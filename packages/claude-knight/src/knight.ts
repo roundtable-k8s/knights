@@ -20,7 +20,7 @@ import { log } from "./logger.js";
 import { recordRateLimit } from "./plan-limits.js";
 import { buildAppendPrompt } from "./prompt.js";
 import { linkSkills } from "./skills.js";
-import { createRoundtableServer, ROUNDTABLE_TOOL_IDS } from "./tools.js";
+import { createRoundtableServer, roundtableToolIds } from "./tools.js";
 import { classifyResult, type TaskResult } from "./result.js";
 
 export type { TaskResult } from "./result.js";
@@ -132,7 +132,7 @@ export function buildOptions(
     allowDangerouslySkipPermissions: true,
     disallowedTools: [...DISALLOWED_TOOLS, ...config.extraDisallowedTools],
     mcpServers: { ...external, roundtable: createRoundtableServer() },
-    allowedTools: [...EXTRA_BUILTINS, ...ROUNDTABLE_TOOL_IDS, ...Object.keys(external).map((n) => `mcp__${n}`)],
+    allowedTools: [...EXTRA_BUILTINS, ...roundtableToolIds(), ...Object.keys(external).map((n) => `mcp__${n}`)],
     hooks: buildHooks(),
     env: buildChildEnv(config.authMode, {
       CLAUDE_CONFIG_DIR: config.claudeConfigDir,

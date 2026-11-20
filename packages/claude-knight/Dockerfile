@@ -34,6 +34,10 @@ ENV MISE_DATA_DIR=/app/.mise \
     MISE_YES=1
 RUN mise install --cd /app && mise reshim
 
+# ── agent-browser CLI for the browser sidecar (spec.capabilities.browser) ──
+ARG AGENT_BROWSER_VERSION=0.43.0
+RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION}
+
 # ── App ──
 # node_modules carries the Agent SDK and its platform package with the native
 # Claude Code binary (@anthropic-ai/claude-agent-sdk-linux-x64).

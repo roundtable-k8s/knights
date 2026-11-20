@@ -8,6 +8,7 @@ import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { getConnection, getJetStream, StringCodec } from "./nats.js";
 import { log } from "./logger.js";
+import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
 const sc = StringCodec();
 
@@ -135,9 +136,14 @@ const natsRequest = tool(
 
 /** Build a fresh server instance per query (instances hold per-connection state). */
 export function createRoundtableServer() {
+  const tools = browserEnabled() ? [natsPublish, natsRequest, ...browserTools] : [natsPublish, natsRequest];
   // alwaysLoad: keep these in the prompt instead of behind ToolSearch — they are the
   // knight's core collaboration tools and tiny.
-  return createSdkMcpServer({ name: "roundtable", version: "0.1.0", tools: [natsPublish, natsRequest], alwaysLoad: true });
+  return createSdkMcpServer({ name: "roundtable", version: "0.1.0", tools, alwaysLoad: true });
 }
 
-export const ROUNDTABLE_TOOL_IDS = ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request"];
+export const NATS_TOOL_IDS = ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request"];
+
+export function roundtableToolIds(): string[] {
+  return browserEnabled() ? [...NATS_TOOL_IDS, ...BROWSER_TOOL_IDS] : NATS_TOOL_IDS;
+}

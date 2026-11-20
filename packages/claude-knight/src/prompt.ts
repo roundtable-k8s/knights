@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { KnightConfig } from "./config.js";
+import { browserEnabled } from "./browser.js";
 
 /**
  * Text appended to Claude Code's own system prompt.
@@ -42,8 +43,16 @@ Knight: ${config.knightName}
 Workspace: ${config.workDir} (persistent PVC — survives restarts)
 Skills: available through the Skill tool (synced from the arsenal, read-only)
 Vault: /vault if mounted (Derek's Obsidian vault — write only to Briefings/ and Roundtable/)
-Knight-to-knight: mcp__roundtable__nats_request (ask another knight), mcp__roundtable__nats_publish (alerts/reports)
+Knight-to-knight: mcp__roundtable__nats_request (ask another knight), mcp__roundtable__nats_publish (alerts/reports)${
+    browserEnabled()
+      ? "\nBrowser: headless Chrome sidecar via mcp__roundtable__browser_* (open → snapshot → click/fill → get_text/screenshot); the agent-browser CLI also works from Bash"
+      : ""
+  }
 </runtime_context>
+
+Arsenal skills were written for pi-knight. Where a skill says nats_request / nats_publish,
+use mcp__roundtable__nats_request / mcp__roundtable__nats_publish; where it says
+spawn_subagent, use the Agent tool; browser_* means mcp__roundtable__browser_*.
 
 <unattended>
 Nobody is watching this session. There is no human to answer questions or approve

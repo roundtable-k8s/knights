@@ -27,6 +27,15 @@ NATS result ◄──  {task_id, success, result, cost, tokens, model, turns, bi
   as the knight contract in `defaults/AGENTS.md` asks. `CLAUDE_SESSION_MODE=fresh` disables resume.
 - **Unattended.** `bypassPermissions`, interactive tools disabled (AskUserQuestion, plan mode, cron, …), and the
   same Bash guardrails as pi-knight enforced by an in-process `PreToolUse` hook.
+- **Tools.** Claude Code's built-ins (Bash, Read, Edit, Grep, Glob, WebFetch, WebSearch, Agent, Skill, …);
+  every CLI the knight's Nix/mise/apt tools install, through Bash (the operator puts them on `PATH`); the
+  Round Table tools below; and any extra MCP servers.
+- **Browser.** With `spec.capabilities.browser: true` the operator adds the headless Chrome sidecar; claude-knight
+  then exposes `mcp__roundtable__browser_{open,snapshot,click,fill,get_text,screenshot,eval,close}` (same set as
+  pi-knight, via the bundled `agent-browser` CLI). Screenshots return as images Claude can see. The
+  `agent-browser` CLI also works directly from Bash, so the arsenal's `shared/web-browser` skill works as written.
+- **Arsenal compatibility.** Skills written for pi-knight name `nats_request`, `spawn_subagent`, `browser_*`; the
+  system prompt maps those to `mcp__roundtable__*` and the `Agent` tool.
 - **Personality.** `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `TOOLS.md` (PVC copy, else `/config`) are appended to
   Claude Code's system prompt each task.
 
@@ -99,5 +108,4 @@ and a missing token left the knight degraded.
 
 - Bash output secret redaction (pi-knight's `afterToolCall` sanitizer) is not ported: Claude Code hooks can
   rewrite MCP tool output but not built-in tool output.
-- `capabilities.browser` is not wired; use WebFetch/WebSearch or a browser MCP server.
 - At-most-once delivery, same as pi-knight: tasks queued in memory are lost if the pod stops.
