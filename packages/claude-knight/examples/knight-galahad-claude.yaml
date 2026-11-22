@@ -14,7 +14,7 @@ metadata:
   name: galahad
   namespace: roundtable
 spec:
-  image: ghcr.io/dapperdivers/claude-knight:latest
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
   domain: security
   # Claude Code aliases (sonnet, opus, haiku) or full claude-* ids. A non-Claude
   # model here (like the CRD default) falls back to the plan's default model.

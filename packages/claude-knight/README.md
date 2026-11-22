@@ -1,11 +1,11 @@
 # claude-knight
 
-A knight runtime for [Roundtable](https://github.com/dapperdivers/roundtable) that runs each task through
+A knight runtime for [Roundtable](https://github.com/roundtable-k8s/roundtable) that runs each task through
 **Claude Code** (via the Claude Agent SDK), so knights can run on a **Claude Max/Pro plan** with a
 `claude setup-token` instead of per-token API billing.
 
-It is a drop-in replacement for [pi-knight](https://github.com/dapperdivers/pi-knight) on a per-knight basis:
-set `spec.image: ghcr.io/dapperdivers/claude-knight:latest` on a Knight. The operator is unchanged — same env
+It is a drop-in replacement for [pi-knight](https://github.com/roundtable-k8s/pi-knight) on a per-knight basis:
+set `spec.image: ghcr.io/roundtable-k8s/claude-knight:latest` on a Knight. The operator is unchanged — same env
 contract, NATS consumer, result payload, `/health` `/ready` `/metrics` `/introspect` endpoints, and the
 `<prefix>.introspect.<Knight>` responder the dashboard uses. Chains, Missions and knight-to-knight
 `nats_request` work across pi-knights and claude-knights.
