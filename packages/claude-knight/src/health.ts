@@ -52,6 +52,7 @@ export function startHealthServer(config: KnightConfig): void {
             skillsLoaded: skillCount,
             model: config.claudeModel ?? "claude-code-default",
             runtime: "claude-knight",
+            claudeRuntime: config.runtime,
             billing: config.authMode,
             knight: config.knightName,
           });

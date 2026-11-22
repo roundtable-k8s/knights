@@ -25,6 +25,15 @@ export interface KnightConfig {
   // ── claude-knight specific ──
   /** "subscription" (Claude plan via CLAUDE_CODE_OAUTH_TOKEN) or "api" (ANTHROPIC_API_KEY). */
   authMode: AuthMode;
+  /**
+   * How each task runs: "cli" spawns the official Claude Code CLI headless
+   * (`claude -p`); "sdk" calls the Agent SDK's query(). Defaults to cli in
+   * subscription mode and sdk in api mode. Subscription + sdk is refused at
+   * startup (see checkRuntime in auth.ts).
+   */
+  runtime: Runtime;
+  /** The Claude Code CLI the cli runtime spawns (CLAUDE_BIN, default "claude" on PATH). */
+  claudeBin: string;
   /** Model passed to Claude Code; undefined lets Claude Code pick its default. */
   claudeModel: string | undefined;
   /** "low" | "medium" | "high" | "xhigh" | "max" — passed as SDK effort when set. */
@@ -52,6 +61,7 @@ export interface KnightConfig {
 }
 
 export type AuthMode = "subscription" | "api";
+export type Runtime = "sdk" | "cli";
 
 type Env = NodeJS.ProcessEnv;
 
@@ -99,6 +109,10 @@ export function loadConfig(env: Env = process.env): KnightConfig {
   if (authMode !== "subscription" && authMode !== "api") {
     throw new Error(`CLAUDE_AUTH_MODE must be "subscription" or "api", got "${authMode}"`);
   }
+  const runtime = (env["CLAUDE_RUNTIME"] || (authMode === "subscription" ? "cli" : "sdk")).toLowerCase();
+  if (runtime !== "sdk" && runtime !== "cli") {
+    throw new Error(`CLAUDE_RUNTIME must be "sdk" or "cli", got "${runtime}"`);
+  }
   const sessionMode = (env["CLAUDE_SESSION_MODE"] ?? "run").toLowerCase();
   if (sessionMode !== "run" && sessionMode !== "fresh") {
     throw new Error(`CLAUDE_SESSION_MODE must be "run" or "fresh", got "${sessionMode}"`);
@@ -123,6 +137,8 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     hostname: os.hostname(),
 
     authMode,
+    runtime,
+    claudeBin: env["CLAUDE_BIN"] || "claude",
     claudeModel: resolveClaudeModel(knightModel, env["CLAUDE_MODEL"]),
     effort: env["CLAUDE_EFFORT"] || undefined,
     maxTurns: intEnv(env, "CLAUDE_MAX_TURNS", 0),

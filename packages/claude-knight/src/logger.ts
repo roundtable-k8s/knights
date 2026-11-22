@@ -5,6 +5,12 @@ type Level = keyof typeof LEVELS;
 
 let minLevel: number = LEVELS.info;
 let knightName = "unknown";
+let out: NodeJS.WritableStream = process.stdout;
+
+/** Send logs elsewhere: the MCP stdio server keeps stdout for the protocol. */
+export function setLogStream(stream: NodeJS.WritableStream): void {
+  out = stream;
+}
 
 export function initLogger(knight: string, level: string): void {
   knightName = knight;
@@ -22,7 +28,7 @@ function emit(level: Level, msg: string, extra?: Record<string, unknown>): void 
     msg,
     ...extra,
   };
-  process.stdout.write(JSON.stringify(entry) + "\n");
+  out.write(JSON.stringify(entry) + "\n");
 }
 
 export const log = {

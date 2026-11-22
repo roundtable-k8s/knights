@@ -1,7 +1,7 @@
 {
   "name": "claude-knight",
   "version": "0.1.0",
-  "description": "Claude Code knight runtime for the Round Table — runs tasks through the Claude Agent SDK on a Claude plan or API key",
+  "description": "Claude Code knight runtime for the Round Table — runs tasks through the official Claude Code CLI (headless) on a Claude plan, or the Agent SDK with an API key",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

@@ -1,6 +1,7 @@
 /**
- * executeTask against a fake Claude Code stream: options passed to the SDK,
- * session resume within a chain run, subscription-mode safety, and limits.
+ * executeTask on the sdk runtime (api mode) against a fake Claude Code stream:
+ * options passed to the SDK, session resume within a chain run, and limits.
+ * The cli runtime (subscription mode) is covered in cli.test.ts.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -13,10 +14,11 @@ import { DISALLOWED_TOOLS, executeTask, resetKnightState, type QueryFn } from ".
 import { checkReserve, resetPlanLimits } from "../src/plan-limits.js";
 
 const work = mkdtempSync(join(tmpdir(), "ck-work-"));
-process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-test";
-process.env.ANTHROPIC_API_KEY = "sk-ant-api03-should-be-stripped";
+process.env.CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat01-should-be-stripped";
+process.env.ANTHROPIC_API_KEY = "sk-ant-api03-test";
 
 const config = loadConfig({
+  CLAUDE_AUTH_MODE: "api",
   KNIGHT_NAME: "Gawain",
   SUBSCRIBE_TOPICS: "rt.tasks.security.>",
   KNIGHT_MODEL: "openrouter/deepseek/deepseek-v3.2",
@@ -46,7 +48,7 @@ function fakeQuery(script: (call: Call, n: number) => any[]): { fn: QueryFn; cal
   return { fn, calls };
 }
 
-const init = (sid: string, apiKeySource = "oauth") => ({
+const init = (sid: string, apiKeySource = "ANTHROPIC_API_KEY") => ({
   type: "system",
   subtype: "init",
   session_id: sid,
@@ -73,7 +75,8 @@ beforeEach(() => {
   resetPlanLimits();
 });
 
-test("passes an unattended, subscription-only configuration to Claude Code", async () => {
+test("sdk runtime is the api-mode default and passes an unattended configuration", async () => {
+  assert.equal(config.runtime, "sdk");
   const { fn, calls } = fakeQuery(() => [init("s1"), done("s1", "ok")]);
   const r = await executeTask("brief me", "t1", config, new AbortController().signal, undefined, fn);
   assert.equal(r.success, true);
@@ -91,8 +94,8 @@ test("passes an unattended, subscription-only configuration to Claude Code", asy
   assert.ok(o.allowedTools.includes("mcp__vault"));
   assert.equal(o.systemPrompt.preset, "claude_code");
   assert.match(o.systemPrompt.append, /You are Gawain, a Knight of the Round Table/);
-  assert.equal(o.env.ANTHROPIC_API_KEY, undefined, "API key stripped in subscription mode");
-  assert.equal(o.env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat01-test");
+  assert.equal(o.env.CLAUDE_CODE_OAUTH_TOKEN, undefined, "OAuth token stripped in api mode");
+  assert.equal(o.env.ANTHROPIC_API_KEY, "sk-ant-api03-test");
   assert.equal(o.env.CLAUDE_CONFIG_DIR, join(work, ".claude-home"));
   assert.equal(o.resume, undefined);
   assert.ok(o.hooks.PreToolUse);
@@ -136,11 +139,11 @@ test("concurrent tasks of one run are serialized so resume sees the prior sessio
   assert.equal(calls[1].options.resume, "s1");
 });
 
-test("refuses to run if Claude Code reports API-key auth in subscription mode", async () => {
-  const { fn } = fakeQuery(() => [init("s1", "ANTHROPIC_API_KEY"), done("s1", "should not count")]);
-  const r = await executeTask("x", "t", config, new AbortController().signal, undefined, fn);
-  assert.equal(r.success, false);
-  assert.match(r.error!, /Refusing to run: subscription mode/);
+test("never runs a subscription knight through the SDK", async () => {
+  const sub = { ...config, authMode: "subscription" as const, runtime: "sdk" as const };
+  const { fn, calls } = fakeQuery(() => [init("s1", "none"), done("s1", "x")]);
+  await assert.rejects(executeTask("x", "t", sub, new AbortController().signal, undefined, fn), /official Claude Code CLI/);
+  assert.equal(calls.length, 0);
 });
 
 test("rate-limit events feed the plan reserve; limit errors are flagged", async () => {

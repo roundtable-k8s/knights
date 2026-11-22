@@ -1,6 +1,8 @@
 /**
- * Task execution: one Claude Agent SDK query() — i.e. one Claude Code process —
- * per task.
+ * Task execution: one Claude Code process per task, either the official CLI run
+ * headless (`claude -p`, cli runtime, cli-runner.ts) or the Agent SDK's query()
+ * (sdk runtime). Both produce the same message stream (stream.ts), so sessions,
+ * cost accounting and result classification are shared.
  *
  * Sessions: with CLAUDE_SESSION_MODE=run (default), tasks carrying the same
  * chain runId resume the same Claude Code session, so a chain's steps share
@@ -10,46 +12,22 @@
  * on re-reading old context. Long-term memory lives in files on the PVC
  * (MEMORY.md, memory/*.md), as the knight contract already asks.
  */
-import { query, type McpServerConfig, type Options, type SDKMessage, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { mkdirSync } from "node:fs";
 import type { KnightConfig } from "./config.js";
-import { buildChildEnv } from "./auth.js";
+import { buildChildEnv, checkRuntime } from "./auth.js";
+import { buildCliInvocation, makeTaskDir, runClaudeCli, writeInvocationFiles, type CliInvocation } from "./cli-runner.js";
 import { buildHooks } from "./hooks.js";
+import { DISALLOWED_TOOLS, EXTRA_BUILTINS, loadMcpServers } from "./mcp-config.js";
 import { log } from "./logger.js";
-import { recordRateLimit } from "./plan-limits.js";
 import { buildAppendPrompt } from "./prompt.js";
 import { linkSkills } from "./skills.js";
+import { applyMessage, newStreamState } from "./stream.js";
 import { createRoundtableServer, roundtableToolIds } from "./tools.js";
 import { classifyResult, type TaskResult } from "./result.js";
 
 export type { TaskResult } from "./result.js";
-
-/**
- * Built-in tools that need a human, schedule work outside the task, or belong to
- * interactive Claude Code. An unattended knight must not reach for them.
- */
-export const DISALLOWED_TOOLS = [
-  "AskUserQuestion",
-  "EnterPlanMode",
-  "ExitPlanMode",
-  "EnterWorktree",
-  "ExitWorktree",
-  "CronCreate",
-  "CronDelete",
-  "CronList",
-  "ScheduleWakeup",
-  "RemoteTrigger",
-  "PushNotification",
-  "SendUserMessage",
-  "SendUserFile",
-  "ReadNotifications",
-  "Monitor",
-  "ShowOnboardingRolePicker",
-];
-
-/** Built-ins to make sure are present (native builds otherwise fold search into Bash). */
-const EXTRA_BUILTINS = ["Grep", "Glob", "WebFetch", "WebSearch"];
+export { DISALLOWED_TOOLS, loadMcpServers } from "./mcp-config.js";
 
 // runId → Claude Code session id, for resuming within a chain run.
 const runSessions = new Map<string, string>();
@@ -91,26 +69,6 @@ function rememberRunSession(runId: string, sessionId: string): void {
     if (oldest === undefined) break;
     runSessions.delete(oldest);
   }
-}
-
-/** External MCP servers: /config/mcp.json (ConfigMap) then MCP_SERVERS_JSON (env) on top. */
-export function loadMcpServers(config: KnightConfig): Record<string, McpServerConfig> {
-  const servers: Record<string, McpServerConfig> = {};
-  const merge = (source: string, raw: string) => {
-    try {
-      const parsed = JSON.parse(raw);
-      const map = parsed?.mcpServers ?? parsed; // accept .mcp.json shape or a bare map
-      if (map && typeof map === "object" && !Array.isArray(map)) Object.assign(servers, map);
-      else log.warn("Ignoring MCP config that is not an object", { source });
-    } catch (err) {
-      log.warn("Ignoring unparseable MCP config", { source, error: String(err) });
-    }
-  };
-  const file = join(config.configDir, "mcp.json");
-  if (existsSync(file)) merge(file, readFileSync(file, "utf8"));
-  if (config.mcpServersJson) merge("MCP_SERVERS_JSON", config.mcpServersJson);
-  delete servers["roundtable"]; // reserved for the built-in NATS tools
-  return servers;
 }
 
 export function buildOptions(
@@ -168,14 +126,49 @@ async function withRunLock<T>(runId: string | undefined, fn: () => Promise<T>): 
 
 export type QueryFn = typeof query;
 
+/** Test seams: replace the SDK's query() or the CLI invocation. */
+export interface ExecuteOverrides {
+  queryFn?: QueryFn;
+  /** Adjust the generated CLI invocation before it runs (tests point it at a fake binary). */
+  cliInvocation?: (inv: CliInvocation) => CliInvocation;
+}
+
+/** One task's message stream from the configured runtime, plus cleanup for its temp files. */
+function openStream(
+  task: string,
+  config: KnightConfig,
+  abortController: AbortController,
+  resume: string | undefined,
+  overrides: ExecuteOverrides,
+): { stream: AsyncIterable<SDKMessage>; cleanup: () => void } {
+  if (config.runtime === "sdk") {
+    const queryFn = overrides.queryFn ?? query;
+    return { stream: queryFn({ prompt: task, options: buildOptions(config, abortController, resume) }), cleanup: () => {} };
+  }
+  const { dir, cleanup } = makeTaskDir();
+  try {
+    let inv = buildCliInvocation(config, { resume, taskDir: dir });
+    if (overrides.cliInvocation) inv = overrides.cliInvocation(inv);
+    writeInvocationFiles(inv);
+    return { stream: runClaudeCli(task, inv, abortController.signal), cleanup };
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
+}
+
 export async function executeTask(
   task: string,
   taskId: string,
   config: KnightConfig,
   signal: AbortSignal,
   runId?: string,
-  queryFn: QueryFn = query,
+  overrides: QueryFn | ExecuteOverrides = {},
 ): Promise<TaskResult> {
+  const over: ExecuteOverrides = typeof overrides === "function" ? { queryFn: overrides } : overrides;
+  // main.ts refuses this at startup; never run a plan token through the SDK regardless.
+  const runtimeProblem = checkRuntime(config.authMode, config.runtime);
+  if (runtimeProblem) throw new Error(runtimeProblem);
   return withRunLock(runId, async () => {
     mkdirSync(config.claudeConfigDir, { recursive: true });
     const skills = linkSkills(config.skillsDir, config.claudeConfigDir);
@@ -190,80 +183,42 @@ export async function executeTask(
       taskId,
       runId: runId ?? null,
       resume: resume ?? null,
+      runtime: config.runtime,
       model: config.claudeModel ?? "default",
       skills: skills.names.length,
       taskLength: task.length,
     });
 
     const started = Date.now();
-    let result: SDKResultMessage | undefined;
-    let sessionId: string | undefined;
-    let lastAssistantText = "";
-    let assistantError: string | undefined;
-    let apiKeySource: string | undefined;
+    const state = newStreamState();
+    const ctx = { config, taskId, countTools: config.runtime === "cli" };
+    let cleanup = () => {};
 
     try {
-      const stream = queryFn({ prompt: task, options: buildOptions(config, abortController, resume) });
-      for await (const msg of stream as AsyncIterable<SDKMessage>) {
-        if ("session_id" in msg && typeof msg.session_id === "string") sessionId = msg.session_id;
-        switch (msg.type) {
-          case "system":
-            if (msg.subtype === "init") {
-              apiKeySource = msg.apiKeySource;
-              log.info("Claude Code session started", {
-                taskId,
-                sessionId: msg.session_id,
-                model: msg.model,
-                version: msg.claude_code_version,
-                apiKeySource,
-                mcp: msg.mcp_servers?.map((s) => `${s.name}:${s.status}`),
-                skills: msg.skills?.length,
-              });
-              // Belt and braces for the credential stripping in auth.ts.
-              if (config.authMode === "subscription" && (apiKeySource === "ANTHROPIC_API_KEY" || apiKeySource === "apiKeyHelper")) {
-                abortController.abort();
-                throw new Error(`Refusing to run: subscription mode but Claude Code authenticated via ${apiKeySource}`);
-              }
-            }
-            break;
-          case "assistant": {
-            if (msg.parent_tool_use_id) break; // subagent chatter, not the deliverable
-            if (msg.error) assistantError = msg.error;
-            const content = (msg.message as { content?: Array<{ type: string; text?: string }> })?.content;
-            const text = Array.isArray(content)
-              ? content.filter((b) => b.type === "text" && b.text).map((b) => b.text!.trim()).join("\n").trim()
-              : "";
-            if (text) lastAssistantText = text;
-            break;
-          }
-          case "rate_limit_event":
-            recordRateLimit(config.knightName, msg.rate_limit_info);
-            if (msg.rate_limit_info.status !== "allowed") {
-              log.warn("Claude plan limit warning", { ...msg.rate_limit_info });
-            }
-            break;
-          case "result":
-            result = msg;
-            break;
-        }
-      }
+      const opened = openStream(task, config, abortController, resume, over);
+      cleanup = opened.cleanup;
+      for await (const msg of opened.stream) applyMessage(msg, state, ctx);
     } catch (err) {
+      abortController.abort();
       const message = err instanceof Error ? err.message : String(err);
       const outcome = classifyResult({
-        result,
-        lastAssistantText,
-        assistantError,
+        result: state.result,
+        lastAssistantText: state.lastAssistantText,
+        assistantError: state.assistantError,
         thrown: message,
         aborted: signal.aborted,
         config,
         durationMs: Date.now() - started,
       });
-      remember({ taskId, runId, sessionId, success: false, costUsd: outcome.cost, durationMs: Date.now() - started, turns: result?.num_turns ?? 0, finishedAt: new Date().toISOString(), error: outcome.error });
+      remember({ taskId, runId, sessionId: state.sessionId, success: false, costUsd: outcome.cost, durationMs: Date.now() - started, turns: state.result?.num_turns ?? 0, finishedAt: new Date().toISOString(), error: outcome.error });
       return outcome;
     } finally {
       signal.removeEventListener("abort", onAbort);
+      cleanup();
     }
 
+    const sessionId = state.sessionId;
+    let result = state.result;
     if (sessionId && runId && config.sessionMode === "run") rememberRunSession(runId, sessionId);
     if (result && resume) {
       const cumulative = result.total_cost_usd;
@@ -281,8 +236,8 @@ export async function executeTask(
 
     const outcome = classifyResult({
       result,
-      lastAssistantText,
-      assistantError,
+      lastAssistantText: state.lastAssistantText,
+      assistantError: state.assistantError,
       aborted: signal.aborted,
       config,
       durationMs: Date.now() - started,

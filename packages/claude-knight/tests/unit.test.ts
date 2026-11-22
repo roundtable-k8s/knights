@@ -41,6 +41,11 @@ test("loadConfig defaults and validation", () => {
   assert.throws(() => loadConfig({ ...baseEnv, CLAUDE_AUTH_MODE: "max" }), /CLAUDE_AUTH_MODE/);
   assert.throws(() => loadConfig({ SUBSCRIBE_TOPICS: "x" }), /KNIGHT_NAME/);
   assert.equal(loadConfig({ ...baseEnv, CLAUDE_PLAN_RESERVE: "5" }).planReserve, 1);
+  // runtime: cli for subscription, sdk for api, overridable, validated
+  assert.equal(c.runtime, "cli");
+  assert.equal(loadConfig({ ...baseEnv, CLAUDE_AUTH_MODE: "api" }).runtime, "sdk");
+  assert.equal(loadConfig({ ...baseEnv, CLAUDE_AUTH_MODE: "api", CLAUDE_RUNTIME: "CLI" }).runtime, "cli");
+  assert.throws(() => loadConfig({ ...baseEnv, CLAUDE_RUNTIME: "docker" }), /CLAUDE_RUNTIME/);
 });
 
 // ── auth ───────────────────────────────────────────────────────────

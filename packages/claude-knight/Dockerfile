@@ -47,6 +47,32 @@ COPY --from=builder /app/package.json ./
 COPY defaults/ ./defaults/
 COPY scripts/ ./scripts/
 
+# ── Claude Code CLI (`claude` on PATH, for CLAUDE_RUNTIME=cli) ──
+# Pinned. The Agent SDK's platform package ships the official Claude Code
+# native binary, byte-identical to @anthropic-ai/claude-code-linux-x64 of the
+# same version (SDK 0.3.N bundles CLI 2.1.N). When CLAUDE_CODE_VERSION matches
+# the SDK's bundled CLI, `claude` links to that binary instead of shipping a
+# second ~360 MB copy; otherwise the pinned CLI is installed on its own. Either
+# way the build fails unless `claude --version` reports the pinned version.
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.329
+RUN set -eu; \
+    sdk_cli="$(jq -r .claudeCodeVersion node_modules/@anthropic-ai/claude-agent-sdk/package.json)"; \
+    sdk_bin=/app/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude; \
+    if [ "$sdk_cli" = "$CLAUDE_CODE_VERSION" ] && [ -x "$sdk_bin" ]; then \
+      ln -s "$sdk_bin" /usr/local/bin/claude; \
+      echo "claude: reusing the Agent SDK's bundled CLI $sdk_cli"; \
+    else \
+      tmp="$(mktemp -d)"; cd "$tmp"; \
+      npm pack --silent "@anthropic-ai/claude-code-linux-x64@${CLAUDE_CODE_VERSION}"; \
+      tar xzf ./*.tgz; \
+      install -D -m 0755 package/claude /opt/claude-code/claude; \
+      ln -s /opt/claude-code/claude /usr/local/bin/claude; \
+      cd /; rm -rf "$tmp" /root/.npm; \
+      echo "claude: installed CLI ${CLAUDE_CODE_VERSION} (SDK bundles ${sdk_cli})"; \
+    fi; \
+    claude --version | grep -q "^${CLAUDE_CODE_VERSION} "
+
 ENV NODE_ENV=production \
     MISE_DATA_DIR=/data/.mise \
     MISE_YES=1 \

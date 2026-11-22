@@ -1,7 +1,8 @@
 /**
- * Knight-to-knight NATS tools, exposed to Claude Code as an in-process MCP
- * server named "roundtable" (tool ids mcp__roundtable__nats_publish and
- * mcp__roundtable__nats_request). Same behavior and payloads as pi-knight's
+ * Knight-to-knight NATS tools, exposed to Claude Code as an MCP server named
+ * "roundtable" (tool ids mcp__roundtable__nats_publish and
+ * mcp__roundtable__nats_request): in process for the sdk runtime, over stdio
+ * (`node dist/index.js mcp`) for the cli runtime. Same behavior and payloads as pi-knight's
  * tools/nats.ts, so a claude-knight and a pi-knight can call each other.
  */
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
@@ -134,9 +135,18 @@ const natsRequest = tool(
   },
 );
 
-/** Build a fresh server instance per query (instances hold per-connection state). */
+/** The "roundtable" MCP server's tools: NATS, plus browser_* when the sidecar is enabled. */
+export function roundtableTools() {
+  return browserEnabled() ? [natsPublish, natsRequest, ...browserTools] : [natsPublish, natsRequest];
+}
+
+/**
+ * sdk runtime: an in-process SDK MCP server. Build a fresh instance per query
+ * (instances hold per-connection state). The cli runtime serves the same tools
+ * over stdio instead (mcp-stdio.ts).
+ */
 export function createRoundtableServer() {
-  const tools = browserEnabled() ? [natsPublish, natsRequest, ...browserTools] : [natsPublish, natsRequest];
+  const tools = roundtableTools();
   // alwaysLoad: keep these in the prompt instead of behind ToolSearch — they are the
   // knight's core collaboration tools and tiny.
   return createSdkMcpServer({ name: "roundtable", version: "0.1.0", tools, alwaysLoad: true });

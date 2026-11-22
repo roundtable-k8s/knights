@@ -2,7 +2,9 @@
  * Introspection over NATS (<prefix>.introspect.<Knight>) and HTTP (/introspect),
  * answering the same request types as pi-knight so the dashboard's Session
  * Explorer works with both runtimes. Session data comes from Claude Code's own
- * transcripts via the Agent SDK's listSessions/getSessionMessages.
+ * transcripts: via the Agent SDK's listSessions/getSessionMessages in the sdk
+ * runtime, read from $CLAUDE_CONFIG_DIR/projects JSONL (sessions.ts) in the cli
+ * runtime.
  */
 import { getSessionMessages, listSessions, type SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Subscription } from "nats";
@@ -11,6 +13,7 @@ import { getRecentTasks } from "./knight.js";
 import { log } from "./logger.js";
 import { getConnection, StringCodec } from "./nats.js";
 import { snapshot as planSnapshot } from "./plan-limits.js";
+import { listTranscripts, readTranscript } from "./sessions.js";
 
 const sc = StringCodec();
 const startTime = Date.now();
@@ -31,6 +34,37 @@ const MAX_HISTORY = 60;
 const MAX_SESSION_ENTRIES = 500;
 const DEFAULT_SESSION_ENTRIES = 200;
 const SESSION_ID_RE = /^[0-9a-fA-F-]+$/;
+
+interface SessionSummary {
+  sessionId: string;
+  lastModified: number;
+  fileSize?: number;
+  firstPrompt?: string;
+  summary?: string;
+}
+
+/** Sessions newest first, from whichever store the runtime writes. */
+async function sessionList(config: KnightConfig, limit: number): Promise<SessionSummary[]> {
+  if (config.runtime === "cli") {
+    try {
+      return listTranscripts(config.claudeConfigDir, config.workDir, limit);
+    } catch {
+      return [];
+    }
+  }
+  return listSessions({ dir: config.workDir, limit }).catch(() => []);
+}
+
+async function sessionMessages(config: KnightConfig, id: string): Promise<SessionMessage[] | null> {
+  if (config.runtime === "cli") {
+    try {
+      return readTranscript(config.claudeConfigDir, config.workDir, id) as unknown as SessionMessage[] | null;
+    } catch {
+      return null;
+    }
+  }
+  return getSessionMessages(id, { dir: config.workDir }).catch(() => null);
+}
 
 export function startIntrospect(config: KnightConfig): void {
   const nc = getConnection();
@@ -67,6 +101,7 @@ function runtime(config: KnightConfig) {
     activeTasks,
     model: config.claudeModel ?? "claude-code-default",
     runtime: "claude-knight",
+    claudeRuntime: config.runtime,
     billing: config.authMode,
     plan: planSnapshot(),
   };
@@ -81,7 +116,7 @@ export async function handleIntrospect(req: IntrospectRequest, config: KnightCon
     case "recent":
     case "tree": {
       // No single long-lived session to walk: show the latest session instead.
-      const [latest] = await listSessions({ dir: config.workDir, limit: 1 }).catch(() => []);
+      const [latest] = await sessionList(config, 1);
       if (!latest) return { knight: config.knightName, entries: [], total: 0, returned: 0 };
       const page = (await buildSession(config, latest.sessionId, req.limit ?? 20)) as Record<string, unknown>;
       return req.type === "tree" ? { knight: config.knightName, nodes: page.entries, totalNodes: page.total } : page;
@@ -110,7 +145,7 @@ export async function handleIntrospect(req: IntrospectRequest, config: KnightCon
 }
 
 async function buildHistory(config: KnightConfig) {
-  const sessions = await listSessions({ dir: config.workDir, limit: MAX_HISTORY }).catch(() => []);
+  const sessions = await sessionList(config, MAX_HISTORY);
   return {
     knight: config.knightName,
     sessions: sessions.map((s) => ({
@@ -129,7 +164,7 @@ async function buildSession(config: KnightConfig, id: string | undefined, limit?
   if (!id || !SESSION_ID_RE.test(id)) return { error: "Invalid or missing session id" };
   const start = Math.max(0, offset ?? 0);
   const count = Math.min(Math.max(1, limit ?? DEFAULT_SESSION_ENTRIES), MAX_SESSION_ENTRIES);
-  const all = await getSessionMessages(id, { dir: config.workDir }).catch(() => null);
+  const all = await sessionMessages(config, id);
   if (!all) return { error: `Session not found: ${id}` };
   const page = all.slice(start, start + count);
   return {
@@ -165,7 +200,7 @@ export function itemsForMessage(m: SessionMessage): Record<string, unknown>[] {
     id: m.uuid,
     parentId: m.parent_tool_use_id,
     type: "message",
-    timestamp: null,
+    timestamp: (m as { timestamp?: string }).timestamp ?? null,
     role: m.type,
   };
   const blocks: Block[] = Array.isArray(msg.content) ? (msg.content as Block[]) : [];

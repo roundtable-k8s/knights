@@ -41,12 +41,23 @@ spec:
   envFrom:
     - secretRef:
         name: claude-setup-token   # provides CLAUDE_CODE_OAUTH_TOKEN
+  # Alternative: keep the token out of the pod and let an egress gateway swap it
+  # in. Drop the secretRef above and add these to env:
+  #   - name: ANTHROPIC_AUTH_TOKEN
+  #     value: placeholder-replaced-at-egress
+  #   - name: ANTHROPIC_CUSTOM_HEADERS
+  #     value: "anthropic-beta: oauth-2025-04-20"
 
   env:
     # subscription (default): bill to the Claude plan via the setup-token.
     # api: use ANTHROPIC_API_KEY instead (e.g. the Max plan's monthly API credit).
     - name: CLAUDE_AUTH_MODE
       value: subscription
+    # Subscription knights run the official Claude Code CLI headless (claude -p);
+    # that is the default for subscription mode and the only runtime it allows.
+    # api mode defaults to the Agent SDK (CLAUDE_RUNTIME=sdk).
+    # - name: CLAUDE_RUNTIME
+    #   value: cli
     # Stop taking tasks when any plan window is 80% used, leaving the rest of the
     # week for interactive Claude Code and chat. 1 disables the reserve.
     - name: CLAUDE_PLAN_RESERVE

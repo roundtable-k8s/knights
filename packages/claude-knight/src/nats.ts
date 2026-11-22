@@ -78,12 +78,12 @@ export function getStatus(): { connected: boolean } {
   return { connected };
 }
 
-export async function connectNats(config: KnightConfig): Promise<void> {
+export async function connectNats(config: Pick<KnightConfig, "natsUrl" | "knightName">, clientName = `claude-knight-${config.knightName}`): Promise<void> {
   log.info("Connecting to NATS", { url: config.natsUrl });
 
   nc = await natsConnect({
     servers: config.natsUrl,
-    name: `claude-knight-${config.knightName}`,
+    name: clientName,
     reconnect: true,
     maxReconnectAttempts: -1,
     reconnectTimeWait: 2000,
