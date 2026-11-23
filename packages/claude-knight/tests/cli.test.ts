@@ -148,6 +148,7 @@ test("generates the MCP config, the guardrail hook settings and the system promp
   assert.deepEqual(settings.hooks.PreToolUse, [
     { matcher: "Bash", hooks: [{ type: "command", command: "/usr/local/bin/node /app/dist/index.js hook pretooluse", timeout: 30 }] },
   ]);
+  assert.deepEqual(settings.attribution, { commit: "", pr: "" }, "no Claude co-author trailer or PR footer");
 
   const prompt = inv.files["/tmp/task/system-prompt.md"]!;
   assert.match(prompt, /You are Gawain, a Knight of the Round Table/);

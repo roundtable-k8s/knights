@@ -96,6 +96,9 @@ export function buildCliInvocation(config: KnightConfig, opts: CliInvocationOpti
     },
   };
   const settings = {
+    // Knights commit and open PRs as the Round Table bot; no Claude Code
+    // co-author trailer or "Generated with Claude Code" footer.
+    attribution: { commit: "", pr: "" },
     hooks: {
       PreToolUse: [
         { matcher: "Bash", hooks: [{ type: "command", command: `${shellQuote(self)} hook pretooluse`, timeout: 30 }] },
