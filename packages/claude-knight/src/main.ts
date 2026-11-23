@@ -130,6 +130,8 @@ export async function main(): Promise<void> {
         result: outcome.result,
         ...(outcome.error ? { error: outcome.error } : {}),
         ...(outcome.usageLimited ? { usage_limited: true } : {}),
+        ...(outcome.prs?.length ? { prs: outcome.prs } : {}),
+        ...(outcome.verdict ? { verdict: outcome.verdict } : {}),
         duration_ms: durationMs,
         cost: outcome.cost,
         tokens: outcome.tokens,

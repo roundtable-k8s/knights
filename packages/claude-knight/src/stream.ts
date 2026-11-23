@@ -12,6 +12,7 @@ import { BLOCK_REASON_PREFIX } from "./guardrails.js";
 import { log } from "./logger.js";
 import { toolCallsBlocked, toolCallsTotal } from "./metrics.js";
 import { recordRateLimit } from "./plan-limits.js";
+import { isPrCommand, mergePrs, prsFromBash, type PRRef } from "./structured.js";
 
 export interface StreamState {
   result?: SDKResultMessage;
@@ -23,10 +24,14 @@ export interface StreamState {
   toolNames: Map<string, string>;
   /** tool_use id → Bash command, so a blocked call can be logged with its command. */
   bashCommands: Map<string, string>;
+  /** tool_use id → Bash command that may open/update a PR (tracked in every runtime). */
+  prCommands: Map<string, string>;
+  /** PRs opened or updated by the agent's gh/git commands, in order. */
+  prs: PRRef[];
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map(), bashCommands: new Map() };
+  return { lastAssistantText: "", toolNames: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
 }
 
 export interface StreamContext {
@@ -82,6 +87,14 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
       break;
     case "assistant": {
       const content = (msg.message as { content?: Block[] })?.content;
+      if (Array.isArray(content)) {
+        for (const b of content) {
+          const cmd = (b?.input as { command?: unknown } | undefined)?.command;
+          if (b?.type === "tool_use" && b.id && b.name === "Bash" && typeof cmd === "string" && isPrCommand(cmd)) {
+            state.prCommands.set(b.id, cmd);
+          }
+        }
+      }
       if (ctx.countTools && Array.isArray(content)) {
         for (const b of content) {
           if (b?.type !== "tool_use" || !b.id || !b.name) continue;
@@ -99,9 +112,16 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
       break;
     }
     case "user": {
-      if (!ctx.countTools) break;
       const content = (msg.message as { content?: unknown })?.content;
       if (!Array.isArray(content)) break;
+      for (const b of content as Block[]) {
+        if (b?.type !== "tool_result" || !b.tool_use_id) continue;
+        const cmd = state.prCommands.get(b.tool_use_id);
+        if (cmd === undefined) continue;
+        state.prCommands.delete(b.tool_use_id);
+        if (!b.is_error) mergePrs(state.prs, prsFromBash(cmd, blockText(b.content)));
+      }
+      if (!ctx.countTools) break;
       for (const b of content as Block[]) {
         if (b?.type !== "tool_result") continue;
         const tool = (b.tool_use_id && state.toolNames.get(b.tool_use_id)) || "unknown";

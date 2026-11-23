@@ -5,6 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
+import { parseVerdict, resolvePrs, type PRRef, type Verdict } from "./structured.js";
 
 export interface TaskResult {
   result: string;
@@ -19,6 +20,10 @@ export interface TaskResult {
   turns: number;
   /** True when the failure was a plan/credit limit, so callers can back off. */
   usageLimited?: boolean;
+  /** Pull requests the task opened or updated (omitted when none). */
+  prs?: PRRef[];
+  /** Review outcome from a final `Verdict:` line (omitted when none). */
+  verdict?: Verdict;
 }
 
 export interface ClassifyInput {
@@ -29,6 +34,8 @@ export interface ClassifyInput {
   aborted: boolean;
   config: KnightConfig;
   durationMs: number;
+  /** PRs found from the agent's gh/git commands (StreamState.prs). */
+  prs?: PRRef[];
 }
 
 export function isUsageLimitMessage(text: string | undefined): boolean {
@@ -80,7 +87,11 @@ export function classifyResult(input: ClassifyInput): TaskResult {
   // Success path: a result message that is not an error, with real text.
   if (result && result.subtype === "success" && !result.is_error) {
     const text = (result.result ?? "").trim() || lastAssistantText;
-    if (text) return { ...base, result: text, success: true };
+    if (text) {
+      const prs = resolvePrs(input.prs ?? [], text);
+      const verdict = parseVerdict(text);
+      return { ...base, result: text, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };
+    }
     return fail("Agent produced no deliverable output");
   }
 

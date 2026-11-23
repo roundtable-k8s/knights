@@ -361,6 +361,7 @@ export async function executeTask(
       aborted: signal.aborted,
       config,
       durationMs: Date.now() - started,
+      prs: state.prs,
     });
     removeWorkDir(!outcome.success);
     remember({
