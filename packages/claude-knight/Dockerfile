@@ -38,6 +38,12 @@ RUN mise install --cd /app && mise reshim
 ARG AGENT_BROWSER_VERSION=0.43.0
 RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION}
 
+# ── GitHub token file (roundtable-k8s/roundtable#194) ──
+# A git credential helper and a gh shim that read $GITHUB_TOKEN_FILE on every
+# call. The entrypoint puts /opt/roundtable/bin first on PATH when it is set.
+COPY scripts/github/git-credential-roundtable /usr/local/bin/git-credential-roundtable
+COPY scripts/github/gh /opt/roundtable/bin/gh
+
 # ── App ──
 # node_modules carries the Agent SDK and its platform package with the native
 # Claude Code binary (@anthropic-ai/claude-agent-sdk-linux-x64).

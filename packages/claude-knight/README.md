@@ -120,6 +120,17 @@ Set through the Knight's `spec.env` / `spec.envFrom`:
 | `CLAUDE_DISALLOWED_TOOLS` | — | extra built-ins to disable, comma separated |
 | `CLAUDE_CONFIG_DIR` | `/data/.claude-home` | Claude Code state, sessions, linked skills |
 
+### GitHub credentials
+
+GitHub App installation tokens expire after an hour, but env vars are frozen at pod start. When the Knight
+(or its RoundTable) sets `spec.github.tokenSecretRef`, the operator mounts that Secret read-only and sets
+`GITHUB_TOKEN_FILE=/var/run/secrets/roundtable/github/token`, which the kubelet rewrites when the Secret
+rotates. With it set, the entrypoint points git at `/usr/local/bin/git-credential-roundtable` (it reads the
+file on every call, `username=x-access-token`, `https://github.com` only) and puts `/opt/roundtable/bin`
+first on `PATH`. A `gh` shim there exports `GH_TOKEN` from the file per invocation and then execs the real
+`gh`. Both runtimes start Claude Code with the pod env, so its Bash tool sees the shim. Neither script logs
+the token. Without `GITHUB_TOKEN_FILE` the old `gh auth git-credential` / `GH_TOKEN` behaviour is kept.
+
 Set `spec.concurrency: 1` unless the plan has headroom: each concurrent task is its own Claude Code process.
 
 See `examples/knight-galahad-claude.yaml` for a complete Knight.
