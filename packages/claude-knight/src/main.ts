@@ -5,7 +5,7 @@ import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
 import { executeTask } from "./knight.js";
 import { initLogger, log } from "./logger.js";
 import * as metrics from "./metrics.js";
-import { connectNats, drain, publishResult, subscribe, type ParsedTask } from "./nats.js";
+import { connectNats, drain, HEARTBEAT_MS, publishResult, subscribe, type TaskDelivery } from "./nats.js";
 import { checkReserve } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -69,11 +69,10 @@ export async function main(): Promise<void> {
   await connectNats(config);
   metrics.natsConnected.labels(config.knightName).set(1);
   startIntrospect(config);
-  const tasks = await subscribe(config);
 
   let activeCount = 0;
   let shuttingDown = false;
-  const queue: ParsedTask[] = [];
+  let puller: Awaited<ReturnType<typeof subscribe>> | null = null;
 
   const setActive = (n: number) => {
     activeCount = n;
@@ -82,7 +81,10 @@ export async function main(): Promise<void> {
     metrics.activeTasks.labels(config.knightName).set(n);
   };
 
-  async function processTask(parsed: ParsedTask): Promise<void> {
+  async function processTask(delivery: TaskDelivery): Promise<void> {
+    const parsed = delivery.task;
+    // Keep the message un-acked but alive while the task runs; ack only when it finishes.
+    const heartbeat = setInterval(() => delivery.working(), HEARTBEAT_MS);
     setActive(activeCount + 1);
     const started = Date.now();
     const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
@@ -165,32 +167,50 @@ export async function main(): Promise<void> {
       metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
     } finally {
       clearTimeout(timer);
+      clearInterval(heartbeat);
+      delivery.ack();
       setActive(activeCount - 1);
-      const next = queue.shift();
-      if (next && !shuttingDown) void processTask(next);
+      puller?.wake();
     }
   }
 
-  void (async () => {
-    for await (const parsed of tasks) {
-      if (shuttingDown) break;
-      if (parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase()) {
-        log.debug("Skipping self-echo", { taskId: parsed.taskId });
-        continue;
-      }
-      if (activeCount >= config.maxConcurrentTasks) {
-        log.info("At capacity, queuing task", { taskId: parsed.taskId, queueSize: queue.length + 1 });
-        queue.push(parsed);
-      } else {
-        void processTask(parsed);
-      }
-    }
-  })();
+  // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
+  puller = await subscribe(config, {
+    freeSlots: () => (shuttingDown ? 0 : config.maxConcurrentTasks - activeCount),
+    accept: (parsed) => {
+      const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
+      if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId });
+      return !self;
+    },
+    onTask: (delivery) => {
+      // Count the slot synchronously so the next fetch sees it.
+      void processTask(delivery);
+    },
+    onLost: async (parsed) => {
+      const msg = "Task was delivered to a knight that stopped before finishing it (not re-run: max_deliver=1)";
+      metrics.tasksTotal.labels(config.knightName, "error").inc();
+      await publishResult(parsed.taskId, {
+        task_id: parsed.taskId,
+        knight: config.knightName,
+        success: false,
+        result: `Task failed: ${msg}`,
+        error: msg,
+        lost: true,
+        duration_ms: 0,
+        cost: 0,
+        tokens: { input: 0, output: 0 },
+        model: config.claudeModel ?? "claude-code-default",
+        runtime: "claude-knight",
+        billing: config.authMode,
+        timestamp: new Date().toISOString(),
+      });
+    },
+  });
 
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info("Shutdown signal received", { signal, activeCount, queued: queue.length });
+    log.info("Shutdown signal received", { signal, activeCount });
     const deadline = Date.now() + 60_000;
     while (activeCount > 0 && Date.now() < deadline) await sleep(1000);
     if (activeCount > 0) log.warn("Forcing shutdown with active tasks", { activeCount });

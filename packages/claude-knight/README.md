@@ -165,4 +165,8 @@ and a missing token left the knight degraded.
   instead of `PostToolUse` hooks.
 - Bash output secret redaction (pi-knight's `afterToolCall` sanitizer) is not ported: Claude Code hooks can
   rewrite MCP tool output but not built-in tool output.
-- At-most-once delivery, same as pi-knight: tasks queued in memory are lost if the pod stops.
+- Delivery: pull consumer, one fetch per free slot (`MAX_CONCURRENT_TASKS - active`); no in-memory queue, so backlog is visible as
+  JetStream consumer lag. Tasks are acked when they finish, with `working()` heartbeats every 10s against a 30s `ack_wait`.
+  `max_deliver` stays 1: a task whose knight crashed mid-run is not re-run; a `MAX_DELIVERIES` advisory makes a surviving
+  replica publish a failure result (`lost: true`) instead. Known limit: the advisory is missed if no replica of the knight
+  is up when the ack window expires.
