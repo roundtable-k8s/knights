@@ -69,3 +69,8 @@ export const usageLimitHits = new client.Counter({
   labelNames: ["knight"] as const,
   registers: [registry],
 });
+
+/** Count a task that was delivered to a knight that stopped before finishing it (not re-run). */
+export function recordLostTask(knight: string): void {
+  tasksTotal.labels(knight, "lost").inc();
+}
