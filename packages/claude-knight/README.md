@@ -170,3 +170,10 @@ and a missing token left the knight degraded.
   `max_deliver` stays 1: a task whose knight crashed mid-run is not re-run; a `MAX_DELIVERIES` advisory makes a surviving
   replica publish a failure result (`lost: true`) instead. Known limit: the advisory is missed if no replica of the knight
   is up when the ack window expires.
+
+## Draining on rollout
+
+On `SIGTERM` the knight stops fetching new tasks, `/ready` returns 503 (`"status": "draining"`) so the pod
+leaves Service endpoints, and in-flight tasks keep heartbeating until they publish their result and ack.
+It then exits. The wait is bounded by `DRAIN_TIMEOUT_MS` (default `TASK_TIMEOUT_MS` + 60s, matching the
+operator's `terminationGracePeriodSeconds`); the kubelet SIGKILLs after the pod grace period regardless.

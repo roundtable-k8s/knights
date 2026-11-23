@@ -1,6 +1,7 @@
 import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, type KnightConfig } from "./config.js";
-import { setActiveTaskCount, setDegradedReason, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
+import { createShutdown, installSignalHandlers } from "./drain.js";
+import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { initLogger, log } from "./logger.js";
@@ -208,21 +209,22 @@ export async function main(): Promise<void> {
     },
   });
 
-  const shutdown = async (signal: string) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log.info("Shutdown signal received", { signal, activeCount });
-    const deadline = Date.now() + 60_000;
-    while (activeCount > 0 && Date.now() < deadline) await sleep(1000);
-    if (activeCount > 0) log.warn("Forcing shutdown with active tasks", { activeCount });
-    await drain().catch((e) => log.error("NATS drain error", { error: String(e) }));
-    metrics.natsConnected.labels(config.knightName).set(0);
-    await stopHealthServer();
-    log.info("Shutdown complete");
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  process.on("SIGINT", () => void shutdown("SIGINT"));
+  const shutdown = createShutdown({
+    setDraining: (d) => {
+      shuttingDown = d; // freeSlots() -> 0: no new fetches
+      setDraining(d);
+    },
+    stopPulling: async () => void (await puller?.stop()),
+    getActive: () => activeCount,
+    maxWaitMs: config.drainTimeoutMs,
+    drainNats: drain,
+    cleanup: async () => {
+      metrics.natsConnected.labels(config.knightName).set(0);
+      await stopHealthServer();
+    },
+    exit: (code) => process.exit(code),
+  });
+  installSignalHandlers(shutdown);
 
   log.info("Claude-Knight ready");
 }

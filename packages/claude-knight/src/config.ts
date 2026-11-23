@@ -17,6 +17,8 @@ export interface KnightConfig {
   natsResultsStream: string;
   natsResultsPrefix: string;
   taskTimeoutMs: number;
+  /** Max wait for in-flight tasks after SIGTERM. Default taskTimeoutMs + 60s, matching the operator's terminationGracePeriodSeconds. */
+  drainTimeoutMs: number;
   maxConcurrentTasks: number;
   metricsPort: number;
   logLevel: string;
@@ -129,6 +131,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
     natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
     taskTimeoutMs: intEnv(env, "TASK_TIMEOUT_MS", 1_800_000),
+    drainTimeoutMs: intEnv(env, "DRAIN_TIMEOUT_MS", intEnv(env, "TASK_TIMEOUT_MS", 1_800_000) + 60_000),
     // The operator always sets this from spec.concurrency (CRD default 2). Set
     // concurrency: 1 on claude-knights unless the plan has headroom to spare.
     maxConcurrentTasks: Math.max(1, intEnv(env, "MAX_CONCURRENT_TASKS", 1)),
