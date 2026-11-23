@@ -14,7 +14,7 @@
  */
 import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdirSync } from "node:fs";
-import type { KnightConfig } from "./config.js";
+import { resolveClaudeModel, type KnightConfig } from "./config.js";
 import { buildChildEnv, checkRuntime } from "./auth.js";
 import { buildCliInvocation, makeTaskDir, runClaudeCli, writeInvocationFiles, type CliInvocation } from "./cli-runner.js";
 import { buildHooks } from "./hooks.js";
@@ -131,6 +131,8 @@ export interface ExecuteOverrides {
   queryFn?: QueryFn;
   /** Adjust the generated CLI invocation before it runs (tests point it at a fake binary). */
   cliInvocation?: (inv: CliInvocation) => CliInvocation;
+  /** Per-task model (TaskPayload.model); replaces the knight's CLAUDE_MODEL for this task. Must be a Claude model. */
+  model?: string;
 }
 
 /** One task's message stream from the configured runtime, plus cleanup for its temp files. */
@@ -160,12 +162,33 @@ function openStream(
 export async function executeTask(
   task: string,
   taskId: string,
-  config: KnightConfig,
+  baseConfig: KnightConfig,
   signal: AbortSignal,
   runId?: string,
   overrides: QueryFn | ExecuteOverrides = {},
 ): Promise<TaskResult> {
   const over: ExecuteOverrides = typeof overrides === "function" ? { queryFn: overrides } : overrides;
+  let config = baseConfig;
+  if (over.model) {
+    // A per-task model replaces CLAUDE_MODEL for this task only. Non-Claude ids are a
+    // task error, never a silent fallback to the knight default.
+    const model = resolveClaudeModel(undefined, over.model);
+    if (!model) {
+      const error = `Unsupported model "${over.model}": claude-knight only runs Claude models (aliases like sonnet/opus/haiku or claude-* ids)`;
+      log.warn("Task rejected: unsupported model", { taskId, model: over.model });
+      return {
+        result: error,
+        success: false,
+        error,
+        cost: 0,
+        billing: baseConfig.authMode,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        model: baseConfig.claudeModel ?? "claude-code-default",
+        turns: 0,
+      };
+    }
+    config = { ...baseConfig, claudeModel: model };
+  }
   // main.ts refuses this at startup; never run a plan token through the SDK regardless.
   const runtimeProblem = checkRuntime(config.authMode, config.runtime);
   if (runtimeProblem) throw new Error(runtimeProblem);

@@ -111,6 +111,8 @@ Set through the Knight's `spec.env` / `spec.envFrom`:
 | `CLAUDE_RUNTIME` | `cli` (subscription), `sdk` (api) | `cli` or `sdk`; `sdk` is refused with `subscription` |
 | `CLAUDE_BIN` | `claude` | CLI the `cli` runtime runs |
 | `CLAUDE_MODEL` | from `spec.model` | `sonnet`, `opus`, `haiku`, or a `claude-*` id. Non-Claude `spec.model` → plan default |
+
+A task payload may carry an optional `model` (a Claude alias or `claude-*` id); it replaces `CLAUDE_MODEL` for that task only. Non-Claude ids fail the task with an error. Chain-run session resume continues across steps that use different models.
 | `CLAUDE_EFFORT` | Claude Code default | `low` `medium` `high` `xhigh` `max` |
 | `CLAUDE_PLAN_RESERVE` | `0.8` | 0–1; `1` disables |
 | `CLAUDE_MAX_TURNS` | `0` (none) | turn cap per task |

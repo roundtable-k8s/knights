@@ -173,6 +173,10 @@ test("parses operator, pi-knight and plain-text task payloads", () => {
   assert.equal(pk.from, "galahad");
   assert.equal(pk.timeoutMs, undefined); // 0 must not become an instant abort (#30)
 
+  assert.equal(parseTaskMessage(JSON.stringify({ task: "x", model: " opus " }), "s").model, "opus");
+  assert.equal(parseTaskMessage(JSON.stringify({ task: "x", model: "" }), "s").model, undefined);
+  assert.equal(op.model, undefined);
+
   const plain = parseTaskMessage("just text", "abc123");
   assert.deepEqual([plain.task, plain.taskId], ["just text", "abc123"]);
 

@@ -27,6 +27,8 @@ export interface ParsedTask {
   /** Chain run identity (operator-assigned UUID). Used to start a fresh agent session
    *  per run and avoid cross-run context bleed. Optional — absent for ad-hoc tasks. (#31) */
   runId?: string;
+  /** Optional per-task model override (TaskPayload.model); replaces CLAUDE_MODEL for this task only. */
+  model?: string;
 }
 
 /**
@@ -57,6 +59,7 @@ export function parseTaskMessage(raw: string, subjectTaskId: string): ParsedTask
         timestamp: json.timestamp,
         timeoutMs: normalizeTimeoutMs(json.metadata?.timeout_ms ?? json.metadata?.timeoutMs),
         runId: json.runId ?? json.run_id,
+        model: typeof json.model === "string" && json.model.trim() ? json.model.trim() : undefined,
       };
     }
   } catch {

@@ -94,7 +94,7 @@ export async function main(): Promise<void> {
       const reserve = config.authMode === "subscription" ? checkReserve(config.planReserve) : { blocked: false };
       const outcome = reserve.blocked
         ? null
-        : await executeTask(parsed.task, parsed.taskId, config, controller.signal, parsed.runId);
+        : await executeTask(parsed.task, parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
 
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });

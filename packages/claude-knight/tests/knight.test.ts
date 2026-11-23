@@ -194,3 +194,27 @@ test("built-in NATS tools are always loaded, search tools requested", async () =
   assert.equal(o.mcpServers.roundtable.type, "sdk");
   for (const t of ["Grep", "Glob", "WebFetch", "WebSearch", "mcp__roundtable__nats_request"]) assert.ok(o.allowedTools.includes(t), t);
 });
+
+test("per-task model overrides the knight model for that task only, and keeps resume working", async () => {
+  const { fn, calls } = fakeQuery((_c, n) => [init("s1"), done("s1", `ok ${n}`)]);
+  const sig = new AbortController().signal;
+  const a = await executeTask("step 1", "a", config, sig, "run-M", { queryFn: fn, model: "opus" });
+  const b = await executeTask("step 2", "b", config, sig, "run-M", { queryFn: fn, model: "claude-haiku-4-5" });
+  await executeTask("step 3", "c", config, sig, "run-M", { queryFn: fn });
+  assert.equal(calls[0]!.options.model, "opus");
+  assert.equal(calls[1]!.options.model, "claude-haiku-4-5");
+  assert.equal(calls[1]!.options.resume, "s1", "resume within the run survives a model change");
+  assert.equal(calls[2]!.options.model, undefined, "knight default restored for tasks without a model");
+  assert.equal(a.success && b.success, true);
+});
+
+test("per-task model that is not a Claude model is a task error, not a silent fallback", async () => {
+  const { fn, calls } = fakeQuery(() => [init("s1"), done("s1", "ok")]);
+  const r = await executeTask("x", "t", config, new AbortController().signal, undefined, {
+    queryFn: fn,
+    model: "openrouter/deepseek/deepseek-v3.2",
+  });
+  assert.equal(r.success, false);
+  assert.match(r.error!, /Unsupported model "openrouter\/deepseek\/deepseek-v3.2"/);
+  assert.equal(calls.length, 0, "no Claude Code process is started");
+});
