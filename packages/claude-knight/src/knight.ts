@@ -13,7 +13,7 @@
  * (MEMORY.md, memory/*.md), as the knight contract already asks.
  */
 import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { resolveClaudeModel, type KnightConfig } from "./config.js";
 import { buildChildEnv, checkRuntime } from "./auth.js";
@@ -118,6 +118,59 @@ export function buildOptions(
 export function taskWorkDir(config: KnightConfig, taskId: string, runId?: string): string {
   const key = (runId || taskId).replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 120) || "task";
   return join(config.workDir, "work", key);
+}
+
+/**
+ * Remove a directory tree even when it holds read-only files/dirs (e.g. Go
+ * envtest binaries). Adds owner write (+exec on dirs) before removing, and
+ * never follows symlinks: links are unlinked, their targets left untouched.
+ */
+export function forceRemoveTree(path: string): void {
+  const fix = (p: string): void => {
+    let st;
+    try {
+      st = lstatSync(p);
+    } catch {
+      return;
+    }
+    if (st.isSymbolicLink()) return;
+    try {
+      chmodSync(p, st.mode | (st.isDirectory() ? 0o700 : 0o200));
+    } catch {
+      /* best effort; rmSync reports real failures */
+    }
+    if (st.isDirectory()) for (const name of readdirSync(p)) fix(join(p, name));
+  };
+  fix(path);
+  rmSync(path, { recursive: true, force: true });
+}
+
+const activeWorkDirs = new Set<string>();
+
+/** Remove per-task dirs under <workDir>/work older than maxAgeMs that no running task owns. */
+export function sweepStaleWorkDirs(config: KnightConfig, maxAgeMs = 24 * 3600 * 1000): number {
+  const root = join(config.workDir, "work");
+  let removed = 0;
+  let names: string[];
+  try {
+    names = readdirSync(root);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    const dir = join(root, name);
+    if (activeWorkDirs.has(dir)) continue;
+    try {
+      const st = lstatSync(dir);
+      if (!st.isDirectory() || Date.now() - st.mtimeMs < maxAgeMs) continue;
+      forceRemoveTree(dir);
+      removed++;
+    } catch (e) {
+      log.warn("Could not sweep stale task working directory", { dir, error: String(e) });
+    }
+  }
+  if (removed) log.info("Swept stale task working directories", { removed });
+  return removed;
 }
 
 /**
@@ -247,10 +300,12 @@ export async function executeTask(
     const ctx = { config, taskId, countTools: config.runtime === "cli" };
     let cleanup = () => {};
     const cwd = taskWorkDir(config, taskId, runId);
+    activeWorkDirs.add(cwd);
     const removeWorkDir = (failed: boolean) => {
+      activeWorkDirs.delete(cwd);
       if (failed && process.env["DEBUG"]) return log.info("Keeping task working directory (DEBUG)", { taskId, cwd });
       try {
-        rmSync(cwd, { recursive: true, force: true });
+        forceRemoveTree(cwd);
       } catch (e) {
         log.warn("Could not remove task working directory", { taskId, cwd, error: String(e) });
       }
@@ -341,4 +396,5 @@ export function resetKnightState(): void {
   runLocks.clear();
   sessionCost.clear();
   recentTasks.length = 0;
+  activeWorkDirs.clear();
 }

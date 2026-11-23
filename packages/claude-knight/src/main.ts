@@ -2,7 +2,7 @@ import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, type KnightConfig } from "./config.js";
 import { setActiveTaskCount, setDegradedReason, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
-import { executeTask } from "./knight.js";
+import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { initLogger, log } from "./logger.js";
 import * as metrics from "./metrics.js";
 import { connectNats, drain, HEARTBEAT_MS, publishResult, subscribe, type TaskDelivery } from "./nats.js";
@@ -33,6 +33,7 @@ export async function main(): Promise<void> {
   // Introspect in this process reads the same config dir the Claude Code child
   // processes write to.
   process.env["CLAUDE_CONFIG_DIR"] = config.claudeConfigDir;
+  sweepStaleWorkDirs(config);
 
   log.info("Claude-Knight starting", {
     model: config.claudeModel ?? "claude-code-default",
