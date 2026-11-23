@@ -32,7 +32,7 @@ function readFirst(paths: string[]): string | undefined {
   return undefined;
 }
 
-export function buildPreamble(config: KnightConfig): string {
+export function buildPreamble(config: KnightConfig, taskDir?: string): string {
   const model = config.claudeModel ?? "the Claude plan default";
   return `You are ${config.knightName}, a Knight of the Round Table.
 You are a specialized AI agent running as a Kubernetes pod in the Round Table fleet,
@@ -40,7 +40,9 @@ running on Claude Code (claude-knight runtime). Model: ${model}.
 
 <runtime_context>
 Knight: ${config.knightName}
-Workspace: ${config.workDir} (persistent PVC — survives restarts)
+Workspace: ${config.workDir} (persistent PVC — survives restarts)${
+    taskDir ? `\nWorking directory for this task: ${taskDir} (private to this task, removed when it ends; clone repos and put scratch files here; memory files stay under ${config.workDir})` : ""
+  }
 Skills: available through the Skill tool (synced from the arsenal, read-only)
 Vault: /vault if mounted (Derek's Obsidian vault — write only to Briefings/ and Roundtable/)
 Knight-to-knight: mcp__roundtable__nats_request (ask another knight), mcp__roundtable__nats_publish (alerts/reports)${
@@ -71,8 +73,8 @@ state the assumption in your final answer, and complete the work.
 </critical_rules>`;
 }
 
-export function buildAppendPrompt(config: KnightConfig): string {
-  const sections: string[] = [buildPreamble(config)];
+export function buildAppendPrompt(config: KnightConfig, taskDir?: string): string {
+  const sections: string[] = [buildPreamble(config, taskDir)];
   for (const file of PERSONALITY_FILES) {
     const text = readFirst([join(config.workDir, file), join(config.configDir, file)]);
     if (text) sections.push(`<knight_file name="${file}">\n${text}\n</knight_file>`);

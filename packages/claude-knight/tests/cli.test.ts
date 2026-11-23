@@ -11,13 +11,13 @@
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadConfig, type KnightConfig } from "../src/config.js";
-import { buildCliInvocation, parseStreamLine, shellQuote } from "../src/cli-runner.js";
+import { buildCliInvocation, type CliInvocation, parseStreamLine, shellQuote } from "../src/cli-runner.js";
 import { DISALLOWED_TOOLS, executeTask, getRecentTasks, resetKnightState } from "../src/knight.js";
 import { checkReserve, resetPlanLimits } from "../src/plan-limits.js";
 import { registry } from "../src/metrics.js";
@@ -104,7 +104,7 @@ test("builds a headless, unattended claude -p invocation", () => {
   });
   const a = inv.args;
   assert.equal(inv.bin, FAKE);
-  assert.equal(inv.cwd, work);
+  assert.equal(inv.cwd, work, "defaults to the root workdir");
   assert.deepEqual(a.slice(0, 4), ["-p", "--output-format", "stream-json", "--verbose"]);
   assert.equal(flag(a, "--permission-mode"), "bypassPermissions");
   assert.ok(a.includes("--allow-dangerously-skip-permissions"));
@@ -213,7 +213,9 @@ test("success: result text, cost, tokens, turns, model and session id", async ()
 
   const call = lastCall();
   assert.equal(call.stdin, "brief me", "prompt goes in on stdin");
-  assert.equal(call.cwd, work);
+  assert.ok(call.cwd.startsWith(join(work, "work") + "/t-"), "runs in a per-task directory");
+  assert.match(call.cwd, /\/work\/t-[a-z0-9]+$/);
+  assert.match(call.files.systemPrompt!, /Working directory for this task: .*\/work\/t-/);
   assert.equal(call.env.ANTHROPIC_API_KEY, undefined);
   assert.match(call.files.systemPrompt!, /You are Gawain/);
   assert.ok(JSON.parse(call.files.mcp!).mcpServers.roundtable);
@@ -310,6 +312,57 @@ test("chain steps resume one session; fresh mode never resumes", async () => {
   await run("s1", "run-C", fresh);
   await run("s2", "run-C", fresh);
   assert.equal(flag(lastCall().argv, "--resume"), undefined);
+});
+
+test("concurrent tasks get distinct working directories, removed afterwards", async () => {
+  useFixture("success");
+  const seen: string[] = [];
+  const over = { cliInvocation: (inv: CliInvocation) => (seen.push(inv.cwd), assert.ok(existsSync(inv.cwd), "created before spawn"), inv) };
+  const go = (id: string, runId?: string) => executeTask("x", id, config, new AbortController().signal, runId, over);
+  await Promise.all([go("a1"), go("b/../2"), go("c3", "run-X")]);
+  assert.equal(new Set(seen).size, 3);
+  for (const d of seen) {
+    assert.equal(join(d, ".."), join(work, "work"), "stays under $KNIGHT_WORKDIR/work");
+    assert.ok(!existsSync(d), "removed after the task");
+  }
+  assert.equal(seen[2], join(work, "work", "run-X"), "keyed on runId when present");
+  // the same runId reuses the same directory (session resume is per cwd)
+  await go("c4", "run-X");
+  assert.equal(seen[3], seen[2]);
+});
+
+test("the knight's root CLAUDE.md and .claude/ are visible from the per-task cwd", async () => {
+  useFixture("success");
+  writeFileSync(join(work, "CLAUDE.md"), "root rules");
+  mkdirSync(join(work, ".claude"), { recursive: true });
+  writeFileSync(join(work, ".claude", "settings.json"), "{}");
+  try {
+    let md = "", st = "";
+    const over = { cliInvocation: (inv: CliInvocation) => (md = readFileSync(join(inv.cwd, "CLAUDE.md"), "utf8"), st = readFileSync(join(inv.cwd, ".claude", "settings.json"), "utf8"), inv) };
+    await executeTask("x", "link1", config, new AbortController().signal, undefined, over);
+    assert.equal(md, "root rules");
+    assert.equal(st, "{}");
+    assert.ok(existsSync(join(work, "CLAUDE.md")) && existsSync(join(work, ".claude", "settings.json")), "removing the task dir leaves the root config intact");
+  } finally {
+    rmSync(join(work, "CLAUDE.md"));
+    rmSync(join(work, ".claude"), { recursive: true });
+  }
+});
+
+test("a failed task's directory is kept only when DEBUG is set", async () => {
+  useFixture("auth-error");
+  const dirs: string[] = [];
+  const over = { cliInvocation: (inv: CliInvocation) => (dirs.push(inv.cwd), inv) };
+  const fail = () => executeTask("x", `f-${dirs.length}`, config, new AbortController().signal, undefined, over);
+  assert.equal((await fail()).success, false);
+  assert.ok(!existsSync(dirs[0]!));
+  process.env.DEBUG = "1";
+  try {
+    assert.equal((await fail()).success, false);
+    assert.ok(existsSync(dirs[1]!));
+  } finally {
+    delete process.env.DEBUG;
+  }
 });
 
 test("startup refuses subscription + sdk", async () => {
