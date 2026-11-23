@@ -21,10 +21,12 @@ export interface StreamState {
   apiKeySource?: string;
   /** tool_use id → tool name, for tool metrics in the cli runtime. */
   toolNames: Map<string, string>;
+  /** tool_use id → Bash command, so a blocked call can be logged with its command. */
+  bashCommands: Map<string, string>;
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map() };
+  return { lastAssistantText: "", toolNames: new Map(), bashCommands: new Map() };
 }
 
 export interface StreamContext {
@@ -42,7 +44,7 @@ export const API_KEY_SOURCES = ["ANTHROPIC_API_KEY", "apiKeyHelper"];
 
 export class ApiKeyAuthError extends Error {}
 
-type Block = { type?: string; text?: string; id?: string; name?: string; tool_use_id?: string; is_error?: boolean; content?: unknown };
+type Block = { type?: string; text?: string; id?: string; name?: string; tool_use_id?: string; is_error?: boolean; input?: unknown; content?: unknown };
 
 function blockText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -81,7 +83,12 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
     case "assistant": {
       const content = (msg.message as { content?: Block[] })?.content;
       if (ctx.countTools && Array.isArray(content)) {
-        for (const b of content) if (b?.type === "tool_use" && b.id && b.name) state.toolNames.set(b.id, b.name);
+        for (const b of content) {
+          if (b?.type !== "tool_use" || !b.id || !b.name) continue;
+          state.toolNames.set(b.id, b.name);
+          const cmd = (b.input as { command?: unknown } | undefined)?.command;
+          if (b.name === "Bash" && typeof cmd === "string") state.bashCommands.set(b.id, cmd);
+        }
       }
       if (msg.parent_tool_use_id) break; // subagent chatter, not the deliverable
       if (msg.error) state.assistantError = msg.error;
@@ -98,13 +105,17 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
       for (const b of content as Block[]) {
         if (b?.type !== "tool_result") continue;
         const tool = (b.tool_use_id && state.toolNames.get(b.tool_use_id)) || "unknown";
-        if (b.tool_use_id) state.toolNames.delete(b.tool_use_id);
+        const command = (b.tool_use_id && state.bashCommands.get(b.tool_use_id)) || "";
+        if (b.tool_use_id) {
+          state.toolNames.delete(b.tool_use_id);
+          state.bashCommands.delete(b.tool_use_id);
+        }
         toolCallsTotal.inc({ tool, status: b.is_error ? "error" : "success" });
         const text = blockText(b.content);
         const at = text.indexOf(BLOCK_REASON_PREFIX);
         if (b.is_error && at >= 0) {
           const reason = text.slice(at + BLOCK_REASON_PREFIX.length).split("\n")[0]!.trim();
-          log.warn("Blocked dangerous bash command", { taskId, reason });
+          log.warn("Blocked dangerous bash command", { taskId, reason, command: command.slice(0, 200) });
           toolCallsBlocked.inc({ tool, reason });
         }
       }

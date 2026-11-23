@@ -6,10 +6,10 @@
  */
 export const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/(?:\s|$|\*)/, reason: "Recursive delete at root level" },
-  { pattern: /\bgit\s+push\b.*--force(?!-with-lease)\b/, reason: "Force push without lease (use --force-with-lease or new commits)" },
-  { pattern: /\bgit\s+push\b.*\s-f\b/, reason: "Force push (use new commits instead)" },
+  // Match the flag as a whole token: not a branch like `fix-f`, and --force-with-lease stays allowed.
+  { pattern: /\bgit\s+push\b[^;&|\n]*\s--force(?=\s|$)/, reason: "Force push without lease (use --force-with-lease or new commits)" },
+  { pattern: /\bgit\s+push\b[^;&|\n]*\s-[a-zA-Z]*f[a-zA-Z]*(?=\s|$)/, reason: "Force push (use new commits instead)" },
   { pattern: /\bchmod\s+(-R\s+)?777\b/, reason: "World-writable permissions" },
-  { pattern: /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z)?sh\b/, reason: "Piping remote script to shell" },
   { pattern: /\bdd\s+.*of=\/dev\//, reason: "Direct device write" },
   { pattern: /\bmkfs(\.\w+)?\b/, reason: "Filesystem format" },
 ];

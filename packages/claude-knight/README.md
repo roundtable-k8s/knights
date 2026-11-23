@@ -47,7 +47,9 @@ that differs from the SDK's bundled CLI is installed on its own, and the build c
   task starts fresh. Long-term memory lives in files on the PVC (`MEMORY.md`, `memory/`, `session-notes/`),
   as the knight contract in `defaults/AGENTS.md` asks. `CLAUDE_SESSION_MODE=fresh` disables resume.
 - **Unattended.** `bypassPermissions`, interactive tools disabled (AskUserQuestion, plan mode, cron, …), and the
-  same Bash guardrails as pi-knight enforced by a `PreToolUse` hook (a command hook in `cli`, in process in `sdk`).
+  same Bash guardrails as pi-knight enforced by a `PreToolUse` hook (a command hook in `cli`, in process in `sdk`). Blocked: `rm -rf /`, `mkfs`, `dd of=/dev/…`, `chmod 777`, and
+  `git push` with a `-f`/`--force` flag token (`--force-with-lease` is allowed). Blocked calls are logged with the
+  command (first 200 chars) in both runtimes. `curl … | sh` is not blocked.
 - **Tools.** Claude Code's built-ins (Bash, Read, Edit, Grep, Glob, WebFetch, WebSearch, Agent, Skill, …);
   every CLI the knight's Nix/mise/apt tools install, through Bash (the operator puts them on `PATH`); the
   Round Table tools below; and any extra MCP servers.
