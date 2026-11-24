@@ -99,7 +99,7 @@ require `CLAUDE_CODE_OAUTH_TOKEN`, and still strips `ANTHROPIC_API_KEY`. It is n
 
 **Plan reserve.** In subscription mode the fleet shares plan windows with your own Claude Code and chat use.
 Claude Code reports window utilization; once any window passes `CLAUDE_PLAN_RESERVE` (default `0.8`) or is
-rejected, new tasks fail fast with `usage_limited: true` and the reset time, instead of using up the week.
+rejected, new tasks fail fast with `usage_limited: true` and the reset time, instead of using up the week. While refused, the knight re-checks real usage with one tiny Haiku call at most every 5 minutes and resumes once usage drops back under the reserve (no restart needed). `CLAUDE_PLAN_RESERVE` is re-read on every check.
 Utilization is exported as `claude_knight_plan_utilization{window=…}`.
 
 **Cost.** `cost` in results and `claude_knight_llm_cost_dollars_total` are at API list prices. With
@@ -129,7 +129,7 @@ Set through the Knight's `spec.env` / `spec.envFrom`:
 
 A task payload may carry an optional `model` (a Claude alias or `claude-*` id); it replaces `CLAUDE_MODEL` for that task only. Non-Claude ids fail the task with an error. Chain-run session resume continues across steps that use different models.
 | `CLAUDE_EFFORT` | Claude Code default | `low` `medium` `high` `xhigh` `max` |
-| `CLAUDE_PLAN_RESERVE` | `0.8` | 0–1; `1` disables |
+| `CLAUDE_PLAN_RESERVE` | `0.8` | 0–1; `1` disables; re-read on every check |
 | `CLAUDE_MAX_TURNS` | `0` (none) | turn cap per task |
 | `CLAUDE_MAX_BUDGET_USD` | `0` (none) | per-task cap at API-equivalent prices |
 | `CLAUDE_SESSION_MODE` | `run` | `run` or `fresh` |

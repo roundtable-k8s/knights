@@ -85,4 +85,48 @@ export function snapshot(): Record<string, WindowState> {
 /** Test hook. */
 export function resetPlanLimits(): void {
   windows.clear();
+  lastProbeAtMs = 0;
+  probing = null;
+}
+
+/** How often a refusing knight re-checks the real usage (ms). */
+export const RECHECK_INTERVAL_MS = 5 * 60_000;
+
+let lastProbeAtMs = 0;
+let probing: Promise<void> | null = null;
+
+/**
+ * Like checkReserve, but while blocked it refreshes the stored reading with
+ * `probe` (a cheap Claude call whose rate_limit_event feeds recordRateLimit) at
+ * most once per `intervalMs`, so a knight recovers after usage drops (owner reset
+ * or bought more) instead of staying refused until the recorded reset time.
+ * Concurrent tasks share one probe. If the probe throws, the old reading is kept.
+ */
+export async function checkReserveRefreshing(
+  reserve: number,
+  probe: () => Promise<void>,
+  opts: { now?: () => number; intervalMs?: number; onCleared?: () => void } = {},
+): Promise<ReserveCheck> {
+  const now = opts.now ?? Date.now;
+  const interval = opts.intervalMs ?? RECHECK_INTERVAL_MS;
+  const was = checkReserve(reserve, now());
+  if (!was.blocked) return was;
+  if (probing) await probing;
+  else if (now() - lastProbeAtMs >= interval) {
+    lastProbeAtMs = now();
+    const previous = new Map(windows);
+    windows.clear();
+    probing = probe()
+      .catch(() => {
+        // Keep the old reading for windows the probe did not re-report.
+        for (const [k, v] of previous) if (!windows.has(k)) windows.set(k, v);
+      })
+      .finally(() => {
+        probing = null;
+      });
+    await probing;
+  }
+  const check = checkReserve(reserve, now());
+  if (!check.blocked) opts.onCleared?.();
+  return check;
 }

@@ -326,3 +326,45 @@ test("transcript messages map to dashboard items", () => {
   assert.equal(toolResult[0]!.type, "tool_result");
   assert.equal(toolResult[0]!.text, "⚠ 403");
 });
+
+test("refusing knight re-checks usage at an interval and recovers when it drops", async () => {
+  resetPlanLimits();
+  const { checkReserveRefreshing } = await import("../src/plan-limits.js");
+  let t = 1_800_000_000_000;
+  const now = () => t;
+  const resetsAt = (t + 3 * 3600_000) / 1000;
+  recordRateLimit("K", { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt }, t);
+  let calls = 0;
+  let usage = 0.9; // fake rate-limit source
+  const probe = async () => {
+    calls++;
+    recordRateLimit("K", { status: "allowed", rateLimitType: "five_hour", utilization: usage, resetsAt }, t);
+  };
+  let cleared = 0;
+  const opts = { now, intervalMs: 300_000, onCleared: () => cleared++ };
+
+  // still high: refused, one probe, and no extra calls within the interval
+  assert.equal((await checkReserveRefreshing(0.8, probe, opts)).blocked, true);
+  assert.equal((await checkReserveRefreshing(0.8, probe, opts)).blocked, true);
+  t += 60_000;
+  assert.equal((await checkReserveRefreshing(0.8, probe, opts)).blocked, true);
+  assert.equal(calls, 1);
+
+  // usage drops; after the interval the next task is accepted
+  usage = 0.1;
+  t += 300_000;
+  assert.equal((await checkReserveRefreshing(0.8, probe, opts)).blocked, false);
+  assert.equal(calls, 2);
+  assert.equal(cleared, 1);
+  resetPlanLimits();
+});
+
+test("a failed usage probe keeps the old reading", async () => {
+  resetPlanLimits();
+  const { checkReserveRefreshing } = await import("../src/plan-limits.js");
+  const t = 1_800_000_000_000;
+  recordRateLimit("K", { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt: (t + 3600_000) / 1000 }, t);
+  const r = await checkReserveRefreshing(0.8, async () => { throw new Error("boom"); }, { now: () => t });
+  assert.equal(r.blocked, true);
+  resetPlanLimits();
+});

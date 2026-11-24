@@ -85,6 +85,11 @@ function intEnv(env: Env, name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** CLAUDE_PLAN_RESERVE clamped to 0-1; re-read on every reserve check so changes apply without a restart. */
+export function planReserveFromEnv(env: Env = process.env): number {
+  return Math.min(1, Math.max(0, floatEnv(env, "CLAUDE_PLAN_RESERVE", 0.8)));
+}
+
 function floatEnv(env: Env, name: string, fallback: number): number {
   const raw = env[name];
   if (raw == null || raw === "") return fallback;
@@ -161,6 +166,6 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     mcpServersJson: env["MCP_SERVERS_JSON"] || undefined,
     extraDisallowedTools: (env["CLAUDE_DISALLOWED_TOOLS"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     sessionMode: sessionMode as "run" | "fresh",
-    planReserve: Math.min(1, Math.max(0, floatEnv(env, "CLAUDE_PLAN_RESERVE", 0.8))),
+    planReserve: planReserveFromEnv(env),
   };
 }

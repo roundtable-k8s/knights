@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { registerActivity, TaskActivity, unregisterActivity } from "./activity.js";
 import { checkAuth, checkRuntime } from "./auth.js";
-import { loadConfig, type KnightConfig } from "./config.js";
+import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
@@ -9,9 +9,18 @@ import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { initLogger, log } from "./logger.js";
 import * as metrics from "./metrics.js";
 import { connectNats, drain, getConnection, HEARTBEAT_MS, StringCodec, publishResult, subscribe, type TaskDelivery } from "./nats.js";
-import { checkReserve } from "./plan-limits.js";
+import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
+
+/**
+ * Cheapest call that returns a fresh rate-limit reading: a one-word prompt on the
+ * smallest model. Its rate_limit_event updates the stored plan windows via the stream.
+ */
+async function probeUsage(config: KnightConfig): Promise<void> {
+  const r = await executeTask("Reply with the single word: ok", "plan-usage-probe", config, AbortSignal.timeout(60_000), undefined, { model: "haiku" });
+  if (!r.success && !r.usageLimited) throw new Error(r.error ?? "usage probe failed");
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -121,7 +130,12 @@ export async function main(): Promise<void> {
 
     try {
       // Plan reserve: refuse new work before spawning Claude Code at all.
-      const reserve = config.authMode === "subscription" ? checkReserve(config.planReserve) : { blocked: false };
+      const reserve: { blocked: boolean; reason?: string } =
+        config.authMode === "subscription"
+          ? await checkReserveRefreshing(planReserveFromEnv(), () => probeUsage(config), {
+              onCleared: () => log.info("Plan reserve cleared: usage is back under the reserve, accepting tasks"),
+            })
+          : { blocked: false };
       const outcome = reserve.blocked
         ? null
         : await executeTask(parsed.task, parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
