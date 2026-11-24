@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadConfig, type KnightConfig } from "../src/config.js";
 import { buildCliInvocation, type CliInvocation, parseStreamLine, shellQuote } from "../src/cli-runner.js";
-import { DISALLOWED_TOOLS, executeTask, getRecentTasks, resetKnightState } from "../src/knight.js";
+import { DISALLOWED_TOOLS, taskWorkDir, executeTask, getRecentTasks, resetKnightState } from "../src/knight.js";
 import { checkReserve, resetPlanLimits } from "../src/plan-limits.js";
 import { registry } from "../src/metrics.js";
 
@@ -214,7 +214,7 @@ test("success: result text, cost, tokens, turns, model and session id", async ()
   const call = lastCall();
   assert.equal(call.stdin, "brief me", "prompt goes in on stdin");
   assert.ok(call.cwd.startsWith(join(work, "work") + "/t-"), "runs in a per-task directory");
-  assert.match(call.cwd, /\/work\/t-[a-z0-9]+$/);
+  assert.match(call.cwd, /\/work\/t-[a-z0-9]+-[0-9a-f]{8}$/);
   assert.match(call.files.systemPrompt!, /Working directory for this task: .*\/work\/t-/);
   assert.equal(call.env.ANTHROPIC_API_KEY, undefined);
   assert.match(call.files.systemPrompt!, /You are Gawain/);
@@ -325,7 +325,7 @@ test("concurrent tasks get distinct working directories, removed afterwards", as
     assert.equal(join(d, ".."), join(work, "work"), "stays under $KNIGHT_WORKDIR/work");
     assert.ok(!existsSync(d), "removed after the task");
   }
-  assert.equal(seen[2], join(work, "work", "run-X"), "keyed on runId when present");
+  assert.equal(seen[2], taskWorkDir(config, "c3", "run-X"), "keyed on runId when present");
   // the same runId reuses the same directory (session resume is per cwd)
   await go("c4", "run-X");
   assert.equal(seen[3], seen[2]);

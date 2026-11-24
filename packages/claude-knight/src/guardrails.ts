@@ -6,6 +6,8 @@
  */
 export const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/(?:\s|$|\*)/, reason: "Recursive delete at root level" },
+  // Known residual false positive (deliberate fail-safe): the patterns scan the raw command text, so
+  // `git push -f` appearing as an argument (e.g. `echo "git push -f"`) is blocked too.
   // Match the flag as a whole token: not a branch like `fix-f`, and --force-with-lease stays allowed.
   { pattern: /\bgit\s+push\b[^;&|\n]*\s--force(?=\s|$)/, reason: "Force push without lease (use --force-with-lease or new commits)" },
   { pattern: /\bgit\s+push\b[^;&|\n]*\s-[a-zA-Z]*f[a-zA-Z]*(?=\s|$)/, reason: "Force push (use new commits instead)" },

@@ -12,6 +12,7 @@ import { parseTaskMessage } from "../src/nats.js";
 import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, resetPlanLimits } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
 import { formatRequestResponse } from "../src/tools.js";
+import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/introspect.js";
 
 const baseEnv = { KNIGHT_NAME: "Gawain", SUBSCRIBE_TOPICS: "rt.tasks.security.>" };
@@ -29,6 +30,20 @@ test("model mapping accepts Claude ids and aliases, drops non-Claude models", ()
   assert.equal(resolveClaudeModel(""), undefined);
   // CLAUDE_MODEL overrides spec.model
   assert.equal(resolveClaudeModel("openrouter/deepseek/deepseek-v3.2", "haiku"), "haiku");
+});
+
+test("DRAIN_TIMEOUT_MS defaults to TASK_TIMEOUT_MS + 60s", () => {
+  assert.equal(loadConfig({ ...baseEnv }).drainTimeoutMs, 1_800_000 + 60_000);
+  assert.equal(loadConfig({ ...baseEnv, TASK_TIMEOUT_MS: "1000" }).drainTimeoutMs, 61_000);
+  assert.equal(loadConfig({ ...baseEnv, TASK_TIMEOUT_MS: "1000", DRAIN_TIMEOUT_MS: "5" }).drainTimeoutMs, 5);
+});
+
+test("taskWorkDir is collision-safe and stable", () => {
+  const c = loadConfig({ ...baseEnv });
+  assert.notEqual(taskWorkDir(c, "t", "a/b"), taskWorkDir(c, "t", "a_b"));
+  assert.equal(taskWorkDir(c, "t", "a/b"), taskWorkDir(c, "other", "a/b"));
+  assert.equal(taskWorkDir(c, "t1"), taskWorkDir(c, "t1"));
+  assert.ok(taskWorkDir(c, "x".repeat(300)).split("/").pop()!.length <= 120);
 });
 
 test("loadConfig defaults and validation", () => {
@@ -79,7 +94,7 @@ test("api mode requires an API key and strips the OAuth token", () => {
 
 // ── hooks ──────────────────────────────────────────────────────────
 
-test("bash guardrails block the same things pi-knight blocks", () => {
+test("bash guardrails block the commands listed in src/guardrails.ts", () => {
   for (const cmd of [
     "rm -rf /",
     "rm -rf / --no-preserve-root",

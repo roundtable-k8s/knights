@@ -18,7 +18,7 @@ const freePort = () =>
   });
 
 /** Wires the REAL createShutdown + installSignalHandlers + pull loop + health server to fakes for NATS/task. */
-async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: boolean }) {
+async function harness(opts: { taskMs: number; maxWaitMs: number }) {
   const events: string[] = [];
   let active = 0;
   let shuttingDown = false;
@@ -27,7 +27,6 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
   let served = false;
   let heartbeats = 0;
   let exitCode: number | null = null;
-  const aborters: Array<() => void> = [];
   const port = await freePort();
   startHealthServer({ knightName: "T", metricsPort: port } as unknown as KnightConfig);
 
@@ -50,13 +49,8 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
       active++;
       const hb = setInterval(() => d.working(), 20);
       void (async () => {
-        let aborted = false;
-        await Promise.race([
-          sleep(opts.taskMs), // the long fake task
-          new Promise<void>((r) => aborters.push(() => { aborted = true; r(); })),
-        ]);
-        if (aborted) await sleep(50); // the failure result is published asynchronously
-        events.push(`${aborted ? "failed" : "result"}:${d.task.taskId}`);
+        await sleep(opts.taskMs); // the long fake task
+        events.push(`result:${d.task.taskId}`);
         clearInterval(hb);
         d.ack();
         active--;
@@ -75,7 +69,6 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
     drainNats: async () => { events.push("nats-drain"); },
     cleanup: async () => { events.push("cleanup"); await stopHealthServer(); },
     exit: (code) => { events.push("exit"); exitCode = code; },
-    ...(opts.abortable ? { abortInflight: () => { events.push("abort"); aborters.forEach((f) => f()); }, abortGraceMs: 2000 } : {}),
   });
   installSignalHandlers(shutdown, proc);
 

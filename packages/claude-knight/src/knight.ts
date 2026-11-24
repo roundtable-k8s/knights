@@ -14,6 +14,7 @@
  */
 import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveClaudeModel, type KnightConfig } from "./config.js";
 import { buildChildEnv, checkRuntime } from "./auth.js";
@@ -112,12 +113,15 @@ export function buildOptions(
 }
 
 /**
- * Per-task working directory: $KNIGHT_WORKDIR/work/<runId|taskId>, sanitised.
+ * Per-task working directory: $KNIGHT_WORKDIR/work/<runId|taskId>-<hash>, sanitised.
  * Keyed on runId so a resumed session (stored per cwd) finds its transcript.
  */
 export function taskWorkDir(config: KnightConfig, taskId: string, runId?: string): string {
-  const key = (runId || taskId).replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 120) || "task";
-  return join(config.workDir, "work", key);
+  const raw = runId || taskId;
+  // The hash of the raw id keeps `a/b` and `a_b` (same after sanitising) in distinct dirs; stable per run.
+  const hash = createHash("sha256").update(raw).digest("hex").slice(0, 8);
+  const name = raw.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_").slice(0, 120 - 9) || "task";
+  return join(config.workDir, "work", `${name}-${hash}`);
 }
 
 /**
@@ -290,7 +294,7 @@ export async function executeTask(
       runId: runId ?? null,
       resume: resume ?? null,
       runtime: config.runtime,
-      model: config.claudeModel ?? "default",
+      model: config.claudeModel ?? "claude-code-default",
       skills: skills.names.length,
       taskLength: task.length,
     });

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { loadConfig } from "../src/config.js";
-import { DISALLOWED_TOOLS, executeTask, resetKnightState, type QueryFn } from "../src/knight.js";
+import { DISALLOWED_TOOLS, taskWorkDir, executeTask, resetKnightState, type QueryFn } from "../src/knight.js";
 import { checkReserve, resetPlanLimits } from "../src/plan-limits.js";
 
 const work = mkdtempSync(join(tmpdir(), "ck-work-"));
@@ -83,7 +83,7 @@ test("sdk runtime is the api-mode default and passes an unattended configuration
 
   const o = calls[0]!.options;
   assert.equal(calls[0]!.prompt, "brief me");
-  assert.equal(o.cwd, join(work, "work", "t1"));
+  assert.equal(o.cwd, taskWorkDir(config, "t1"));
   assert.equal(o.model, undefined, "non-Claude spec.model falls back to Claude Code default");
   assert.equal(o.permissionMode, "bypassPermissions");
   assert.equal(o.allowDangerouslySkipPermissions, true);
