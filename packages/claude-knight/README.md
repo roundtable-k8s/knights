@@ -161,6 +161,17 @@ npm run build
 CK_LIVE_CLAUDE=1 CLAUDE_CODE_OAUTH_TOKEN=… npx tsx --test tests/claude-live.test.ts   # optional, real plan token
 ```
 
+### Nix dev shell
+
+`flake.nix` pins the toolchain CI uses (Node 22 with npm, plus git, gh and jq) to the same nixpkgs revision as
+roundtable-k8s/roundtable. With Nix and flakes enabled:
+
+```bash
+nix develop                 # shell with node 22, npm, git, gh, jq
+npm ci && npx tsc --noEmit && npm test && npm run build
+nix build .#knight-tools    # the same tools as one environment (result/bin), for spec.tools.flakes
+```
+
 `tests/` cover config, auth stripping, Bash guardrails, skill linking, NATS payloads, plan reserve, result
 classification, session resume and per-task cost on resumed sessions. For the `cli` runtime:
 `cli.test.ts` checks the generated arguments and files and parses recorded stream-json fixtures
