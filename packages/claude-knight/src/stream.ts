@@ -9,6 +9,7 @@
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
 import { BLOCK_REASON_PREFIX } from "./guardrails.js";
+import { getActivity } from "./activity.js";
 import { log } from "./logger.js";
 import { toolCallsBlocked, toolCallsTotal } from "./metrics.js";
 import { recordRateLimit } from "./plan-limits.js";
@@ -22,6 +23,8 @@ export interface StreamState {
   apiKeySource?: string;
   /** tool_use id → tool name, for tool metrics in the cli runtime. */
   toolNames: Map<string, string>;
+  /** tool_use id → tool name for activity events (both runtimes). */
+  activityTools: Map<string, string>;
   /** tool_use id → Bash command, so a blocked call can be logged with its command. */
   bashCommands: Map<string, string>;
   /** tool_use id → Bash command that may open/update a PR (tracked in every runtime). */
@@ -31,7 +34,7 @@ export interface StreamState {
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
+  return { lastAssistantText: "", toolNames: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
 }
 
 export interface StreamContext {
@@ -95,6 +98,17 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
           }
         }
       }
+      const act = getActivity(taskId);
+      if (act && Array.isArray(content)) {
+        for (const b of content) {
+          if (b?.type === "tool_use" && b.id && b.name) {
+            state.activityTools.set(b.id, b.name);
+            act.toolStarted(b.id, b.name, b.input);
+          } else if (b?.type === "text" && b.text?.trim() && !msg.parent_tool_use_id) {
+            act.assistantMessage(b.text.trim());
+          }
+        }
+      }
       if (ctx.countTools && Array.isArray(content)) {
         for (const b of content) {
           if (b?.type !== "tool_use" || !b.id || !b.name) continue;
@@ -114,6 +128,15 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
     case "user": {
       const content = (msg.message as { content?: unknown })?.content;
       if (!Array.isArray(content)) break;
+      const act = getActivity(taskId);
+      if (act) {
+        for (const b of content as Block[]) {
+          if (b?.type !== "tool_result" || !b.tool_use_id) continue;
+          const name = state.activityTools.get(b.tool_use_id) ?? "unknown";
+          state.activityTools.delete(b.tool_use_id);
+          act.toolFinished(b.tool_use_id, name, !!b.is_error, blockText(b.content));
+        }
+      }
       for (const b of content as Block[]) {
         if (b?.type !== "tool_result" || !b.tool_use_id) continue;
         const cmd = state.prCommands.get(b.tool_use_id);

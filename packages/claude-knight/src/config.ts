@@ -23,6 +23,11 @@ export interface KnightConfig {
   metricsPort: number;
   logLevel: string;
   hostname: string;
+  /** Downward-API pod name / node name (fall back to the hostname). */
+  podName: string;
+  nodeName: string;
+  /** Whether activity events carry previews of assistant text, tool args and output. */
+  activityContent: "none" | "preview";
 
   // ── claude-knight specific ──
   /** "subscription" (Claude plan via CLAUDE_CODE_OAUTH_TOKEN) or "api" (ANTHROPIC_API_KEY). */
@@ -138,6 +143,9 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     metricsPort: intEnv(env, "METRICS_PORT", 3000),
     logLevel: env["LOG_LEVEL"] ?? "info",
     hostname: os.hostname(),
+    podName: env["POD_NAME"] || os.hostname(),
+    nodeName: env["NODE_NAME"] || os.hostname(),
+    activityContent: (env["ACTIVITY_CONTENT"] ?? "preview").toLowerCase() === "none" ? "none" : "preview",
 
     authMode,
     runtime,

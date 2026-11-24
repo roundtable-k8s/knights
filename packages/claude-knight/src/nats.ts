@@ -28,6 +28,11 @@ export interface ParsedTask {
   runId?: string;
   /** Optional per-task model override (TaskPayload.model); replaces CLAUDE_MODEL for this task only. */
   model?: string;
+  /** Chain/step identity when the dispatcher supplies it; used only for activity events. */
+  chainName?: string;
+  stepName?: string;
+  /** Epoch ms the task was published, when known (queuedFor in task.started). */
+  publishedAtMs?: number;
 }
 
 /**
@@ -59,6 +64,9 @@ export function parseTaskMessage(raw: string, subjectTaskId: string): ParsedTask
         timeoutMs: normalizeTimeoutMs(json.metadata?.timeout_ms ?? json.metadata?.timeoutMs),
         runId: json.runId ?? json.run_id,
         model: typeof json.model === "string" && json.model.trim() ? json.model.trim() : undefined,
+        chainName: typeof (json.chainName ?? json.chain) === "string" ? (json.chainName ?? json.chain) : undefined,
+        stepName: typeof (json.stepName ?? json.step) === "string" ? (json.stepName ?? json.step) : undefined,
+        publishedAtMs: Number.isFinite(Date.parse(json.timestamp)) ? Date.parse(json.timestamp) : undefined,
       };
     }
   } catch {

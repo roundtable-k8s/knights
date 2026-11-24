@@ -9,6 +9,7 @@
 import { getSessionMessages, listSessions, type SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Subscription } from "nats";
 import type { KnightConfig } from "./config.js";
+import { inflightTasks } from "./activity.js";
 import { getRecentTasks } from "./knight.js";
 import { log } from "./logger.js";
 import { getConnection, StringCodec } from "./nats.js";
@@ -74,10 +75,17 @@ export function startIntrospect(config: KnightConfig): void {
   }
   const prefix = config.natsResultsPrefix.replace(/\.results$/, "");
   const subject = `${prefix}.introspect.${config.knightName}`;
+  // Knight-level subject (every pod answers; kept for back-compat) plus a per-pod one.
+  const podSubject = `${subject}.${config.podName}`;
   sub = nc.subscribe(subject);
-  log.info("Introspect responder started", { subject });
-  (async () => {
-    for await (const msg of sub!) {
+  const podSub = nc.subscribe(podSubject);
+  log.info("Introspect responder started", { subject, podSubject });
+  for (const s of [sub, podSub]) void serve(s, config);
+}
+
+async function serve(s: Subscription, config: KnightConfig): Promise<void> {
+  {
+    for await (const msg of s) {
       let req: IntrospectRequest = { type: "stats" };
       try {
         req = JSON.parse(sc.decode(msg.data));
@@ -85,20 +93,23 @@ export function startIntrospect(config: KnightConfig): void {
         // default to stats
       }
       try {
-        msg.respond(sc.encode(JSON.stringify(await handleIntrospect(req, config))));
+        const body = (await handleIntrospect(req, config)) as Record<string, unknown>;
+        msg.respond(sc.encode(JSON.stringify({ ...body, pod: config.podName, node: config.nodeName })));
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         log.error("Introspect error", { error });
-        msg.respond(sc.encode(JSON.stringify({ error })));
+        msg.respond(sc.encode(JSON.stringify({ error, pod: config.podName, node: config.nodeName })));
       }
     }
-  })();
+  }
 }
 
 function runtime(config: KnightConfig) {
   return {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     activeTasks,
+    pod: config.podName,
+    node: config.nodeName,
     model: config.claudeModel ?? "claude-code-default",
     runtime: "claude-knight",
     claudeRuntime: config.runtime,
@@ -138,6 +149,7 @@ export async function handleIntrospect(req: IntrospectRequest, config: KnightCon
           cost: totals.cost,
         },
         tasks: tasks.slice(-10),
+        inflight: inflightTasks(),
         runtime: runtime(config),
       };
     }

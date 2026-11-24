@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+import { registerActivity, TaskActivity, unregisterActivity } from "./activity.js";
 import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, type KnightConfig } from "./config.js";
 import { createShutdown, installSignalHandlers } from "./drain.js";
@@ -6,7 +8,7 @@ import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { initLogger, log } from "./logger.js";
 import * as metrics from "./metrics.js";
-import { connectNats, drain, HEARTBEAT_MS, publishResult, subscribe, type TaskDelivery } from "./nats.js";
+import { connectNats, drain, getConnection, HEARTBEAT_MS, StringCodec, publishResult, subscribe, type TaskDelivery } from "./nats.js";
 import { checkReserve } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -86,9 +88,33 @@ export async function main(): Promise<void> {
   async function processTask(delivery: TaskDelivery): Promise<void> {
     const parsed = delivery.task;
     // Keep the message un-acked but alive while the task runs; ack only when it finishes.
-    const heartbeat = setInterval(() => delivery.working(), HEARTBEAT_MS);
-    setActive(activeCount + 1);
     const started = Date.now();
+    const prefix = config.natsResultsPrefix.replace(/\.results$/, "");
+    const enc = StringCodec();
+    const activity = new TaskActivity({
+      knight: config.knightName,
+      taskId: parsed.taskId,
+      subject: `${prefix}.activity.${config.knightName}.${parsed.taskId}`,
+      identity: { pod: config.podName, node: config.nodeName },
+      runId: parsed.runId,
+      chainName: parsed.chainName,
+      stepName: parsed.stepName,
+      model: parsed.model ?? config.claudeModel,
+      slot: activeCount,
+      concurrency: config.maxConcurrentTasks,
+      queuedFor: parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined,
+      content: config.activityContent,
+      // Core NATS publish: fire-and-forget, never JetStream.
+      publish: (subject, payload) => getConnection()?.publish(subject, enc.encode(payload)),
+    });
+    activity.workDir = basename(config.workDir);
+    registerActivity(activity, parsed.taskId);
+    activity.started();
+    const heartbeat = setInterval(() => {
+      delivery.working();
+      activity.heartbeat();
+    }, HEARTBEAT_MS);
+    setActive(activeCount + 1);
     const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -102,6 +128,7 @@ export async function main(): Promise<void> {
 
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
+        activity.finished({ success: false, errorClass: "usage_limited", cost: 0 });
         metrics.usageLimitHits.labels(config.knightName).inc();
         metrics.tasksTotal.labels(config.knightName, "refused").inc();
         await publishResult(parsed.taskId, {
@@ -123,6 +150,7 @@ export async function main(): Promise<void> {
       }
 
       const durationMs = Date.now() - started;
+      activity.finished({ success: outcome.success, errorClass: outcome.usageLimited ? "usage_limited" : outcome.error ? "error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
       await publishResult(parsed.taskId, {
         task_id: parsed.taskId,
         knight: config.knightName,
@@ -153,6 +181,7 @@ export async function main(): Promise<void> {
       const durationMs = Date.now() - started;
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error("Task failed", { taskId: parsed.taskId, error: errMsg });
+      activity.finished({ success: false, errorClass: "exception", cost: 0 });
       await publishResult(parsed.taskId, {
         task_id: parsed.taskId,
         knight: config.knightName,
@@ -172,6 +201,7 @@ export async function main(): Promise<void> {
     } finally {
       clearTimeout(timer);
       clearInterval(heartbeat);
+      unregisterActivity(parsed.taskId);
       delivery.ack();
       setActive(activeCount - 1);
       puller?.wake();
