@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseVerdict, resolvePrs, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { parseVerdict, resolvePrs, taskResultFields, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -174,7 +174,7 @@ export function runtimeFields(config: Pick<KnightConfig, "authMode">): Pick<Resu
  */
 export function buildResultPayload(
   outcome: TaskResult,
-  meta: { taskId: string; knight: string; durationMs: number; timestamp?: string },
+  meta: { taskId: string; knight: string; durationMs: number; timestamp?: string; parsed?: ParsedTask },
 ): ResultPayload {
   return {
     task_id: meta.taskId,
@@ -192,6 +192,7 @@ export function buildResultPayload(
     turns: outcome.turns,
     runtime: "claude-knight",
     billing: outcome.billing,
+    ...taskResultFields(meta.parsed, outcome.success),
     timestamp: meta.timestamp ?? new Date().toISOString(),
   };
 }

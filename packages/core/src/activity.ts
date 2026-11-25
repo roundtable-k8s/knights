@@ -41,6 +41,8 @@ export interface ActivityEvent {
   chainName?: string;
   stepName?: string;
   model?: string;
+  /** 1-based attempt number; only on task.started of a manual retry. */
+  attempt?: number;
   seq: number;
   truncated?: boolean;
   [field: string]: unknown;
@@ -241,6 +243,8 @@ export interface TaskActivityInit {
   concurrency?: number;
   /** ms between publish and pickup, when the dispatcher stamped the task. */
   queuedFor?: number;
+  /** Attempt number of a manual retry (> 1); reported on task.started. */
+  attempt?: number;
   /** Working directory name, reported in the in-flight registry. */
   workDir?: string;
   /** `none` drops previews and argument summaries. Default `preview`. */
@@ -379,6 +383,7 @@ export class TaskActivity {
         ...(i.slot != null ? { slot: i.slot } : {}),
         ...(i.concurrency != null ? { concurrency: i.concurrency } : {}),
         ...(i.queuedFor != null ? { queuedFor: Math.max(0, Math.round(i.queuedFor)) } : {}),
+        ...(i.attempt && i.attempt > 1 ? { attempt: i.attempt } : {}),
       },
       false,
     );

@@ -1,4 +1,5 @@
 import type { TaskResult } from "./schema.js";
+import { taskResultFields, type ParsedTask } from "./task.js";
 
 /** Serialise a result exactly as it goes on the wire (the TaskResult schema in ./schema.ts). */
 export function encodeResult(result: TaskResult): string {
@@ -19,8 +20,11 @@ export function failureResult(meta: {
   model: string;
   error: string;
   timestamp?: string;
+  /** The parsed task; echoed on the failure result as `task` (with `attempt`, `retry_of`). */
+  parsed?: ParsedTask;
 }): TaskResult {
   return {
+    ...taskResultFields(meta.parsed, false),
     task_id: meta.taskId,
     knight: meta.knight,
     success: false,
@@ -35,7 +39,13 @@ export function failureResult(meta: {
 }
 
 /** Result for a task that was delivered but never acked (`lost: true`). */
-export function lostTaskResult(meta: { taskId: string; knight: string; model: string; timestamp?: string }): TaskResult {
+export function lostTaskResult(meta: {
+  taskId: string;
+  knight: string;
+  model: string;
+  timestamp?: string;
+  parsed?: ParsedTask;
+}): TaskResult {
   return { ...failureResult({ ...meta, error: LOST_TASK_ERROR }), lost: true };
 }
 
@@ -46,6 +56,7 @@ export function invalidTaskResult(meta: {
   model: string;
   invalid: string;
   timestamp?: string;
+  parsed?: ParsedTask;
 }): TaskResult {
   return failureResult({ ...meta, error: `Invalid task payload: ${meta.invalid}` });
 }

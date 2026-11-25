@@ -1,4 +1,4 @@
-import type { TaskResult as ResultPayload } from "@roundtable/knight-core";
+import { taskResultFields, type ParsedTask, type TaskResult as ResultPayload } from "@roundtable/knight-core";
 import type { TaskResult } from "./knight.js";
 import { refusalCode } from "./result-extraction.js";
 
@@ -24,7 +24,7 @@ export function failedTaskResult(errMsg: string, model: string): TaskResult {
  */
 export function buildResultPayload(
   result: TaskResult,
-  meta: { taskId: string; knight: string; durationMs: number; timestamp?: string },
+  meta: { taskId: string; knight: string; durationMs: number; timestamp?: string; parsed?: ParsedTask },
 ): ResultPayload {
   return {
     task_id: meta.taskId,
@@ -40,6 +40,7 @@ export function buildResultPayload(
     ...(result.prs ? { prs: result.prs } : {}),
     ...(result.verdict ? { verdict: result.verdict } : {}),
     ...(result.refused ? { refused: result.refused } : {}),
+    ...taskResultFields(meta.parsed, result.success),
     timestamp: meta.timestamp ?? new Date().toISOString(),
   };
 }

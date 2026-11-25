@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -127,7 +127,8 @@ async function main(): Promise<void> {
     // Skills may have changed (git-sync): re-read and re-register the service if so.
     // Not awaited: the slot must be counted synchronously so the next fetch sees it.
     void knightService?.refreshSkills();
-    const { task: taskText, taskId, runId, model, chainName, stepName, timestamp } = delivery.task;
+    const { taskId, runId, model, chainName, stepName, timestamp, attempt } = delivery.task;
+    const taskText = promptWithRetryContext(delivery.task);
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
     let slot = 0;
     while (usedSlots.has(slot)) slot++;
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
       stepName,
       model: model ?? config.knightModel,
       slot,
+      attempt,
       concurrency: config.maxConcurrentTasks,
       ...(Number.isFinite(sentAt) ? { queuedFor: Math.max(0, Date.now() - sentAt) } : {}),
       content: config.activityContent,
@@ -167,7 +169,7 @@ async function main(): Promise<void> {
       const durationMs = Date.now() - startTime;
 
       activity.finished({ success: result.success, error: result.error, cost: result.cost, tokens: result.tokens });
-      await publishResult(taskId, buildResultPayload(result, { taskId, knight: config.knightName, durationMs }));
+      await publishResult(taskId, buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }));
 
       // Token/cost are recorded regardless — a no-output task still spent them. Only the
       // task-outcome counter reflects the honest success/failure. (#31)
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
 
       await publishResult(taskId, buildResultPayload(
         failedTaskResult(errMsg, config.knightModel),
-        { taskId, knight: config.knightName, durationMs },
+        { taskId, knight: config.knightName, durationMs, parsed: delivery.task },
       )).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
       metrics.tasksTotal.labels("error").inc();
@@ -216,7 +218,7 @@ async function main(): Promise<void> {
     },
     onLost: async (parsed) => {
       metrics.recordLostTask();
-      await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel }));
+      await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel, parsed }));
     },
     // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
     onInvalid: async (parsed) => {

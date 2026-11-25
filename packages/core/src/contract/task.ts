@@ -1,3 +1,4 @@
+import type { TaskResult } from "./schema.js";
 import { taskPayloadErrors } from "./validate.js";
 
 /**
@@ -29,6 +30,8 @@ export interface ParsedTask {
   attempt?: number;
   /** The task ID a manual retry re-runs. */
   retryOf?: string;
+  /** Why the earlier attempt failed (manual retry), capped at 2 KB. */
+  previousFailure?: string;
   /**
    * Set when a JSON payload does not match the TaskPayload schema: one `<field>: <problem>`
    * line per error, joined with "; ". The task must not run; answer it with a failure
@@ -99,5 +102,64 @@ export function parseTask(raw: string, subjectTaskId: string): ParsedTask {
     publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : undefined,
     attempt: json.attempt,
     retryOf: json.retryOf || undefined,
+    previousFailure: normalizePreviousFailure(json.previousFailure),
+  };
+}
+
+const MAX_PREVIOUS_FAILURE = 2048;
+/** Cap on the task text echoed in a failure result. */
+export const MAX_ECHOED_TASK_BYTES = 64 * 1024;
+
+function normalizePreviousFailure(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.slice(0, MAX_PREVIOUS_FAILURE) : undefined;
+}
+
+/** Cut text to at most `maxBytes` of UTF-8 without leaving a broken character at the end. */
+function capBytes(text: string, maxBytes: number): string {
+  const buf = Buffer.from(text, "utf8");
+  if (buf.length <= maxBytes) return text;
+  return buf.subarray(0, maxBytes).toString("utf8").replace(/\uFFFD+$/, "");
+}
+
+/**
+ * The prompt to run: for a manual retry (`attempt` > 1) the task text is prefixed with a
+ * request to check what the earlier attempt already did. Other tasks are unchanged.
+ */
+export function promptWithRetryContext(task: Pick<ParsedTask, "task" | "attempt" | "retryOf" | "previousFailure">): string {
+  if (!task.attempt || task.attempt <= 1) return task.task;
+  return (
+    `This is attempt ${task.attempt} of a task that did not finish before ` +
+    `(original task \`${task.retryOf ?? "unknown"}\`; previous outcome: \`${task.previousFailure ?? "unknown"}\`). ` +
+    "Before doing anything, check what the earlier attempt already did (files, branches, pull requests, messages, notes) " +
+    `and continue from there instead of repeating it.\n\n${task.task}`
+  );
+}
+
+/**
+ * Fields a result carries for a task: `attempt` and `retry_of` when set, and on a failure
+ * the original task as `task` (the dead-letter capture reads it from there, because the
+ * task message is acked and gone by then).
+ */
+export function taskResultFields(
+  parsed: ParsedTask | undefined,
+  success: boolean,
+): Pick<TaskResult, "attempt" | "retry_of" | "task"> {
+  if (!parsed) return {};
+  return {
+    ...(parsed.attempt ? { attempt: parsed.attempt } : {}),
+    ...(parsed.retryOf ? { retry_of: parsed.retryOf } : {}),
+    ...(success
+      ? {}
+      : {
+          task: {
+            taskId: parsed.taskId,
+            task: capBytes(parsed.task ?? "", MAX_ECHOED_TASK_BYTES),
+            ...(parsed.runId ? { runId: parsed.runId } : {}),
+            ...(parsed.chainName ? { chainName: parsed.chainName } : {}),
+            ...(parsed.stepName ? { stepName: parsed.stepName } : {}),
+            ...(parsed.model ? { model: parsed.model } : {}),
+            ...(parsed.attempt ? { attempt: parsed.attempt } : {}),
+          },
+        }),
   };
 }

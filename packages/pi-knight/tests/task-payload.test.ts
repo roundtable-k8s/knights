@@ -93,3 +93,16 @@ test("fixture result.refused-credits: a thrown 402 publishes refused credits", (
 test("fixture result.lost: the lost-task result matches", () => {
   assert.deepEqual(resultFixtureDiff(lostTaskResult({ taskId: "t-1", knight: "galahad", model: "claude-opus-5-5", timestamp: fx.timestamp }), "result.lost"), []);
 });
+
+test("retry attempt: result carries attempt/retry_of; failure carries the task, success does not (#36)", () => {
+  const parsed = { task: "Do it", taskId: "t1", attempt: 2, retryOf: "t0" };
+  const fail = buildResultPayload(base, { ...meta, parsed });
+  assert.equal(fail.attempt, 2);
+  assert.equal(fail.retry_of, "t0");
+  assert.equal(fail.task?.task, "Do it");
+  const ok = buildResultPayload({ ...base, success: true }, { ...meta, parsed });
+  assert.equal(ok.attempt, 2);
+  assert.ok(!("task" in ok));
+  const first = buildResultPayload({ ...base, success: true }, { ...meta, parsed: { task: "x", taskId: "t1" } });
+  assert.ok(!("attempt" in first) && !("retry_of" in first));
+});

@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -143,6 +143,7 @@ export async function main(): Promise<void> {
       runId: parsed.runId,
       chainName: parsed.chainName,
       stepName: parsed.stepName,
+      attempt: parsed.attempt,
       model: parsed.model ?? config.claudeModel,
       slot: activeCount,
       concurrency: config.maxConcurrentTasks,
@@ -170,7 +171,7 @@ export async function main(): Promise<void> {
           : { blocked: false };
       const outcome = reserve.blocked
         ? null
-        : await executeTask(parsed.task, parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
+        : await executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
 
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
@@ -183,6 +184,7 @@ export async function main(): Promise<void> {
             taskId: parsed.taskId,
             knight: config.knightName,
             durationMs: Date.now() - started,
+            parsed,
           }),
         );
         return;
@@ -190,7 +192,7 @@ export async function main(): Promise<void> {
 
       const durationMs = Date.now() - started;
       activity.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
-      await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs }));
+      await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }));
 
       metrics.tasksTotal.labels(outcome.success ? "success" : "error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
@@ -204,7 +206,7 @@ export async function main(): Promise<void> {
       activity.finished({ success: false, error: errMsg, errorClass: "internal", cost: 0 });
       await publishResult(
         parsed.taskId,
-        buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs }),
+        buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }),
       ).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
       metrics.tasksTotal.labels("error").inc();
@@ -236,7 +238,7 @@ export async function main(): Promise<void> {
       metrics.recordLostTask();
       const model = config.claudeModel ?? "claude-code-default";
       await publishResult(parsed.taskId, {
-        ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model }),
+        ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model, parsed }),
         ...runtimeFields(config),
       });
     },

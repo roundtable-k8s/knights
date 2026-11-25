@@ -195,7 +195,12 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
       msg.ack();
       return;
     }
-    log.info("Task received", { taskId: parsed.taskId, subject });
+    log.info("Task received", {
+      taskId: parsed.taskId,
+      subject,
+      ...(parsed.attempt ? { attempt: parsed.attempt } : {}),
+      ...(parsed.retryOf ? { retryOf: parsed.retryOf } : {}),
+    });
     opts.onTask({ task: parsed, working: () => msg.working(), ack: () => msg.ack() });
   }
 
