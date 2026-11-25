@@ -20,7 +20,7 @@ import { loadConfig, type KnightConfig } from "../src/config.js";
 import { buildCliInvocation, type CliInvocation, parseStreamLine, shellQuote } from "../src/cli-runner.js";
 import { DISALLOWED_TOOLS, taskWorkDir, executeTask, getRecentTasks, resetKnightState } from "../src/knight.js";
 import { checkReserve, resetPlanLimits } from "../src/plan-limits.js";
-import { registry } from "../src/metrics.js";
+import { registry } from "../src/runtime-metrics.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const FAKE = join(here, "helpers", "fake-claude.mjs");

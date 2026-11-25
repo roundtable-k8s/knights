@@ -23,7 +23,7 @@ import { executeTask, resetKnightState, type ExecuteOverrides } from "../src/kni
 import { handleIntrospect as coreIntrospect, type IntrospectRequest } from "@roundtable/knight-core";
 import { introspectOptions } from "../src/session-source.js";
 const handleIntrospect = (req: IntrospectRequest, cfg: KnightConfig) => coreIntrospect(req, introspectOptions(cfg));
-import { registry } from "../src/metrics.js";
+import { registry } from "../src/runtime-metrics.js";
 import { startMockAnthropic, type MockAnthropic } from "./helpers/mock-anthropic.js";
 
 function bundledClaude(): string | undefined {

@@ -2,13 +2,11 @@ import { basename } from "node:path";
 import { hostname } from "node:os";
 import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
-import { createShutdown, installSignalHandlers } from "./drain.js";
-import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
-import * as metrics from "./metrics.js";
+import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
+import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -61,7 +59,18 @@ export async function main(): Promise<void> {
     log.warn("spec.model is not a Claude model — using Claude Code's default model", { specModel: config.knightModel });
   }
 
-  startHealthServer(config);
+  startHealthServer({
+    knightName: config.knightName,
+    port: config.metricsPort,
+    registry: metrics.registry,
+    readyExtras: () => ({
+      model: config.claudeModel ?? "claude-code-default",
+      runtime: "claude-knight",
+      claudeRuntime: config.runtime,
+      billing: config.authMode,
+    }),
+    routes: { "/introspect": (url) => handleIntrospect(introspectRequestFromQuery(url.searchParams), introspectOptions(config)) },
+  });
 
   // A missing credential can only be fixed by changing the Secret, which restarts
   // the pod. Stay up and degraded (readiness 503 with the reason) and do NOT bind

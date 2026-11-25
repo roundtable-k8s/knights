@@ -1,4 +1,4 @@
-import { log } from "@roundtable/knight-core";
+import { log } from "./logger.js";
 
 export interface DrainOptions {
   /** Tasks currently executing. */
@@ -38,6 +38,12 @@ export interface ShutdownDeps {
   pollMs?: number;
   /** Close NATS after flushing pending publishes. */
   drainNats(): Promise<void>;
+  /**
+   * Forced path only (tasks still running at the deadline): abort them, e.g. dispose sessions.
+   * Aborted tasks then get `abortGraceMs` to publish their failure result before NATS is drained.
+   */
+  abortInflight?(): void;
+  abortGraceMs?: number;
   /** Final teardown after NATS is drained (metrics, health server). */
   cleanup?(): Promise<void> | void;
   exit(code: number): void;
@@ -57,7 +63,19 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
     deps.setDraining(true);
     await deps.stopPulling();
     const left = await waitForInflight({ getActive: deps.getActive, maxWaitMs: deps.maxWaitMs, pollMs: deps.pollMs });
-    if (left > 0) log.warn("Forcing shutdown with active tasks", { activeCount: left });
+    if (left > 0) {
+      log.warn("Forcing shutdown with active tasks", { activeCount: left });
+      if (deps.abortInflight) {
+        deps.abortInflight();
+        // Let the aborted tasks' catch-branch publish their failure result before nc.drain()/exit.
+        const stuck = await waitForInflight({
+          getActive: deps.getActive,
+          maxWaitMs: deps.abortGraceMs ?? 5000,
+          pollMs: deps.pollMs,
+        });
+        if (stuck > 0) log.warn("Aborted tasks did not finish in time", { activeCount: stuck });
+      }
+    }
     await deps.drainNats().catch((e) => log.error("NATS drain error", { error: String(e) }));
     await deps.cleanup?.();
     log.info("Shutdown complete");
