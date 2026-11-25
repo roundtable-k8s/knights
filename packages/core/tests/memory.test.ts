@@ -59,3 +59,21 @@ test("writeFileAtomic replaces the file and leaves no temp file", () => {
   assert.deepEqual(readdirSync(d), ["MEMORY.md"]);
   assert.ok(existsSync(f));
 });
+
+test("writeFileAtomic: a failure between write and rename leaves the previous file intact and no temp file", () => {
+  const d = tmp();
+  const f = join(d, "current.md");
+  writeFileAtomic(f, "old");
+  assert.throws(
+    () =>
+      writeFileAtomic(f, "new", {
+        write: (p, data) => writeFileSync(p, data),
+        rename: () => {
+          throw new Error("crash before rename");
+        },
+      }),
+    /crash before rename/,
+  );
+  assert.equal(readFileSync(f, "utf8"), "old");
+  assert.deepEqual(readdirSync(d), ["current.md"]);
+});

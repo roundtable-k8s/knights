@@ -8,11 +8,11 @@
  *
  * Inspired by Claude Code's session memory template and Anthropic's context engineering blog.
  */
-import { writeFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { dataPaths, type KnightConfig } from "./config.js";
-import { log } from "@roundtable/knight-core";
+import { log, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
 
@@ -74,8 +74,26 @@ export function setupCompactionHook(session: AgentSession, config: KnightConfig)
 
 // ─── Session Notes ──────────────────────────────────────────────
 
+// Per-path promise chains: read-modify-write of a notes file must not interleave within this process.
+const WORKLOG_MAX_ENTRIES = 50;
+const notesLocks = new Map<string, Promise<unknown>>();
+
+/** Run `fn` after every earlier call for the same `key` has settled (failures do not block the queue). */
+function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = notesLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.catch(() => undefined);
+  notesLocks.set(key, tail);
+  void tail.then(() => {
+    if (notesLocks.get(key) === tail) notesLocks.delete(key);
+  });
+  return run;
+}
+
 /**
  * Update session notes after each task.
+ *
+ * Serialised per file (concurrent tasks) and written atomically (temp file + rename).
  *
  * This is the "short-term memory" layer — a structured file that persists
  * across context compaction. The "Current State" section is critical because
@@ -87,6 +105,16 @@ export async function updateSessionNotes(
   knightName: string,
   task: string,
   result: string,
+  fsOps?: AtomicFsOps,
+): Promise<void> {
+  return withLock(SESSION_NOTES_FILE(), () => updateSessionNotesLocked(knightName, task, result, fsOps));
+}
+
+async function updateSessionNotesLocked(
+  knightName: string,
+  task: string,
+  result: string,
+  fsOps?: AtomicFsOps,
 ): Promise<void> {
   // Ensure directories exist
   await ensureDir(SESSION_NOTES_DIR());
@@ -107,6 +135,11 @@ export async function updateSessionNotes(
   // Extract existing sections to preserve non-current-state content
   const previousLearnings = extractSection(existing, "Learnings");
   const previousErrors = extractSection(existing, "Errors & Corrections");
+  // Worklog accumulates (bounded) so that every task's entry survives; lost updates would drop lines here.
+  const previousWorklog = extractSection(existing, "Worklog").split("\n").filter((l) => l.startsWith("- "));
+  const worklog = [...previousWorklog, `- ${now}: ${taskPreview.split("\n")[0].slice(0, 80)} → result (${result.length} chars)`]
+    .slice(-WORKLOG_MAX_ENTRIES)
+    .join("\n");
 
   const notes = `# Current State
 _Last updated: ${now}_
@@ -132,10 +165,10 @@ ${previousLearnings || "_None recorded yet._"}
 ${resultPreview}
 
 # Worklog
-- ${now}: Executed task, produced result (${result.length} chars)
+${worklog}
 `;
 
-  await writeFile(SESSION_NOTES_FILE(), notes, "utf-8");
+  writeFileAtomic(SESSION_NOTES_FILE(), notes, fsOps);
   log.debug("Session notes updated", {
     knight: knightName,
     file: SESSION_NOTES_FILE(),
@@ -158,7 +191,7 @@ async function ensureDir(dir: string): Promise<void> {
  */
 function extractSection(markdown: string, sectionName: string): string {
   const pattern = new RegExp(
-    `^#\\s+${sectionName}\\s*\\n([\\s\\S]*?)(?=^#\\s+|$)`,
+    `^#\\s+${sectionName}\\s*\\n([\\s\\S]*?)(?=^#\\s+|(?![\\s\\S]))`,
     "m"
   );
   const match = markdown.match(pattern);

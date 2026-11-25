@@ -121,6 +121,7 @@ else running Roundtable brings their own token. Check Anthropic's current terms 
 Set by the operator (same as pi-knight): `KNIGHT_NAME`, `KNIGHT_MODEL`, `SUBSCRIBE_TOPICS`, `NATS_URL`,
 `NATS_TASKS_STREAM`, `NATS_RESULTS_STREAM`, `NATS_RESULTS_PREFIX`, `MAX_CONCURRENT_TASKS`, `TASK_TIMEOUT_MS`,
 `METRICS_PORT`, `LOG_LEVEL`.
+`MAX_CONCURRENT_TASKS` defaults to `1` when unset, the same default as pi-knight (shared in `@roundtable/knight-core`).
 
 Set through the Knight's `spec.env` / `spec.envFrom`:
 

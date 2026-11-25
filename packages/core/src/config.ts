@@ -90,8 +90,11 @@ export function parseTopics(raw: string): string[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+/** Default MAX_CONCURRENT_TASKS when the variable is unset; shared by every runtime. The operator always sets it explicitly. */
+export const DEFAULT_MAX_CONCURRENT_TASKS = 1;
+
 /** MAX_CONCURRENT_TASKS, never below 1 so the pull loop cannot stall on 0, negative or NaN. */
-export function maxConcurrentTasks(env: Env, fallback: number): number {
+export function maxConcurrentTasks(env: Env, fallback: number = DEFAULT_MAX_CONCURRENT_TASKS): number {
   const raw = env["MAX_CONCURRENT_TASKS"];
   if (raw == null || raw.trim() === "") return fallback;
   const n = strictNumber(raw);

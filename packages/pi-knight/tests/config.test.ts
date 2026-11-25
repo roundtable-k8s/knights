@@ -15,7 +15,7 @@ test("pi-knight config defaults", () => {
   assert.equal(c.natsResultsPrefix, "fleet-a.results");
   assert.equal(c.taskTimeoutMs, 1_800_000);
   assert.equal(c.drainTimeoutMs, 1_860_000);
-  assert.equal(c.maxConcurrentTasks, 2);
+  assert.equal(c.maxConcurrentTasks, 1);
   assert.equal(c.metricsPort, 3000);
   assert.equal(c.logLevel, "info");
   assert.equal(c.thinkingLevel, "off");

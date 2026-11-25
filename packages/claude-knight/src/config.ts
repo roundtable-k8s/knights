@@ -113,7 +113,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
     // The operator always sets this from spec.concurrency (CRD default 2). Set
     // concurrency: 1 on claude-knights unless the plan has headroom to spare.
-    maxConcurrentTasks: maxConcurrentTasks(env, 1),
+    maxConcurrentTasks: maxConcurrentTasks(env),
     hostname: os.hostname(),
     podName: env["POD_NAME"] || os.hostname(),
     nodeName: env["NODE_NAME"] || os.hostname(),
