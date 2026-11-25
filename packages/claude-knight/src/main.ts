@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -95,6 +95,29 @@ export async function main(): Promise<void> {
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
 
   let activeCount = 0;
+  // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
+  // Discovery only: tasks stay on JetStream.
+  let knightService: KnightService | null = null;
+  const nc = getConnection();
+  if (nc) {
+    knightService = await startKnightService({
+      nc,
+      knightName: config.knightName,
+      table: tableName(process.env, config),
+      domain: domainFromTopics(config.subscribeTopics),
+      model: config.claudeModel ?? "claude-code-default",
+      runtime: "claude-knight",
+      version: readPackageVersion(import.meta.url),
+      pod: config.podName,
+      skillsDir: config.skillsDir,
+      maxConcurrentTasks: config.maxConcurrentTasks,
+      getActive: () => activeCount,
+      getCounts: () => countsFromMetrics(metrics.tasksTotal, config.knightName),
+    }).catch((e) => {
+      log.warn("NATS micro service registration failed", { error: String(e) });
+      return null;
+    });
+  }
   let shuttingDown = false;
   let puller: Awaited<ReturnType<typeof subscribe>> | null = null;
 
@@ -106,6 +129,9 @@ export async function main(): Promise<void> {
 
   async function processTask(delivery: TaskDelivery): Promise<void> {
     const parsed = delivery.task;
+    // Skills may have changed (git-sync): re-read and re-register the service if so.
+    // Not awaited: the slot must be counted synchronously so the next fetch sees it.
+    void knightService?.refreshSkills();
     // Keep the message un-acked but alive while the task runs; ack only when it finishes.
     const started = Date.now();
     const activity = new TaskActivity({
@@ -188,6 +214,7 @@ export async function main(): Promise<void> {
       clearTimeout(timer);
       clearInterval(heartbeat);
       activity.close();
+      knightService?.markTaskFinished();
       delivery.ack();
       setActive(activeCount - 1);
       puller?.wake();
@@ -230,6 +257,7 @@ export async function main(): Promise<void> {
       shuttingDown = d; // freeSlots() -> 0: no new fetches
       setDraining(d);
     },
+    stopService: () => knightService?.stop(),
     stopPulling: async () => void (await puller?.stop()),
     getActive: () => activeCount,
     maxWaitMs: config.drainTimeoutMs,

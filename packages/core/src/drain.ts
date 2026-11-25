@@ -31,6 +31,8 @@ export async function waitForInflight(opts: DrainOptions): Promise<number> {
 export interface ShutdownDeps {
   /** /ready -> 503 so the pod leaves Service endpoints. */
   setDraining(draining: boolean): void;
+  /** Leave NATS micro service discovery ($SRV.PING) before anything else, so a stopping pod drops out at once. */
+  stopService?(): Promise<void> | void;
   /** Stop fetching new tasks (resolves once the pull loop has ended). */
   stopPulling(): Promise<void>;
   getActive(): number;
@@ -50,7 +52,7 @@ export interface ShutdownDeps {
 }
 
 /**
- * The shutdown sequence: setDraining → stop fetching → wait for in-flight → drain NATS → cleanup → exit.
+ * The shutdown sequence: setDraining → stop service → stop fetching → wait for in-flight → drain NATS → cleanup → exit.
  * Idempotent: a second signal while shutting down is ignored. This is the one function the
  * SIGTERM/SIGINT handlers call, and the one the tests exercise.
  */
@@ -61,6 +63,7 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
     shuttingDown = true;
     log.info("Shutdown signal received — draining", { signal, activeCount: deps.getActive() });
     deps.setDraining(true);
+    await Promise.resolve(deps.stopService?.()).catch((e) => log.error("Service stop error", { error: String(e) }));
     await deps.stopPulling();
     const left = await waitForInflight({ getActive: deps.getActive, maxWaitMs: deps.maxWaitMs, pollMs: deps.pollMs });
     if (left > 0) {

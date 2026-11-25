@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -87,10 +87,34 @@ async function main(): Promise<void> {
   // Start introspection responder (zero-cost session queries)
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
 
+  // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
+  // Discovery only: tasks stay on JetStream.
+  let activeCount = 0;
+  let knightService: KnightService | null = null;
+  const nc = getConnection();
+  if (nc) {
+    knightService = await startKnightService({
+      nc,
+      knightName: config.knightName,
+      table: tableName(process.env, config),
+      domain: domainFromTopics(config.subscribeTopics),
+      model: config.knightModel,
+      runtime: "pi-knight",
+      version: readPackageVersion(import.meta.url),
+      pod: config.hostname,
+      skillsDir: "/skills",
+      maxConcurrentTasks: config.maxConcurrentTasks,
+      getActive: () => activeCount,
+      getCounts: () => countsFromMetrics(metrics.tasksTotal, config.knightName),
+    }).catch((e) => {
+      log.warn("NATS micro service registration failed", { error: String(e) });
+      return null;
+    });
+  }
+
   // Subscribe to task stream
 
   // Task execution state
-  let activeCount = 0;
   let puller: Awaited<ReturnType<typeof subscribe>> | null = null;
   let shuttingDown = false;
   // Concurrency slots (0-based) in use, reported on task.started.
@@ -98,6 +122,9 @@ async function main(): Promise<void> {
 
   // Process a single task
   async function processTask(delivery: TaskDelivery): Promise<void> {
+    // Skills may have changed (git-sync): re-read and re-register the service if so.
+    // Not awaited: the slot must be counted synchronously so the next fetch sees it.
+    void knightService?.refreshSkills();
     const { task: taskText, taskId, runId, model, chainName, stepName, timestamp } = delivery.task;
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
     let slot = 0;
@@ -164,6 +191,7 @@ async function main(): Promise<void> {
       clearTimeout(timeout);
       clearInterval(heartbeat);
       activity.close();
+      knightService?.markTaskFinished();
       usedSlots.delete(slot);
       delivery.ack();
       activeCount--;
@@ -207,6 +235,7 @@ async function main(): Promise<void> {
       shuttingDown = d; // freeSlots() -> 0: no new fetches
       setDraining(d);
     },
+    stopService: () => knightService?.stop(),
     stopPulling: async () => void (await puller?.stop()),
     getActive: () => activeCount,
     maxWaitMs: config.drainTimeoutMs,

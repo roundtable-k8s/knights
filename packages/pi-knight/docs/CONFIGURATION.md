@@ -99,6 +99,20 @@ temp file and rename.
 | `METRICS_PORT` | Health/metrics HTTP port | `3000` |
 | `LOG_LEVEL` | Log verbosity (debug/info/warn/error) | `info` |
 
+## Fleet discovery (NATS micro service)
+
+Every knight pod (pi-knight and claude-knight) registers as the NATS micro service `roundtable-knight`, so liveness, skills and load are visible without Kubernetes access. It is for discovery and health only: tasks still arrive over JetStream, and the service takes none.
+
+```bash
+nats micro ls roundtable-knight      # who is alive (one row per pod)
+nats micro info roundtable-knight    # metadata per pod
+nats micro stats roundtable-knight   # load per pod
+```
+
+`$SRV.PING`, `$SRV.INFO` and `$SRV.STATS` (all `.roundtable-knight`) work too. INFO metadata (all strings): `table`, `knight`, `domain`, `model`, `runtime`, `pod`, and `skills`, a JSON array of `{name, description, category}` read from the `SKILL.md` frontmatter under `/skills` (capped at 8 KB; descriptions are truncated first). The table is `ROUNDTABLE_TABLE`, falling back to the NATS prefix. The skill list is re-read before each task and the service re-registered when it changed.
+
+STATS returns `{activeTasks, maxConcurrentTasks, tasksTotal, tasksFailed, lastTaskAt}`. A read-only request endpoint on `$RT.<table>.<knight>.card` returns the INFO metadata. On SIGTERM the service stops first, so a draining pod drops out of PING at once.
+
 ## Skill Filtering
 
 Skill filtering is managed at the **deployment layer**, not in pi-knight code:
