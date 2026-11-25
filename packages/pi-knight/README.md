@@ -104,4 +104,9 @@ leaves Service endpoints, and in-flight tasks keep heartbeating until they publi
 It then exits. The wait is bounded by `DRAIN_TIMEOUT_MS` (default `TASK_TIMEOUT_MS` + 60s, matching the
 operator's `terminationGracePeriodSeconds`); the kubelet SIGKILLs after the pod grace period regardless.
 
+A `SIGTERM` during start-up (before the knight logs it is ready) does not wait for anything: the
+entrypoint exits at once if it is still in its start-up phases, and the runtime, once running, closes
+what it has opened and exits 0 without subscribing, so it never takes a task it would lose at the end
+of the grace period.
+
 A task can set its own `timeoutMs` (`timeout_ms` in the NATS metadata), which overrides `TASK_TIMEOUT_MS` for that task only. A task whose override is longer than `DRAIN_TIMEOUT_MS` can outlive the drain bound. At the deadline the knight aborts still-running tasks and gives them a short grace period to publish a failure result, but the kubelet SIGKILL at the pod grace period can arrive first, in which case that result is never published.

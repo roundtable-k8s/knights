@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -31,6 +31,7 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
       log.info("Skills available", { count: names.length, names });
       return names.length;
     }
+    if (attempt === 0) log.info("No skills found yet, waiting for git-sync", { skillsDir: config.skillsDir });
     if (attempt < 19) await sleep(3000);
   }
   log.warn("No skills found after waiting for git-sync — continuing without", { skillsDir: config.skillsDir });
@@ -40,7 +41,19 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
 export async function main(): Promise<void> {
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
-  const telemetry = await startTelemetry({ service: "claude-knight", knight: config.knightName, table: config.table });
+  // Signal handlers before any network call: a pod deleted during start-up exits now
+  // (closing what is open) instead of starting up and taking tasks (see startup-signals.ts).
+  // eslint-disable-next-line prefer-const -- the start-up handlers close it, and can run before it is assigned
+  let telemetry: Awaited<ReturnType<typeof startTelemetry>> | undefined;
+  const signals = installStartupSignalHandlers({
+    cleanup: async () => {
+      await drain().catch((e) => log.error("NATS drain error", { error: String(e) }));
+      await stopHealthServer();
+      await telemetry?.shutdown();
+    },
+    exit: (code) => process.exit(code),
+  });
+  telemetry = await startTelemetry({ service: "claude-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir, dataDir: config.workDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
   // Introspect in this process reads the same config dir the Claude Code child
@@ -85,7 +98,7 @@ export async function main(): Promise<void> {
     const reason = auth.ok ? `runtime: ${runtimeProblem}` : `auth: ${auth.reason}`;
     log.error("Startup check failed — knight will stay degraded", { reason });
     setDegradedReason(reason);
-    await new Promise(() => {}); // park; SIGTERM still exits via default handler
+    await new Promise(() => {}); // park; SIGTERM exits via the start-up signal handlers
   }
 
   configureTools(config.knightName, config.natsResultsPrefix);
@@ -234,9 +247,36 @@ export async function main(): Promise<void> {
     }
   }
 
+  const shutdown = createShutdown({
+    setDraining: (d) => {
+      shuttingDown = d; // freeSlots() -> 0: no new fetches
+      setDraining(d);
+    },
+    stopService: () => knightService?.stop(),
+    stopPulling: async () => void (await puller?.stop()),
+    getActive: () => activeCount,
+    maxWaitMs: config.drainTimeoutMs,
+    // Grace period over with tasks still running: abort them so each publishes a failure
+    // result (and acks) before exit, instead of being dead-lettered as lost later.
+    abortInflight: () => {
+      for (const c of inflight) c.abort();
+    },
+    drainNats: drain,
+    cleanup: async () => {
+      metrics.natsConnected.labels().set(0);
+      await stopHealthServer();
+      await telemetry?.shutdown();
+    },
+    exit: (code) => process.exit(code),
+  });
+  // Ready: later signals run the full shutdown above. If one came during start-up the
+  // start-up exit is already running: do not start the pull loop.
+  if (!signals.ready(shutdown)) return;
+
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {
-    freeSlots: () => (shuttingDown ? 0 : config.maxConcurrentTasks - activeCount),
+    // Guard: never fetch once a termination was requested, even one that came during start-up.
+    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeCount),
     accept: (parsed) => {
       const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
       if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId });
@@ -264,30 +304,6 @@ export async function main(): Promise<void> {
       });
     },
   });
-
-  const shutdown = createShutdown({
-    setDraining: (d) => {
-      shuttingDown = d; // freeSlots() -> 0: no new fetches
-      setDraining(d);
-    },
-    stopService: () => knightService?.stop(),
-    stopPulling: async () => void (await puller?.stop()),
-    getActive: () => activeCount,
-    maxWaitMs: config.drainTimeoutMs,
-    // Grace period over with tasks still running: abort them so each publishes a failure
-    // result (and acks) before exit, instead of being dead-lettered as lost later.
-    abortInflight: () => {
-      for (const c of inflight) c.abort();
-    },
-    drainNats: drain,
-    cleanup: async () => {
-      metrics.natsConnected.labels().set(0);
-      await stopHealthServer();
-      await telemetry.shutdown();
-    },
-    exit: (code) => process.exit(code),
-  });
-  installSignalHandlers(shutdown);
 
   log.info("Claude-Knight ready");
 }

@@ -13,6 +13,11 @@
 #   /data  → PVC (workspace, memory, mise tools)
 #   /config → ConfigMap (SOUL.md, flake.nix, etc.)
 
+# First statement: trap SIGTERM/SIGINT so a pod deleted during start-up exits
+# at once instead of starting the knight (see startup-signals.sh).
+# shellcheck source=../../core/scripts/startup-signals.sh
+. "$(dirname "$0")/startup-signals.sh"
+
 set -eo pipefail
 
 log() { echo "[entrypoint] $(date '+%H:%M:%S') $*"; }
@@ -97,8 +102,8 @@ if [ -d /nix ] && [ ! -w /nix ]; then
     log "Phase 2: Shared Nix store mounted but no profile at $KNIGHT_NIX_PROFILE yet (build pending)"
   fi
 elif [ -d /nix ] && [ -w /nix ]; then
-  rt_bootstrap_nix
-  rt_restore_profile
+  rt_run rt_bootstrap_nix
+  rt_run rt_restore_profile
   if rt_source_nix; then
     log "Phase 2: Nix ready — $(nix --version 2>/dev/null || echo 'binary found')"
   fi
@@ -138,8 +143,9 @@ elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
     cp "$FLAKE_FILE" "$BUILD_DIR/flake.nix"
     cd "$BUILD_DIR"
 
-    if STORE_PATH=$(nix build ".#default" --no-link --print-out-paths 2>&1); then
-      STORE_PATH=$(echo "$STORE_PATH" | tail -1)
+    BUILD_OUT="$BUILD_DIR.out"
+    if rt_run nix build ".#default" --no-link --print-out-paths >"$BUILD_OUT" 2>&1; then
+      STORE_PATH=$(tail -1 "$BUILD_OUT")
       if [ -d "$STORE_PATH" ]; then
         chmod -R u+w "$NIX_ENV" 2>/dev/null || true
         rm -rf "$NIX_ENV" 2>/dev/null || true
@@ -151,10 +157,10 @@ elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
       fi
     else
       log "  WARNING: Nix flake build failed (non-fatal):"
-      echo "$STORE_PATH" | tail -5
+      tail -5 "$BUILD_OUT"
     fi
 
-    rm -rf "$BUILD_DIR"
+    rm -rf "$BUILD_DIR" "$BUILD_OUT"
     cd /app
   fi
 else
@@ -166,7 +172,8 @@ fi
 # ──────────────────────────────────────────────────────────────────
 if [ -f /config/mise.toml ] && command -v mise >/dev/null 2>&1; then
   log "Phase 4: Mise tools"
-  /app/scripts/mise-init.sh 2>&1 | sed 's/^/  /' || log "  WARNING: mise init failed (non-fatal)"
+  rt_mise() { /app/scripts/mise-init.sh 2>&1 | sed 's/^/  /'; }
+  rt_run rt_mise || log "  WARNING: mise init failed (non-fatal)"
 else
   log "Phase 4: No mise config — skipping"
 fi
@@ -205,6 +212,9 @@ fi
 
 # Phase 5: Start the knight
 # ──────────────────────────────────────────────────────────────────
+# exec: the runtime replaces this shell as PID 1 and gets SIGTERM directly; it
+# installs its own handlers first thing (a signal before it is ready means it
+# exits without taking a task). exec resets the start-up traps to the default.
 # Set PATH with tool priority
 export PATH="/data/nix-env/bin:/data/bin:/data/.mise/shims:/app/.mise/shims:$PATH"
 # The gh shim goes first so every gh call (including the agent's Bash tool)
