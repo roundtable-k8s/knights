@@ -428,17 +428,28 @@ test("a failed usage probe keeps the old reading", async () => {
 test("buildChildEnv passes the active task span to the child as TRACEPARENT", async () => {
   const { startTelemetry, withTaskSpan } = await import("@roundtable/knight-core");
   const { InMemorySpanExporter, SimpleSpanProcessor } = await import("@opentelemetry/sdk-trace-base");
-  assert.equal(buildChildEnv("api", {}, {})["TRACEPARENT"], undefined);
-  const t = await startTelemetry({
-    service: "claude-knight",
-    knight: "k",
-    env: { OTEL_TRACES_EXPORTER: "otlp" },
-    spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
-  });
+  // The NodeSDK reads process.env, so clear ambient OTEL_* (knight pods set OTEL_SDK_DISABLED) for this test only.
+  const ambientOtel = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
+  const clearOtelEnv = () => {
+    for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k];
+  };
+  clearOtelEnv();
   try {
-    const child = await withTaskSpan({ taskId: "t", knight: "k" }, async () => buildChildEnv("api", {}, {}));
-    assert.match(child["TRACEPARENT"] ?? "", /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    assert.equal(buildChildEnv("api", {}, {})["TRACEPARENT"], undefined);
+    const t = await startTelemetry({
+      service: "claude-knight",
+      knight: "k",
+      env: { OTEL_TRACES_EXPORTER: "otlp" },
+      spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
+    });
+    try {
+      const child = await withTaskSpan({ taskId: "t", knight: "k" }, async () => buildChildEnv("api", {}, {}));
+      assert.match(child["TRACEPARENT"] ?? "", /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    } finally {
+      await t.shutdown();
+    }
   } finally {
-    await t.shutdown();
+    clearOtelEnv();
+    Object.assign(process.env, ambientOtel);
   }
 });
