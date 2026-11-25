@@ -10,6 +10,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { createAgentSession, DefaultResourceLoader, defineTool, type AgentSession } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager } from "../model.js";
+import { dataPaths } from "../config.js";
 import { log } from "@roundtable/knight-core";
 import * as metrics from "../runtime-metrics.js";
 
@@ -70,10 +71,11 @@ export const spawnSubagentTool = defineTool({
       // Shared resolution — same model/auth handling as the parent knight.
       const { model, modelRuntime } = await resolveModel(modelStr);
 
-      const settingsManager = createTrustedSettingsManager("/data", "/data");
+      const { dataDir } = dataPaths();
+      const settingsManager = createTrustedSettingsManager(dataDir, dataDir);
       const resourceLoader = new DefaultResourceLoader({
-        cwd: "/data",
-        agentDir: "/data",
+        cwd: dataDir,
+        agentDir: dataDir,
         settingsManager,
         noExtensions: true,
         noThemes: true,
@@ -86,8 +88,8 @@ export const spawnSubagentTool = defineTool({
       ({ session } = await createAgentSession({
         model,
         thinkingLevel,
-        cwd: "/data",
-        agentDir: "/data",
+        cwd: dataDir,
+        agentDir: dataDir,
         modelRuntime,
         settingsManager,
         resourceLoader,

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadConfig } from "../src/config.js";
+import { dataPaths, loadConfig } from "../src/config.js";
 
 const env = { KNIGHT_NAME: "k", SUBSCRIBE_TOPICS: "a.>, b.>" };
 
@@ -46,4 +46,37 @@ test("pi-knight MAX_RETRY_DELAY_MS=0 stays 0 (no cap); invalid values fall back"
   assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "0" }).maxRetryDelayMs, 0);
   assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "-1" }).maxRetryDelayMs, 60000);
   assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "abc" }).maxRetryDelayMs, 60000);
+});
+
+test("data paths: unset KNIGHT_DATA_DIR keeps the /data layout", () => {
+  assert.deepEqual(dataPaths({}), {
+    dataDir: "/data",
+    workRoot: "/data/work",
+    sessionsRoot: "/data/sessions",
+    modelsJson: "/data/models.json",
+  });
+  assert.equal(dataPaths({ KNIGHT_DATA_DIR: "" }).dataDir, "/data");
+});
+
+test("data paths: KNIGHT_DATA_DIR is the default root for work, sessions and models", () => {
+  assert.deepEqual(dataPaths({ KNIGHT_DATA_DIR: "/tmp/k" }), {
+    dataDir: "/tmp/k",
+    workRoot: "/tmp/k/work",
+    sessionsRoot: "/tmp/k/sessions",
+    modelsJson: "/tmp/k/models.json",
+  });
+});
+
+test("data paths: specific overrides take precedence over KNIGHT_DATA_DIR", () => {
+  assert.deepEqual(
+    dataPaths({
+      KNIGHT_DATA_DIR: "/tmp/k",
+      KNIGHT_WORK_ROOT: "/w",
+      KNIGHT_SESSIONS_ROOT: "/s",
+      MODELS_JSON_PATH: "/config/models.json",
+    }),
+    { dataDir: "/tmp/k", workRoot: "/w", sessionsRoot: "/s", modelsJson: "/config/models.json" },
+  );
+  // Empty MODELS_JSON_PATH falls back to the default, as before.
+  assert.equal(dataPaths({ KNIGHT_DATA_DIR: "/tmp/k", MODELS_JSON_PATH: "" }).modelsJson, "/tmp/k/models.json");
 });

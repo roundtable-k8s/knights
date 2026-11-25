@@ -11,10 +11,11 @@
  */
 import { readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { dataPaths } from "./config.js";
 
-// Root of the persisted per-session JSONL files (pi SDK writes under
-// <agentDir>/sessions; knights use agentDir "/data"). Overridable for tests.
-export const SESSIONS_ROOT = process.env.KNIGHT_SESSIONS_ROOT ?? "/data/sessions";
+// Root of the persisted per-session JSONL files (pi SDK writes under <agentDir>/sessions;
+// agentDir is KNIGHT_DATA_DIR). KNIGHT_SESSIONS_ROOT overrides it. Read on each call.
+export const sessionsRoot = (): string => dataPaths().sessionsRoot;
 
 export type RunSessionAction =
   /** Keep using the current session (same run id, or no session yet). */
@@ -64,7 +65,7 @@ export function sessionIdFromFilename(name: string): string {
  * List every persisted session file under `root` (one subdir per cwd), newest
  * first by mtime. Returns [] if the dir doesn't exist yet.
  */
-export async function listSessionFiles(root: string = SESSIONS_ROOT): Promise<SessionFile[]> {
+export async function listSessionFiles(root: string = sessionsRoot()): Promise<SessionFile[]> {
   let dirents;
   try {
     dirents = await readdir(root, { withFileTypes: true });
@@ -132,7 +133,7 @@ export function selectSessionsToPrune(
 export async function pruneSessionFiles(
   policy: RetentionPolicy,
   keep: ReadonlySet<string> = new Set(),
-  root: string = SESSIONS_ROOT,
+  root: string = sessionsRoot(),
   now: number = Date.now(),
 ): Promise<string[]> {
   if (policy.maxFiles <= 0 && policy.maxAgeMs <= 0) return [];

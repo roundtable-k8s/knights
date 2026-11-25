@@ -9,7 +9,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { IntrospectItem, IntrospectOptions, LiveSession, SessionSource } from "@roundtable/knight-core";
 import { findSession, getActiveSession } from "./knight.js";
 import { listInflight, podIdentity } from "@roundtable/knight-core";
-import { listSessionFiles, SESSIONS_ROOT } from "./sessions.js";
+import { listSessionFiles, sessionsRoot } from "./sessions.js";
 import { parseSessionFile, recentItemsForEntry, summarizeEntry, summarizeSession } from "./introspect-format.js";
 import type { KnightConfig } from "./config.js";
 
@@ -54,7 +54,7 @@ function live(session: AgentSession): LiveSession<Entry> {
   };
 }
 
-export function piSessionSource(config: Pick<KnightConfig, "knightModel">, root: string = SESSIONS_ROOT): SessionSource<Entry> {
+export function piSessionSource(config: Pick<KnightConfig, "knightModel">, root: string = sessionsRoot()): SessionSource<Entry> {
   return {
     async listSessions(limit) {
       const files = await listSessionFiles(root);
