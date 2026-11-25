@@ -40,7 +40,7 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
 export async function main(): Promise<void> {
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
-  const telemetry = startTelemetry({ service: "claude-knight", knight: config.knightName, table: config.table });
+  const telemetry = await startTelemetry({ service: "claude-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir, dataDir: config.workDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
   // Introspect in this process reads the same config dir the Claude Code child
@@ -175,7 +175,7 @@ export async function main(): Promise<void> {
       const outcome = reserve.blocked
         ? null
         : await withTaskSpan(
-            { taskId: parsed.taskId, runId: parsed.runId, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel },
+            { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel },
             () => executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model }),
             (o) => ({ success: o.success, cost: o.cost, model: o.model, error: o.error }),
           );

@@ -1,5 +1,5 @@
 import os from "node:os";
-import { activeTraceIds } from "./telemetry.js";
+import { activeTraceIds } from "./trace-context.js";
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 type Level = keyof typeof LEVELS;

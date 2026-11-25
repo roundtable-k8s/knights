@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   scrubAgentEnv();
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
-  const telemetry = startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
+  const telemetry = await startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
 
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 
     try {
       const result = await withTaskSpan(
-        { taskId, runId, knight: config.knightName, table: config.table, model: model ?? config.knightModel },
+        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel },
         () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
         (r) => ({ success: r.success, cost: r.cost, model: r.model, error: r.error }),
       );

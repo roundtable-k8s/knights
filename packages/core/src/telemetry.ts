@@ -1,5 +1,4 @@
-import { SpanStatusCode, context, trace, type Span } from "@opentelemetry/api";
-import { NodeSDK } from "@opentelemetry/sdk-node";
+import { SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { log } from "./logger.js";
@@ -46,6 +45,7 @@ export function resourceDefaults(opts: TelemetryOptions): Record<string, string>
   const set = parseResourceAttributes(env["OTEL_RESOURCE_ATTRIBUTES"]);
   const defaults: Record<string, string> = {
     "roundtable.knight": opts.knight,
+    "roundtable.knight.runtime": opts.service.replace(/-knight$/, ""),
     "roundtable.table": opts.table || env["ROUNDTABLE_TABLE"] || "none",
   };
   if (!env["OTEL_SERVICE_NAME"]) defaults["service.name"] = opts.service;
@@ -59,10 +59,15 @@ const DISABLED: Telemetry = { enabled: false, shutdown: async () => {} };
  * Start the OpenTelemetry Node SDK when OTEL_* env asks for it. Otherwise nothing is
  * registered and no startup log is written.
  */
-export function startTelemetry(opts: TelemetryOptions): Telemetry {
+export async function startTelemetry(opts: TelemetryOptions): Promise<Telemetry> {
   const env = opts.env ?? process.env;
   if (!telemetryEnabled(env)) return DISABLED;
+  // Loaded on demand so a knight with telemetry off never pays for the SDK.
+  const { NodeSDK } = await import("@opentelemetry/sdk-node");
   const sdk = new NodeSDK({
+    // Traces only: no OTLP metrics (prom-client stays) or logs exporters.
+    metricReaders: [],
+    logRecordProcessors: [],
     resource: resourceFromAttributes(resourceDefaults(opts)),
     ...(opts.spanProcessors ? { spanProcessors: opts.spanProcessors } : {}),
   });
@@ -79,18 +84,22 @@ export interface TaskSpanAttributes {
   runId?: string;
   knight: string;
   table?: string;
+  attempt?: number;
+  /** Requested model. */
   model?: string;
 }
 
 export interface TaskSpanOutcome {
   success: boolean;
+  /** Cost in USD. */
   cost?: number;
+  /** Resolved model. */
   model?: string;
   error?: string;
 }
 
 /**
- * Run `fn` inside a new root `knight.task` span (no parent until NATS trace propagation lands).
+ * Run `fn` inside a new root `invoke_agent <knight>` span (no parent until NATS trace propagation lands).
  * With no SDK registered the tracer is a no-op and this just calls `fn`.
  */
 export function withTaskSpan<T>(
@@ -99,26 +108,27 @@ export function withTaskSpan<T>(
   outcome?: (result: T) => TaskSpanOutcome,
 ): Promise<T> {
   const tracer = trace.getTracer(TRACER_NAME);
-  const attributes: Record<string, string> = {
+  const attributes: Record<string, string | number> = {
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.agent.name": attrs.knight,
     "roundtable.task.id": attrs.taskId,
     "roundtable.knight": attrs.knight,
     "roundtable.table": attrs.table || "none",
   };
   if (attrs.runId) attributes["roundtable.run.id"] = attrs.runId;
-  if (attrs.model) attributes["roundtable.model"] = attrs.model;
-  return tracer.startActiveSpan("knight.task", { root: true, attributes }, async (span: Span) => {
+  if (attrs.attempt) attributes["roundtable.attempt"] = attrs.attempt;
+  if (attrs.model) attributes["gen_ai.request.model"] = attrs.model;
+  return tracer.startActiveSpan(`invoke_agent ${attrs.knight}`, { root: true, attributes }, async (span: Span) => {
     try {
       const result = await fn();
       if (outcome) {
         const o = outcome(result);
-        span.setAttribute("roundtable.task.success", o.success);
-        if (o.cost !== undefined) span.setAttribute("roundtable.task.cost", o.cost);
-        if (o.model) span.setAttribute("roundtable.model", o.model);
+        if (o.cost !== undefined) span.setAttribute("roundtable.cost.usd", o.cost);
+        if (o.model) span.setAttribute("gen_ai.response.model", o.model);
         if (!o.success) span.setStatus({ code: SpanStatusCode.ERROR, message: o.error });
       }
       return result;
     } catch (err) {
-      span.setAttribute("roundtable.task.success", false);
       span.recordException(err instanceof Error ? err : String(err));
       span.setStatus({ code: SpanStatusCode.ERROR, message: err instanceof Error ? err.message : String(err) });
       throw err;
@@ -128,19 +138,3 @@ export function withTaskSpan<T>(
   });
 }
 
-/** Trace and span ids of the active recording span, for log lines. */
-export function activeTraceIds(): { trace_id: string; span_id: string } | undefined {
-  const span = trace.getSpan(context.active());
-  if (!span?.isRecording()) return undefined;
-  const { traceId, spanId } = span.spanContext();
-  return { trace_id: traceId, span_id: spanId };
-}
-
-/** `TRACEPARENT` for a child process, from the active span; empty when there is none. */
-export function traceparentEnv(): Record<string, string> {
-  const span = trace.getSpan(context.active());
-  if (!span) return {};
-  const sc = trace.getSpanContext(context.active());
-  if (!sc || !trace.isSpanContextValid(sc)) return {};
-  return { TRACEPARENT: `00-${sc.traceId}-${sc.spanId}-${sc.traceFlags.toString(16).padStart(2, "0")}` };
-}
