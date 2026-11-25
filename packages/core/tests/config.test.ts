@@ -36,3 +36,9 @@ test("loadBaseConfig requires KNIGHT_NAME and ignores unparsable numbers", () =>
   assert.throws(() => loadBaseConfig({}), /KNIGHT_NAME/);
   assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", METRICS_PORT: "abc" }).metricsPort, 3000);
 });
+
+test("loadBaseConfig reads the optional memory env vars", () => {
+  const c = loadBaseConfig({ KNIGHT_NAME: "k", KNIGHT_MEMORY_DIR: "/memory/k", KNIGHT_MEMORY_ROOT: "/memory" });
+  assert.equal(c.memoryDir, "/memory/k");
+  assert.equal(c.memoryRoot, "/memory");
+});

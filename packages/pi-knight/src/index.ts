@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -13,6 +13,8 @@ import * as metrics from "./runtime-metrics.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel);
+  migrateMemory({ memoryDir: config.memoryDir });
+  ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
 
   log.info("Pi-Knight starting", {
     model: config.knightModel,

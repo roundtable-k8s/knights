@@ -9,7 +9,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import type { KnightConfig } from "./config.js";
-import { log, type TaskActivity } from "@roundtable/knight-core";
+import { log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel, setParentKnight } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
@@ -603,5 +603,10 @@ parameters in tool calls.
    call, or end with an empty message, the task is reported as FAILED with no output,
    even when the tool work itself succeeded. After tool use, summarize what you did and
    state the deliverable in text.
-</critical_rules>`;
+</critical_rules>${memorySection(config)}`;
+}
+
+function memorySection(config: KnightConfig): string {
+  const text = memoryPromptSection(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
+  return text ? `\n\n${text}` : "";
 }

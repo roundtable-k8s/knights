@@ -77,6 +77,22 @@ file under `/data/sessions`; old files are pruned at startup and on each run cha
 | `ACTIVITY_CONTENT` | `preview` publishes tool output / message previews in activity events; `none` omits them | `preview` |
 | `POD_NAME`, `NODE_NAME` | Pod identity stamped on activity events and introspect replies (downward API); falls back to hostname / unset | — |
 
+### Memory
+By default long-term memory lives in `/data` (`MEMORY.md`, `memory/YYYY-MM-DD.md`). When the operator
+mounts a memory volume it sets these (both optional):
+
+| Variable | Description |
+|----------|-------------|
+| `KNIGHT_MEMORY_DIR` | This knight's memory volume, e.g. `/memory/<knight>` (read-write) |
+| `KNIGHT_MEMORY_ROOT` | Read-only root holding every knight's memory, e.g. `/memory`; the prompt tells the knight to read, never write, `$KNIGHT_MEMORY_ROOT/<name>/` |
+
+With `KNIGHT_MEMORY_DIR` set the layout is `$KNIGHT_MEMORY_DIR/MEMORY.md` and
+`$KNIGHT_MEMORY_DIR/memory/YYYY-MM-DD-<hostname>.md` (one daily log per pod, so replicas never append to the
+same file); session notes and scratch stay in `/data`. The system prompt states these paths and overrides the
+`/data` paths in `AGENTS.md`. On start, if the volume has no `MEMORY.md` and `/data/MEMORY.md` exists, `MEMORY.md`
+and `memory/` are copied across once (existing files are never overwritten). Runtime writes to `MEMORY.md` use a
+temp file and rename.
+
 ### Observability
 | Variable | Description | Default |
 |----------|-------------|---------|
