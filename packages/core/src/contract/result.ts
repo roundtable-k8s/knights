@@ -60,3 +60,38 @@ export function invalidTaskResult(meta: {
 }): TaskResult {
   return failureResult({ ...meta, error: `Invalid task payload: ${meta.invalid}` });
 }
+
+/** Default cap on the result text (RESULT_MAX_BYTES): 512 KB. */
+export const RESULT_MAX_BYTES = 512 * 1024;
+
+/**
+ * Cap `result.result` to `maxBytes` of UTF-8. Over the budget, the head and the tail are kept
+ * (a trailing `Verdict:` line or PR URL survives) with a `[... N bytes omitted ...]` line between
+ * them, and `result_truncated: true` is set. A result within the budget is returned as is.
+ * Cuts never fall inside a multi-byte character.
+ */
+export function capResultText(result: TaskResult, maxBytes: number): TaskResult {
+  const buf = Buffer.from(result.result, "utf8");
+  if (buf.length <= maxBytes) return result;
+
+  const markerRoom = Buffer.byteLength(`\n[... ${buf.length} bytes omitted ...]\n`);
+  if (maxBytes < markerRoom) {
+    // No room for the marker line: keep a plain UTF-8-safe prefix so the budget still holds.
+    let end = Math.max(0, maxBytes);
+    while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--;
+    return { ...result, result: buf.subarray(0, end).toString("utf8"), result_truncated: true };
+  }
+  const keep = maxBytes - markerRoom;
+  let headEnd = Math.floor(keep * 0.6);
+  let tailStart = buf.length - (keep - headEnd);
+  // Move off UTF-8 continuation bytes (10xxxxxx) so no character is split.
+  while (headEnd > 0 && (buf[headEnd]! & 0xc0) === 0x80) headEnd--;
+  while (tailStart < buf.length && (buf[tailStart]! & 0xc0) === 0x80) tailStart++;
+
+  const omitted = tailStart - headEnd;
+  const text =
+    buf.subarray(0, headEnd).toString("utf8") +
+    `\n[... ${omitted} bytes omitted ...]\n` +
+    buf.subarray(tailStart).toString("utf8");
+  return { ...result, result: text, result_truncated: true };
+}

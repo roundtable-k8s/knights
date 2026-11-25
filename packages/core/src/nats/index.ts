@@ -11,7 +11,7 @@ import {
   type ConsumerConfig,
 } from "@nats-io/jetstream";
 import { log } from "../logger.js";
-import { assertTaskResult, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
+import { RESULT_MAX_BYTES, assertTaskResult, capResultText, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 const decoder = new TextDecoder();
 
@@ -21,6 +21,8 @@ export interface NatsConnectConfig {
   knightName: string;
   /** Total time publishResult keeps retrying a failing publish (RESULT_PUBLISH_RETRY_MS). Default 60 s. */
   resultPublishRetryMs?: number;
+  /** Cap on the result text in bytes (RESULT_MAX_BYTES). Default 512 KB. */
+  resultMaxBytes?: number;
 }
 
 /** What subscribe needs: the durable consumer is `<knightName>-consumer` on natsTasksStream. */
@@ -53,6 +55,7 @@ export async function connectNats(
   onStatus?: (connected: boolean) => void,
 ): Promise<void> {
   _retryMs = config.resultPublishRetryMs ?? RESULT_PUBLISH_RETRY_MS;
+  _resultMaxBytes = config.resultMaxBytes ?? RESULT_MAX_BYTES;
   log.info("Connecting to NATS", { url: config.natsUrl });
 
   nc = await natsConnect({
@@ -497,6 +500,9 @@ function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLos
 // Module-level config ref for publishResult (set during subscribe)
 let _config: NatsSubscribeConfig | null = null;
 let _retryMs = 60_000;
+let _resultMaxBytes = RESULT_MAX_BYTES;
+/** Room kept for JSON escaping and the envelope when sizing the result text against max_payload. */
+const PAYLOAD_MARGIN_BYTES = 1024;
 
 /** Default total time publishResult retries a failing publish. */
 export const RESULT_PUBLISH_RETRY_MS = 60_000;
@@ -508,6 +514,10 @@ const RETRY_MAX_DELAY_MS = 5_000;
 export interface PublishResultOptions {
   /** Total retry budget in ms (0 = a single attempt). Default: RESULT_PUBLISH_RETRY_MS / the connectNats config. */
   retryMs?: number;
+  /** Cap on the result text in bytes. Default: the connectNats config / RESULT_MAX_BYTES. */
+  resultMaxBytes?: number;
+  /** Server max_payload in bytes (tests). Default: the live connection's. */
+  maxPayload?: number;
   /** JetStream client to use instead of the one from connectNats (tests). */
   js?: Pick<JetStreamClient, "publish">;
   /** Budget for "no responders" while connected (leader election); a missing stream fails after this. Default 10 s. */
@@ -536,6 +546,41 @@ export function isNoRespondersError(err: unknown): boolean {
 }
 
 /**
+ * Cap the result text to the smaller of RESULT_MAX_BYTES and what the server's max_payload
+ * leaves after the rest of the result. Runs after prs/verdict were extracted from the full text.
+ */
+function capForPayload(taskId: string, result: TaskResult, opts: PublishResultOptions): TaskResult {
+  let budget = opts.resultMaxBytes ?? _resultMaxBytes;
+  const maxPayload = opts.maxPayload ?? nc?.info?.max_payload;
+  if (maxPayload && maxPayload > 0) {
+    const overhead = Buffer.byteLength(encodeResult({ ...result, result: "", result_truncated: true }));
+    budget = Math.min(budget, maxPayload - overhead - PAYLOAD_MARGIN_BYTES);
+  }
+  budget = Math.max(budget, 256);
+  let capped = capResultText(result, budget);
+  // JSON escaping grows the text (newline/quote 2x, control chars 6x), so measure the encoded
+  // payload and cut again with a smaller budget until it fits.
+  if (maxPayload && maxPayload > 0) {
+    while (budget > 256 && Buffer.byteLength(encodeResult(capped)) > maxPayload) {
+      const excess = Buffer.byteLength(encodeResult(capped)) - maxPayload;
+      const keptBytes = Buffer.byteLength(capped.result);
+      // Shrink by the excess, and at least by a ratio so heavy escaping converges quickly.
+      const next = Math.min(keptBytes - excess - 64, Math.floor(keptBytes * 0.9));
+      budget = Math.max(256, Math.min(budget - 1, next));
+      capped = capResultText(result, budget);
+    }
+  }
+  if (capped !== result) {
+    log.warn("Result text truncated to fit the payload limit", {
+      taskId,
+      originalBytes: Buffer.byteLength(result.result),
+      keptBytes: Buffer.byteLength(capped.result),
+    });
+  }
+  return capped;
+}
+
+/**
  * Publish a task result to `<resultsPrefix>.<taskId>`. A failing publish (NATS reconnecting,
  * leader change) is retried with exponential backoff (0.5 s doubling to 5 s) for up to the
  * retry budget; errors that cannot succeed are thrown at once.
@@ -553,7 +598,7 @@ export async function publishResult(
 
   const prefix = _config?.natsResultsPrefix ?? "fleet-a.results";
   const subject = `${prefix}.${taskId}`;
-  const payload = encodeResult(result);
+  const payload = encodeResult(capForPayload(taskId, result, opts));
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = now() + (opts.retryMs ?? _retryMs);
