@@ -1,4 +1,4 @@
-import { test, afterEach } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { trace, metrics } from "@opentelemetry/api";
@@ -7,7 +7,33 @@ import { initLogger, log, setLogStream } from "../src/logger.js";
 import { startTelemetry, telemetryEnabled, resourceDefaults, withTaskSpan } from "../src/telemetry.js";
 import { traceparentEnv } from "../src/trace-context.js";
 
-afterEach(() => trace.disable());
+// Knight pods set OTEL_* variables (OTEL_SDK_DISABLED=true when telemetry is off), and the
+// NodeSDK reads process.env itself. Clear them for every test and restore them afterwards,
+// so these tests pass whatever the surrounding environment sets.
+const ambientOtel = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
+function clearOtelEnv(): void {
+  for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k];
+}
+
+beforeEach(clearOtelEnv);
+afterEach(() => {
+  trace.disable();
+  clearOtelEnv();
+  Object.assign(process.env, ambientOtel);
+});
+
+test("OTEL_SDK_DISABLED=true (as on knight pods) keeps the bootstrap off even with an exporter set", async () => {
+  process.env.OTEL_SDK_DISABLED = "true";
+  process.env.OTEL_TRACES_EXPORTER = "otlp";
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const t = await startTelemetry({ service: "s", knight: "k", spanProcessors: [processor] });
+  assert.equal(t.enabled, false);
+  await withTaskSpan({ taskId: "t", knight: "k" }, async () => 1);
+  await processor.forceFlush();
+  assert.equal(exporter.getFinishedSpans().length, 0);
+  await t.shutdown();
+});
 
 test("telemetry stays off without OTEL_* env, with OTEL_SDK_DISABLED, and registers nothing", async () => {
   assert.equal(telemetryEnabled({}), false);
