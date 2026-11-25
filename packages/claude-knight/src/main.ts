@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, SlotPool, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -145,6 +145,8 @@ export async function main(): Promise<void> {
 
   // Abort handles of running tasks, for the forced shutdown path.
   const inflight = new Set<AbortController>();
+  // Concurrency slots (0-based) in use, reported on task.started.
+  const slots = new SlotPool();
 
   async function processTask(delivery: TaskDelivery): Promise<void> {
     const parsed = delivery.task;
@@ -153,6 +155,7 @@ export async function main(): Promise<void> {
     void knightService?.refreshSkills();
     // Keep the message un-acked but alive while the task runs; ack only when it finishes.
     const started = Date.now();
+    const slot = slots.acquire();
     const activity = new TaskActivity({
       knight: config.knightName,
       table: config.table,
@@ -164,7 +167,7 @@ export async function main(): Promise<void> {
       stepName: parsed.stepName,
       attempt: parsed.attempt,
       model: parsed.model ?? config.claudeModel,
-      slot: activeCount,
+      slot,
       concurrency: config.maxConcurrentTasks,
       queuedFor: parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined,
       workDir: basename(config.workDir),
@@ -241,6 +244,7 @@ export async function main(): Promise<void> {
       clearInterval(heartbeat);
       activity.close();
       knightService?.markTaskFinished();
+      slots.release(slot);
       delivery.ack();
       setActive(activeCount - 1);
       puller?.wake();
