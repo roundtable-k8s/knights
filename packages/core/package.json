@@ -12,7 +12,8 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
-    "nats": "^2.29.3"
+    "nats": "^2.29.3",
+    "prom-client": "^15.1.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.19",

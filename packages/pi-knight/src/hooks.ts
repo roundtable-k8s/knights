@@ -8,7 +8,7 @@
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { containsSecret, log, redactSecrets } from "@roundtable/knight-core";
-import { toolCallsTotal, toolCallDuration, toolCallErrors, toolCallsBlocked } from "./metrics.js";
+import { toolCallsTotal, toolCallDuration, toolCallErrors, toolCallsBlocked } from "./runtime-metrics.js";
 
 // ─── Dangerous operation patterns ───────────────────────────────────
 

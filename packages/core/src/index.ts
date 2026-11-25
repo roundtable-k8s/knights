@@ -5,3 +5,6 @@ export * from "./contract/index.js";
 export * from "./nats/index.js";
 export * from "./activity.js";
 export * from "./introspect.js";
+export * from "./drain.js";
+export * from "./health.js";
+export * from "./metrics.js";
