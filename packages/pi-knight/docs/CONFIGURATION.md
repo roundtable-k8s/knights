@@ -53,6 +53,9 @@ Knights can evolve their own files over time — ConfigMap seeds the initial sta
 |----------|-------------|---------|
 | `KNIGHT_MODEL` | LLM provider/model | `openrouter/deepseek/deepseek-v3.2` |
 | `KNIGHT_THINKING` | Thinking level (off/minimal/low/medium/high) | `off` |
+| `KNIGHT_MODEL_BASE_URL` | Base URL of a local OpenAI-compatible endpoint (see [Local models](LOCAL-MODELS.md)) | unset |
+| `MODEL_REQUEST_TIMEOUT_MS` | HTTP timeout for a model call | `600000` |
+| `MODEL_CONTEXT_WINDOW` | Context-size hint for models not in the catalogue | `131072` |
 | `PI_MODELS_JSON` | Raw `/data/models.json` content to write at startup | unset |
 | `PI_MODELS_JSON_B64` | Base64-encoded `/data/models.json` content | unset |
 | `OPENROUTER_API_KEY` | OpenRouter key — covers the default + most upgrade models | From ExternalSecret |

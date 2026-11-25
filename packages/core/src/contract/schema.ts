@@ -120,7 +120,9 @@ export const TaskResult = Type.Object(
     tool_calls: Type.Optional(count("pi-knight: tool calls the agent made.")),
     turns: Type.Optional(count("claude-knight: agent turns.")),
     runtime: Type.Optional(Type.String({ description: "claude-knight: `claude-knight`." })),
-    billing: Type.Optional(Type.Enum(["subscription", "api"], { description: "claude-knight: how the run is billed." })),
+    billing: Type.Optional(Type.Enum(["subscription", "api", "local"], {
+        description: "How the run is billed. claude-knight: `subscription` or `api`. pi-knight: `local` for an operator-supplied model endpoint (cost 0).",
+      })),
     prs: Type.Optional(
       Type.Array(TaskResultPR, { description: "Pull requests the task opened or updated (omitted when none)." }),
     ),

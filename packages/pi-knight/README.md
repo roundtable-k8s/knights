@@ -38,6 +38,7 @@ at startup, which makes native-provider canaries possible without a custom image
 | [Observability](docs/OBSERVABILITY.md) | Logging, metrics, health checks, alerting |
 | [Skills](docs/SKILLS.md) | Skill system, arsenal bridge, tool policies |
 | [Configuration](docs/CONFIGURATION.md) | Per-knight config, model selection, env vars |
+| [Local models](docs/LOCAL-MODELS.md) | Running a knight on Ollama or any OpenAI-compatible endpoint |
 | [Security](docs/SECURITY.md) | Isolation model, threat model, OWASP LLM mitigations |
 
 ## Quick Start

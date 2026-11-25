@@ -96,9 +96,10 @@
     "billing": {
       "enum": [
         "subscription",
-        "api"
+        "api",
+        "local"
       ],
-      "description": "claude-knight: how the run is billed."
+      "description": "How the run is billed. claude-knight: `subscription` or `api`. pi-knight: `local` for an operator-supplied model endpoint (cost 0)."
     },
     "prs": {
       "type": "array",

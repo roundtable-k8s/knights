@@ -9,11 +9,14 @@ import { resolveModel } from "./model.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
 import * as metrics from "./runtime-metrics.js";
+import { configureHttpTimeouts } from "./http-timeout.js";
 
 async function main(): Promise<void> {
   // pi's bash tool spawns from process.env: keep production-mode switches out of agent shells.
   scrubAgentEnv();
   const config = loadConfig();
+  // Node's fetch cuts requests off after 300 s regardless of the client timeout.
+  configureHttpTimeouts(config.modelRequestTimeoutMs);
   initLogger(config.knightName, config.logLevel, config.table);
   // Signal handlers before any network call: a pod deleted during start-up exits now
   // (closing what is open) instead of starting up and taking tasks (see startup-signals.ts).
@@ -193,7 +196,7 @@ async function main(): Promise<void> {
       // task-outcome counter reflects the honest success/failure. (#31)
       metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
-      metrics.llmCost.labels(result.model, metrics.BILLING).inc(result.cost);
+      metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
       metrics.recordTokens(result.model, result.tokens);
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;

@@ -49,6 +49,15 @@ export function refusalCode(reason?: string): "credits" | undefined {
   return /credit|max[ _-]?tokens/i.test(reason) ? "credits" : undefined;
 }
 
+export const TOOL_CALLS_AS_TEXT_REASON =
+  "Model returned tool calls as plain text instead of structured tool_calls, so no tool ran. " +
+  "The model or its endpoint does not support tool calling in the OpenAI format; use a tool-capable model.";
+
+/** Failure reason for a local model that ended without a deliverable and without any tool call. */
+export const LOCAL_NO_TOOL_CALLS_REASON =
+  "Local model produced no output and made no tool calls. It may not support tool calling " +
+  "(or the endpoint dropped the tools); check the model's tool support and the endpoint logs.";
+
 /**
  * Describe why a session ended without a deliverable. The Pi agent loop never throws on
  * LLM failures — a stream error or abort ends the loop silently, recorded only as
@@ -72,6 +81,12 @@ export function describeSessionFailure(
         return taskAborted
           ? "Task aborted before producing output (task timeout)"
           : "Task aborted before producing output";
+      }
+      // A normal stop whose text is a raw tool-call payload: the model "called" a tool in
+      // prose instead of structured tool_calls, so nothing ran (#99, #27).
+      if (/^\s*\{/.test(extractTextFromAssistantContent((msg as { content?: unknown }).content)) &&
+          !isDeliverableAssistantText(extractTextFromAssistantContent((msg as { content?: unknown }).content))) {
+        return TOOL_CALLS_AS_TEXT_REASON;
       }
       break; // last assistant message is a normal stop — fall through to generic
     }

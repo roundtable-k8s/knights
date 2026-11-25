@@ -66,6 +66,46 @@ const LOCAL_PROVIDER_BASE_URLS: Record<string, string> = {
   ollama: "http://localhost:11434/v1",
 };
 
+/** Default context window advertised for a model that is not in any catalog. */
+export const DEFAULT_CONTEXT_WINDOW = 131072;
+
+/**
+ * Providers registered from the environment (no catalog / models.json entry), with the
+ * endpoint they were registered on: by construction an operator-supplied OpenAI-compatible
+ * endpoint, so billed locally. Matching the endpoint as well keeps a hosted model of the same
+ * provider name (an `openai/...` override on a knight whose default points OpenAI at a local
+ * server) from being reported as local.
+ */
+const envProviders = new Map<string, string>();
+
+/**
+ * True when a model runs on an operator-supplied endpoint (Ollama, vLLM, LiteLLM, ...)
+ * rather than a hosted provider: the `ollama` provider, a loopback URL, or a provider
+ * registered from env / models.json-less fallback. Such runs cost nothing per token.
+ */
+export function isLocalModel(model: Pick<Model<Api>, "provider" | "baseUrl">): boolean {
+  return (
+    model.provider === "ollama" ||
+    (envProviders.has(model.provider) && envProviders.get(model.provider) === model.baseUrl) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(model.baseUrl ?? "")
+  );
+}
+
+/** Base URL of a local endpoint from env: KNIGHT_MODEL_BASE_URL, then the OpenAI-standard names. */
+export function localBaseUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.KNIGHT_MODEL_BASE_URL || env.OPENAI_BASE_URL || env.OPENAI_API_BASE || undefined;
+}
+
+/** Context-window hint from MODEL_CONTEXT_WINDOW; invalid values warn and fall back. */
+export function contextWindowFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MODEL_CONTEXT_WINDOW;
+  if (raw === undefined || raw === "") return DEFAULT_CONTEXT_WINDOW;
+  const parsed = /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : NaN;
+  if (Number.isSafeInteger(parsed) && parsed > 0) return parsed;
+  log.warn("Invalid MODEL_CONTEXT_WINDOW; falling back to default", { value: raw, fallback: DEFAULT_CONTEXT_WINDOW });
+  return DEFAULT_CONTEXT_WINDOW;
+}
+
 export interface ResolvedModel {
   model: Model<Api>;
   provider: string;
@@ -180,12 +220,8 @@ export async function resolveModel(
   }
 
   if (!model) {
-    const baseUrl =
-      process.env.OPENAI_BASE_URL ||
-      process.env.OPENAI_API_BASE ||
-      LOCAL_PROVIDER_BASE_URLS[provider] ||
-      "http://localhost:4000/v1";
-    const contextWindow = parseInt(process.env.MODEL_CONTEXT_WINDOW ?? "131072", 10);
+    const baseUrl = localBaseUrlFromEnv() || LOCAL_PROVIDER_BASE_URLS[provider] || "http://localhost:4000/v1";
+    const contextWindow = contextWindowFromEnv();
     // Output cap for custom models: MODEL_MAX_TOKENS if set (and valid), otherwise the
     // shared default. pi-ai clamps max_tokens to remaining context room per request (#79).
     const maxTokens = outputTokenCap();
@@ -198,6 +234,7 @@ export async function resolveModel(
     });
     // Register the endpoint as a provider on the runtime so request auth, headers and
     // streaming resolve through it like any catalog model.
+    envProviders.set(provider, baseUrl);
     modelRuntime.registerProvider(provider, {
       baseUrl,
       api: "openai-completions",

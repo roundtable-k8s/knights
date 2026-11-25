@@ -9,7 +9,7 @@ import { Type } from "typebox";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { createAgentSession, DefaultResourceLoader, defineTool, type AgentSession } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { resolveModel, createTrustedSettingsManager } from "../model.js";
+import { isLocalModel, resolveModel, createTrustedSettingsManager } from "../model.js";
 import { dataPaths } from "../config.js";
 import { log } from "@roundtable/knight-core";
 import * as metrics from "../runtime-metrics.js";
@@ -112,7 +112,8 @@ export const spawnSubagentTool = defineTool({
       // spawn's total (no diff needed). Clamp finite/non-negative — same guard as the
       // parent task accounting — to stay safe with routing/custom models.
       const finite = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
-      metrics.llmCost.labels(modelStr, metrics.BILLING).inc(finite(stats.cost));
+      const local = isLocalModel(model);
+      metrics.llmCost.labels(modelStr, local ? "local" : metrics.BILLING).inc(local ? 0 : finite(stats.cost));
       metrics.recordTokens(modelStr, {
         input: finite(stats.tokens.input),
         output: finite(stats.tokens.output),
