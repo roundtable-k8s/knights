@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { connect, type NatsConnection } from "@nats-io/transport-node";
-import { AckPolicy, jetstream, jetstreamManager } from "@nats-io/jetstream";
+import { AckPolicy, DeliverPolicy, jetstream, jetstreamManager } from "@nats-io/jetstream";
 import { connectNats, drain, publishResult, startPullLoop, subscribe, type NatsSubscribeConfig, type PulledMsg, type TaskDelivery } from "../src/nats/index.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -166,7 +166,17 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
   const publishTask = (id: string, topic = "tester") =>
     jetstream(admin).publish(`fleet-a.tasks.${topic}.${id}`, new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })));
 
+  // The operator owns the consumer; the knight must bind to it as-is (ack_wait 1s: the tests rely on it).
+  const preCreate = async (name: string, filter: string) => {
+    const jsm = await jetstreamManager(admin);
+    await jsm.consumers.add("TASKS", {
+      durable_name: `${name}-consumer`, filter_subjects: [filter], ack_policy: AckPolicy.Explicit,
+      deliver_policy: DeliverPolicy.All, max_deliver: 1, ack_wait: 1_000_000_000,
+    });
+  };
+
   it("holds backlog in the stream (lag), takes the next task when a slot frees, and recovers a crashed task", async () => {
+    await preCreate("Tester", "fleet-a.tasks.tester.>");
     for (const id of ["a", "b", "c", "d"]) await publishTask(id);
 
     let active = 0;
@@ -193,6 +203,8 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     assert.equal(info.num_pending, 3, "lag reflects the backlog still in the stream");
     assert.equal(info.num_ack_pending, 1);
     assert.equal(info.config.max_deliver, 1);
+    assert.equal(info.config.ack_wait, 1_000_000_000, "pre-created consumer left unchanged");
+    assert.deepEqual(info.config.filter_subjects, ["fleet-a.tasks.tester.>"]);
 
     // heartbeats keep the task alive well past ack_wait (1s)
     const hb = setInterval(() => deliveries[0]!.working(), 300);
@@ -222,6 +234,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
 
   it("sends in-progress heartbeats for a running task and acks it exactly once (#8)", async () => {
     const beater: NatsSubscribeConfig = { ...config, knightName: "Beater", subscribeTopics: ["fleet-a.tasks.beater.>"] };
+    await preCreate("Beater", "fleet-a.tasks.beater.>");
     // Watch the consumer's ack subject on the wire: +WPI is working(), +ACK the final ack.
     const acks: string[] = [];
     const ackSub = admin.subscribe("$JS.ACK.TASKS.Beater-consumer.>");
@@ -252,6 +265,8 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     await sleep(1500); // past ack_wait: a missed heartbeat or ack would surface as a lost task by now
 
     const info = await (await jetstreamManager(admin)).consumers.info("TASKS", "Beater-consumer");
+    assert.equal(info.config.ack_wait, 1_000_000_000, "pre-created consumer left unchanged");
+    assert.deepEqual(info.config.filter_subjects, ["fleet-a.tasks.beater.>"]);
     assert.deepEqual(lost, [], "heartbeats kept the task alive past ack_wait");
     assert.equal(info.num_ack_pending, 0);
     assert.equal(info.num_redelivered, 0);
