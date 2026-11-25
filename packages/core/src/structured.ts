@@ -46,9 +46,19 @@ export function prsFromText(text: string): PRRef[] {
   return [...out.values()];
 }
 
+/** `git push`, also with global options before the subcommand (`git -C dir push`). */
+const GIT_PUSH_RE = /\bgit\s+(?:-\S+\s+(?:[^-\s]\S*\s+)?)*push\b/;
+/** Number of a `gh pr edit` target, after any flags (`gh pr edit -R o/r --body x #7`). */
+const PR_EDIT_NUM_RE = /\bgh\s+pr\s+edit\s+(?:--?[\w-]+=\S+\s+|-\S+\s+\S+\s+)*#?(\d+)\b/;
+
+/** Segment of a shell command that runs `git push`. */
+export function isGitPush(segment: string): boolean {
+  return GIT_PUSH_RE.test(segment);
+}
+
 /** Bash command that can open or update a PR; worth remembering until its output arrives. */
 export function isPrCommand(command: string): boolean {
-  return /\bgh\s+pr\s+(create|edit)\b|\bgit\s+push\b/.test(command);
+  return /\bgh\s+pr\s+(create|edit)\b/.test(command) || isGitPush(command);
 }
 
 function repoFlag(segment: string): string | undefined {
@@ -78,13 +88,13 @@ export function prsFromBash(command: string, output: string): PRRef[] {
       }
       // edit with a numeric target and -R can be named without output.
       const repo = repoFlag(segment);
-      const num = /\bgh\s+pr\s+edit\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?(\d+)\b/.exec(segment)?.[1];
+      const num = PR_EDIT_NUM_RE.exec(segment)?.[1];
       if (action === "updated" && repo && num) {
         refs.push({ repo, number: Number(num), url: `https://github.com/${repo}/pull/${num}`, action });
       }
       continue;
     }
-    if (/\bgit\s+push\b/.test(segment)) {
+    if (isGitPush(segment)) {
       for (const m of output.matchAll(PR_URL_RE)) refs.push(refFromUrl(m[0], "updated"));
     }
   }

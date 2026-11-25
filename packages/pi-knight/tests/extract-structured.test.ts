@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractStructured, parseVerdict } from "../src/structured.ts";
+import { extractStructured } from "../src/result-extraction.ts";
 
 const call = (id: string, command: string) => ({
   role: "assistant",
@@ -47,9 +47,23 @@ test("falls back to PR URLs in the final message; push marks them updated", () =
   assert.equal(pushed.prs.length, 1);
 });
 
-test("verdict: last Verdict line wins, tolerant formatting", () => {
-  assert.equal(parseVerdict("Verdict: needs changes\n...\nVerdict: SHIP IT"), "ship_it");
-  assert.equal(parseVerdict("**Verdict:** Needs-Changes"), "needs_changes");
-  assert.equal(parseVerdict("the verdict was ship it"), undefined);
-  assert.equal(extractStructured([], "ok\nVerdict: ship it").verdict, "ship_it");
+test("verdict comes from the final message", () => {
+  assert.equal(extractStructured([], "Verdict: needs changes\n...\nVerdict: SHIP IT").verdict, "ship_it");
+  assert.equal(extractStructured([], "**Verdict:** Needs-Changes").verdict, "needs_changes");
+  assert.equal(extractStructured([], "the verdict was ship it").verdict, undefined);
+});
+
+test("gh/git forms pi-knight handled before the move still work", () => {
+  // flags before the edit target, #-prefixed number, env prefix
+  const e = extractStructured([call("1", "GH_DEBUG=0 gh pr edit -R a/b --body z #7"), res("1", "")], "");
+  assert.deepEqual(e.prs, [{ repo: "a/b", number: 7, url: "https://github.com/a/b/pull/7", action: "updated" }]);
+  // git with global options before push still marks fallback PRs updated
+  const p = extractStructured([call("1", "git -C repo push origin HEAD"), res("1", "ok")], `See ${URL1}`);
+  assert.equal(p.prs[0].action, "updated");
+});
+
+test("stricter PR URL regex: /pull/N/files links are no longer reported (core regex)", () => {
+  // pi-knight's old regex reported #71 here; the core's (?![\d/]) skips sub-page links.
+  assert.deepEqual(extractStructured([], `Review ${URL1}/files please`).prs, []);
+  assert.deepEqual(extractStructured([], `Review ${URL1}.`).prs.map((p) => p.number), [71]);
 });

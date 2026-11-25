@@ -17,8 +17,8 @@ import type { TaskActivity } from "./activity.js";
 import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
-import { extractStructured, type PRRef, type Verdict } from "./structured.js";
-import { describeSessionFailure, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
+import type { PRRef, Verdict } from "@roundtable/knight-core";
+import { describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
 
 
 export interface TaskResult {
