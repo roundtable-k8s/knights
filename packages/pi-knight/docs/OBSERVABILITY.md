@@ -194,3 +194,7 @@ The Prometheus metrics provide rolling totals. Combined with Grafana:
 | `METRICS_PORT` | HTTP port for health/metrics | `3000` |
 | `LOG_LEVEL` | Minimum log level | `info` |
 | `ENABLE_METRICS` | Enable Prometheus metrics | `true` |
+
+## Tracing (OpenTelemetry)
+
+Off by default. Tracing starts when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_TRACES_EXPORTER` is set and `OTEL_SDK_DISABLED` is not `true`; the standard `OTEL_*` variables configure the exporter. Resource attributes: `service.name` (default `pi-knight`), `roundtable.knight`, `roundtable.table` (`ROUNDTABLE_TABLE`, default `none`), unless `OTEL_RESOURCE_ATTRIBUTES` sets them. Each task runs in a root `invoke_agent <knight>` span, and log lines written inside it carry `trace_id` and `span_id`. Spans are flushed on shutdown after the drain. claude-knight also hands the task span to the Claude Code child as `TRACEPARENT`.

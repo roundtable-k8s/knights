@@ -367,3 +367,21 @@ test("a failed usage probe keeps the old reading", async () => {
   assert.equal(r.blocked, true);
   resetPlanLimits();
 });
+
+test("buildChildEnv passes the active task span to the child as TRACEPARENT", async () => {
+  const { startTelemetry, withTaskSpan } = await import("@roundtable/knight-core");
+  const { InMemorySpanExporter, SimpleSpanProcessor } = await import("@opentelemetry/sdk-trace-base");
+  assert.equal(buildChildEnv("api", {}, {})["TRACEPARENT"], undefined);
+  const t = await startTelemetry({
+    service: "claude-knight",
+    knight: "k",
+    env: { OTEL_TRACES_EXPORTER: "otlp" },
+    spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
+  });
+  try {
+    const child = await withTaskSpan({ taskId: "t", knight: "k" }, async () => buildChildEnv("api", {}, {}));
+    assert.match(child["TRACEPARENT"] ?? "", /^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  } finally {
+    await t.shutdown();
+  }
+});
