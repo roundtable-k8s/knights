@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseVerdict, resolvePrs, type PRRef, type Verdict } from "@roundtable/knight-core";
+import { parseVerdict, resolvePrs, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -18,7 +18,7 @@ export interface TaskResult {
   model: string;
   /** Agent turns (Claude Code does not report a tool-call count). */
   turns: number;
-  /** True when the failure was a plan/credit limit, so callers can back off. */
+  /** True when the failure was a plan/credit limit, so callers can back off. Published as `refused: "quota"`. */
   usageLimited?: boolean;
   /** Pull requests the task opened or updated (omitted when none). */
   prs?: PRRef[];
@@ -58,6 +58,8 @@ function primaryModel(result: SDKResultMessage | undefined, fallback: string): s
   return best ?? fallback;
 }
 
+const DEFAULT_MODEL = "claude-code-default";
+
 const safe = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
 export function classifyResult(input: ClassifyInput): TaskResult {
@@ -72,7 +74,7 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       cacheRead: safe(usage?.cache_read_input_tokens),
       cacheWrite: safe(usage?.cache_creation_input_tokens),
     },
-    model: primaryModel(result, config.claudeModel ?? "claude-code-default"),
+    model: primaryModel(result, config.claudeModel ?? DEFAULT_MODEL),
     turns: result?.num_turns ?? 0,
   } satisfies Omit<TaskResult, "result" | "success">;
 
@@ -126,4 +128,70 @@ export function classifyResult(input: ClassifyInput): TaskResult {
     }
   }
   return fail(`Claude Code failed: ${thrown ?? assistantError ?? "no result message"}`);
+}
+
+
+/** Outcome for a task the plan reserve refused before Claude Code was started. */
+export function reserveRefusedOutcome(reason: string | undefined, config: KnightConfig): TaskResult {
+  const msg = `Task refused: ${reason}`;
+  return {
+    result: msg,
+    success: false,
+    error: msg,
+    usageLimited: true,
+    cost: 0,
+    billing: config.authMode,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    model: config.claudeModel ?? DEFAULT_MODEL,
+    turns: 0,
+  };
+}
+
+/** Outcome for a task that threw out of executeTask. */
+export function failedOutcome(errMsg: string, config: KnightConfig): TaskResult {
+  return {
+    result: `Task failed: ${errMsg}`,
+    success: false,
+    error: errMsg,
+    cost: 0,
+    billing: config.authMode,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    model: config.claudeModel ?? DEFAULT_MODEL,
+    turns: 0,
+  };
+}
+
+/** Fields every claude-knight result carries on top of the shared contract. */
+export function runtimeFields(config: Pick<KnightConfig, "authMode">): Pick<ResultPayload, "runtime" | "billing"> {
+  return { runtime: "claude-knight", billing: config.authMode };
+}
+
+/**
+ * Build the NATS task-result payload from an outcome. Optional fields are only present
+ * when set. A plan/credit limit is published as `refused: "quota"` plus the deprecated
+ * `usage_limited: true`, which the operator reads until it reads `refused`
+ * (roundtable-k8s/roundtable#431). Pure so tests can check it against the golden fixtures.
+ */
+export function buildResultPayload(
+  outcome: TaskResult,
+  meta: { taskId: string; knight: string; durationMs: number; timestamp?: string },
+): ResultPayload {
+  return {
+    task_id: meta.taskId,
+    knight: meta.knight,
+    success: outcome.success,
+    result: outcome.result,
+    ...(outcome.error ? { error: outcome.error } : {}),
+    ...(outcome.usageLimited ? { refused: "quota" as const, usage_limited: true } : {}),
+    ...(outcome.prs?.length ? { prs: outcome.prs } : {}),
+    ...(outcome.verdict ? { verdict: outcome.verdict } : {}),
+    duration_ms: meta.durationMs,
+    cost: outcome.cost,
+    tokens: outcome.tokens,
+    model: outcome.model,
+    turns: outcome.turns,
+    runtime: "claude-knight",
+    billing: outcome.billing,
+    timestamp: meta.timestamp ?? new Date().toISOString(),
+  };
 }
