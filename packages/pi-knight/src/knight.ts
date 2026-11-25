@@ -332,6 +332,11 @@ export function onSessionEvent(activity: TaskActivity, e: any): void {
  * session and runs concurrently (#53) — cross-task memory lives in files on the PVC. Pi SDK auto-compacts when
  * context grows too large.
  */
+/** `provider/id` of a session model, or the requested string when the model doesn't expose both. */
+function resolvedModelName(m: { provider?: string; id?: string } | undefined, requested: string): string {
+  return m?.provider && m?.id ? `${m.provider}/${m.id}` : requested;
+}
+
 export async function executeTask(
   task: string,
   config: KnightConfig,
@@ -414,6 +419,19 @@ export async function executeTask(
   // restore the knight default afterwards so later steps of the run get it back.
   const defaultModel = override ? sess.model : undefined;
   let promptFailed = true;
+  // Set when restoring the knight default failed: the session is stuck on the override.
+  let staleSession = false;
+  const disposeStale = () => {
+    if (!staleSession) return;
+    staleSession = false;
+    try {
+      sess.dispose();
+    } catch (err) {
+      log.warn("Failed to dispose session", { key: slot.key, error: String(err) });
+    }
+  };
+  // The model this task actually ran on, captured before the restore swaps it back.
+  let ranModel = modelUsed;
   try {
     if (override) {
       try {
@@ -423,14 +441,21 @@ export async function executeTask(
       }
     }
     opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
+    ranModel = resolvedModelName(override?.model ?? sess.model, modelUsed);
     await sess.prompt(task);
     promptFailed = false;
   } finally {
     opts.activity?.detach();
     if (defaultModel) {
-      await sess.setModel(defaultModel).catch((err) => {
-        log.warn("Failed to restore knight default model after task", { error: String(err) });
-      });
+      try {
+        await sess.setModel(defaultModel);
+      } catch (err) {
+        // The session is stuck on the override model: later steps of the run must not reuse it.
+        log.error("Failed to restore knight default model after task; dropping the run's session", { key: slot.key, error: String(err) });
+        if (slot.session === sess) slot.session = null;
+        if (lastActive === slot) lastActive = null;
+        staleSession = true;
+      }
     }
     if (signal && abortHandler) {
       signal.removeEventListener("abort", abortHandler);
@@ -439,6 +464,8 @@ export async function executeTask(
     // Must finish before the lock is released, or it would delete the next step's fresh dir.
     if (!(promptFailed && process.env.DEBUG)) await rm(workDir, { recursive: true, force: true }).catch(() => {});
     slot.pending--;
+    // Dispose right away only when the result below will not read this session.
+    if (promptFailed) disposeStale();
     releaseLock();
   }
 
@@ -484,6 +511,8 @@ export async function executeTask(
     });
   }
 
+  disposeStale();
+
   // Structured prs/verdict, from only this task's messages (the session is shared per run).
   const taskMessages = ((sess as unknown as { messages?: unknown[] }).messages ?? []).slice(messagesBefore);
   const structured = success ? extractStructured(taskMessages, resultText) : { prs: [] as PRRef[] };
@@ -513,7 +542,7 @@ export async function executeTask(
     error,
     cost: taskCost,
     tokens: taskTokens,
-    model: modelUsed,
+    model: ranModel,
     toolCalls: taskToolCalls,
     ...(structured.prs.length > 0 ? { prs: structured.prs } : {}),
     ...(structured.verdict ? { verdict: structured.verdict } : {}),
