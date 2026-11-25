@@ -62,6 +62,11 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     help: "NATS connection status (1=connected, 0=disconnected)",
     registers: [registry],
   });
+  const natsReconnects = new client.Counter({
+    name: `${prefix}_nats_reconnects_total`,
+    help: "Total NATS reconnects after a lost connection",
+    registers: [registry],
+  });
   const activeTasks = new client.Gauge({
     name: `${prefix}_active_tasks`,
     help: "Currently active tasks",
@@ -87,6 +92,14 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     registers: [registry],
   });
 
+  /** Pass to connectNats as onStatus: sets the connection gauge and counts a reconnect (back up after being down). */
+  let natsWasDown = false;
+  function setNatsConnected(up: boolean): void {
+    if (up && natsWasDown) natsReconnects.inc();
+    natsWasDown = !up;
+    natsConnected.labels().set(up ? 1 : 0);
+  }
+
   /** A task delivered to a knight that stopped before finishing it (max_deliver=1, never re-run). */
   function recordLostTask(): void {
     tasksTotal.labels("lost").inc();
@@ -103,5 +116,5 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     for (const [type, n] of types) if (n !== undefined) tokensTotal.labels(model, type).inc(n);
   }
 
-  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, recordLostTask, recordTokens };
+  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, recordLostTask, recordTokens, setNatsConnected };
 }

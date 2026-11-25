@@ -96,8 +96,7 @@ async function main(): Promise<void> {
   pruneOldSessions(config);
 
   // Connect to NATS
-  await connectNats(config, `pi-knight-${config.knightName}`);
-  metrics.natsConnected.labels().set(1);
+  await connectNats(config, `pi-knight-${config.knightName}`, metrics.setNatsConnected);
 
   // Agent-card roster for find_knights / nats_request by name: a KV watch on <table>.* (none without KNIGHT_CARDS_BUCKET).
   void initRoster(process.env, config.knightName, getConnection)?.start();
@@ -187,14 +186,22 @@ async function main(): Promise<void> {
       const durationMs = Date.now() - startTime;
 
       activity.finished({ success: result.success, error: result.error, cost: result.cost, tokens: result.tokens });
-      await publishResult(taskId, buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }));
 
+      // Metrics first: a result that cannot be published must not lose them or turn a success into an error. (#91)
       // Token/cost are recorded regardless — a no-output task still spent them. Only the
       // task-outcome counter reflects the honest success/failure. (#31)
       metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
       metrics.llmCost.labels(result.model, metrics.BILLING).inc(result.cost);
       metrics.recordTokens(result.model, result.tokens);
+
+      try {
+        await publishResult(taskId, buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }));
+      } catch (e) {
+        // Do not publish a made-up failure for a task that ran: the real result is lost, say so.
+        log.error("Failed to publish task result — result lost", { taskId, error: e instanceof Error ? e.message : String(e) });
+        metrics.tasksTotal.labels("publish_failed").inc();
+      }
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const errMsg = err instanceof Error ? err.message : String(err);

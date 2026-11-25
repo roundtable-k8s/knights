@@ -13,6 +13,8 @@ export const {
   llmCost,
   tokensTotal,
   natsConnected,
+  natsReconnects,
+  setNatsConnected,
   activeTasks,
   toolCallDuration,
   toolCallsTotal,
