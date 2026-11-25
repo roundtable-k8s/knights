@@ -13,7 +13,8 @@ These are native tools in the Pi SDK agent loop — no CLI binary needed:
 ## Custom NATS Tools
 Native to pi-knight runtime — no CLI binary needed:
 - **nats_publish**: Fire-and-forget message to any NATS subject
-- **nats_request**: Send a task to another knight and wait for their response
+- **find_knights**: Who at your table can do X (agent cards: domain, skills, ready/suspended/live)
+- **nats_request**: Send a task to another knight and wait for their response (the name is enough; the domain comes from its card)
 - **spawn_subagent**: Spin up a temporary focused sub-agent for a subtask
 
 ## Vault Access

@@ -108,16 +108,16 @@ test("MCP server negotiates initialize and lists the Round Table tools, always l
   const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
   assert.equal(client.getServerVersion()?.version, pkg.version);
   const { tools: listed } = await client.listTools();
-  assert.deepEqual(listed.map((t) => t.name).sort(), ["nats_publish", "nats_request"]);
+  assert.deepEqual(listed.map((t) => t.name).sort(), ["find_knights", "nats_publish", "nats_request"]);
   const req = listed.find((t) => t.name === "nats_request")!;
   assert.equal(req.inputSchema.type, "object");
-  assert.deepEqual([...(req.inputSchema.required ?? [])].sort(), ["domain", "knight", "task"]);
+  assert.deepEqual([...(req.inputSchema.required ?? [])].sort(), ["knight", "task"], "domain is optional");
   assert.equal((req.inputSchema.properties as any).timeout_ms.type, "integer");
   assert.deepEqual(req._meta, { "anthropic/alwaysLoad": true });
 
   process.env.BROWSER_ENABLED = "true";
   const { client: withBrowser } = await connectInProcess(tools());
-  assert.equal((await withBrowser.listTools()).tools.length, 10);
+  assert.equal((await withBrowser.listTools()).tools.length, 11);
 });
 
 test("MCP tools/call runs the tool, validates arguments and reports errors as results", async () => {
@@ -153,12 +153,14 @@ test("MCP tools/call runs the tool, validates arguments and reports errors as re
 });
 
 test("`index.js mcp` serves over stdio to an SDK Client and exits cleanly when stdin closes", async () => {
-  const env = { ...(process.env as Record<string, string>), KNIGHT_NAME: "t", NATS_URL: "nats://127.0.0.1:1", LOG_LEVEL: "error" };
+  const env = { ...(process.env as Record<string, string>), KNIGHT_NAME: "t", NATS_URL: "nats://127.0.0.1:1", LOG_LEVEL: "error", KNIGHT_CARDS_BUCKET: "" };
   const client = new Client({ name: "test", version: "0" });
   const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", tsx, index, "mcp"], env, stderr: "ignore" });
   await client.connect(transport);
   assert.equal(client.getServerVersion()?.name, "roundtable");
-  assert.deepEqual((await client.listTools()).tools.map((t) => t.name).sort(), ["nats_publish", "nats_request"]);
+  assert.deepEqual((await client.listTools()).tools.map((t) => t.name).sort(), ["find_knights", "nats_publish", "nats_request"]);
+  const roster: any = await client.callTool({ name: "find_knights", arguments: {} });
+  assert.match(roster.content[0].text, /No roster available/, "no KNIGHT_CARDS_BUCKET: no roster");
   const res: any = await client.callTool({ name: "nats_publish", arguments: { subject: "a.b", message: "hi" } });
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /NATS not connected/);

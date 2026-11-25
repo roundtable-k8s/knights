@@ -1,13 +1,21 @@
 /**
  * Knight-to-knight NATS tools, exposed to Claude Code as an MCP server named
- * "roundtable" (tool ids mcp__roundtable__nats_publish and
- * mcp__roundtable__nats_request): in process for the sdk runtime, over stdio
+ * "roundtable" (tool ids mcp__roundtable__nats_publish, mcp__roundtable__nats_request
+ * and mcp__roundtable__find_knights): in process for the sdk runtime, over stdio
  * (`node dist/index.js mcp`) for the cli runtime. Same behavior and payloads as pi-knight's
  * tools/nats.ts, so a claude-knight and a pi-knight can call each other.
  */
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { getConnection, getJetStream, log } from "@roundtable/knight-core";
+import {
+  FIND_KNIGHTS_DESCRIPTION,
+  FIND_KNIGHTS_PARAMS,
+  findKnightsText,
+  getConnection,
+  getJetStream,
+  log,
+  resolveRequestTarget,
+} from "@roundtable/knight-core";
 import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
 
@@ -79,18 +87,25 @@ const natsRequest = tool(
     "Use for cross-knight collaboration: ask a specialist, then continue with their answer.",
     "Only works with knights in YOUR table. Write a self-contained task — the target has no context —",
     "and include 'Do not delegate to other knights' to keep request depth at 1. Each request costs tokens.",
+    "Call find_knights first; the knight's name is then enough (its domain comes from its agent card).",
   ].join(" "),
   {
     knight: z.string().describe("Target knight name (e.g. 'galahad')"),
-    domain: z.string().describe("Task domain matching the target knight's NATS filter (e.g. 'security')"),
+    domain: z
+      .string()
+      .optional()
+      .describe("Task domain of the target knight (e.g. 'security'). Optional: looked up from the knight's agent card when omitted"),
     task: z.string().describe("Clear, self-contained task description"),
     timeout_ms: z.number().int().positive().optional().describe("Timeout in ms (default 600000 = 10 min)"),
   },
-  async ({ knight, domain, task, timeout_ms }) => {
+  async ({ knight: requested, domain: requestedDomain, task, timeout_ms }) => {
+    if (!task || task.trim().length === 0) return text("Error: Cannot send an empty task.", true);
+    const target = await resolveRequestTarget(requested, requestedDomain);
+    if ("error" in target) return text(`Error: ${target.error}`, true);
+    const { knight, domain } = target;
     const js = getJetStream();
     const nc = getConnection();
     if (!js || !nc) return text("Error: NATS not connected", true);
-    if (!task || task.trim().length === 0) return text("Error: Cannot send an empty task.", true);
 
     const timeoutMs = timeout_ms ?? 600_000;
     const taskId = `${knight}-xreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -131,9 +146,25 @@ const natsRequest = tool(
   },
 );
 
-/** The "roundtable" MCP server's tools: NATS, plus browser_* when the sidecar is enabled. */
+const findKnights = tool(
+  "find_knights",
+  FIND_KNIGHTS_DESCRIPTION,
+  {
+    query: z.string().optional().describe(FIND_KNIGHTS_PARAMS.query),
+    domain: z.string().optional().describe(FIND_KNIGHTS_PARAMS.domain),
+    skill: z.string().optional().describe(FIND_KNIGHTS_PARAMS.skill),
+    includeSuspended: z.boolean().optional().describe(FIND_KNIGHTS_PARAMS.includeSuspended),
+  },
+  async (params) => {
+    const { text: t, isError } = await findKnightsText(params);
+    return text(t, isError ?? false);
+  },
+);
+
+/** The "roundtable" MCP server's tools: NATS and find_knights, plus browser_* when the sidecar is enabled. */
 export function roundtableTools() {
-  return browserEnabled() ? [natsPublish, natsRequest, ...browserTools] : [natsPublish, natsRequest];
+  const core = [natsPublish, natsRequest, findKnights];
+  return browserEnabled() ? [...core, ...browserTools] : core;
 }
 
 /**
@@ -148,7 +179,7 @@ export function createRoundtableServer() {
   return createSdkMcpServer({ name: "roundtable", version: "0.1.0", tools, alwaysLoad: true });
 }
 
-export const NATS_TOOL_IDS = ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request"];
+export const NATS_TOOL_IDS = ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request", "mcp__roundtable__find_knights"];
 
 export function roundtableToolIds(): string[] {
   return browserEnabled() ? [...NATS_TOOL_IDS, ...BROWSER_TOOL_IDS] : NATS_TOOL_IDS;

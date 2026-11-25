@@ -46,15 +46,16 @@ Workspace: ${config.workDir} (persistent PVC — survives restarts)${
   }
 Skills: available through the Skill tool (synced from the arsenal, read-only)
 Vault: /vault if mounted (Derek's Obsidian vault — write only to Briefings/ and Roundtable/)
-Knight-to-knight: mcp__roundtable__nats_request (ask another knight), mcp__roundtable__nats_publish (alerts/reports)${
+Knight-to-knight: mcp__roundtable__nats_request (ask another knight), mcp__roundtable__nats_publish (alerts/reports), mcp__roundtable__find_knights (who is at your table)
+Before delegating with mcp__roundtable__nats_request, call mcp__roundtable__find_knights to see who at your table can do it; nats_request then needs only the knight's name.${
     browserEnabled()
       ? "\nBrowser: headless Chrome sidecar via mcp__roundtable__browser_* (open → snapshot → click/fill → get_text/screenshot); the agent-browser CLI also works from Bash"
       : ""
   }
 </runtime_context>
 
-Arsenal skills were written for pi-knight. Where a skill says nats_request / nats_publish,
-use mcp__roundtable__nats_request / mcp__roundtable__nats_publish; where it says
+Arsenal skills were written for pi-knight. Where a skill says nats_request / nats_publish / find_knights,
+use mcp__roundtable__nats_request / mcp__roundtable__nats_publish / mcp__roundtable__find_knights; where it says
 spawn_subagent, use the Agent tool; browser_* means mcp__roundtable__browser_*.
 
 <unattended>
