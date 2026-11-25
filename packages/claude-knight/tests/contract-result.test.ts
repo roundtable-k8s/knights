@@ -85,3 +85,32 @@ test("retry attempt: result carries attempt/retry_of; only a failure carries the
   assert.equal(fail.task?.task, "Do it");
   assert.ok(!("attempt" in buildResultPayload(run, meta)));
 });
+
+test("fixture result.transient: an overloaded API error publishes transient overloaded", () => {
+  const out = classifyResult({
+    result: { type: "result", subtype: "success", is_error: true, result: "API Error: 529 Overloaded", num_turns: 1 } as never,
+    lastAssistantText: "",
+    aborted: false,
+    config,
+    durationMs: 5000,
+  });
+  assert.equal(out.success, false);
+  const p = buildResultPayload({ ...out, cost: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: "claude-opus-5-5" }, { ...meta, durationMs: 5000 });
+  assert.equal(p.transient, true);
+  assert.equal(p.transientReason, "overloaded");
+  assert.deepEqual(resultFixtureDiff({ ...p, result: "Task failed: API Error: 529 Overloaded", error: "API Error: 529 Overloaded", turns: 0 }, "result.transient"), []);
+});
+
+test("a thrown connection reset is transient network; an ordinary failure is not", () => {
+  assert.equal(buildResultPayload(failedOutcome("read ECONNRESET", config), meta).transientReason, "network");
+  const plain = buildResultPayload(failedOutcome("boom", config), meta);
+  assert.ok(!("transient" in plain) && !("transientReason" in plain));
+  const turns = classifyResult({
+    result: { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 500 } as never,
+    lastAssistantText: "tests failed with HTTP 503 in fixture",
+    aborted: false,
+    config,
+    durationMs: 1,
+  });
+  assert.equal(turns.transient, undefined);
+});

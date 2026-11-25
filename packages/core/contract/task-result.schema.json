@@ -141,6 +141,18 @@
       ],
       "description": "Machine-readable refusal: the task did not run for affordability. `credits`: the provider is out of credits (e.g. OpenRouter 402), which does not reset on its own, so escalate. `quota`: a plan quota window is used up (claude-knight subscription), which resets later, so defer and re-run."
     },
+    "transient": {
+      "type": "boolean",
+      "description": "The task failed because the model provider was briefly unavailable, after the runtime's own retries. Safe to retry later. Never set for a task that failed on its own terms or was refused."
+    },
+    "transientReason": {
+      "enum": [
+        "overloaded",
+        "provider_5xx",
+        "network"
+      ],
+      "description": "Why a transient failure happened. `overloaded`: the provider answered HTTP 529. `provider_5xx`: it answered 500, 502, 503 or 504. `network`: a connection reset or timeout to the provider."
+    },
     "usage_limited": {
       "type": "boolean",
       "deprecated": true,

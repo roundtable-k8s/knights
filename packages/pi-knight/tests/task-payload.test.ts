@@ -106,3 +106,20 @@ test("retry attempt: result carries attempt/retry_of; failure carries the task, 
   const first = buildResultPayload({ ...base, success: true }, { ...meta, parsed: { task: "x", taskId: "t1" } });
   assert.ok(!("attempt" in first) && !("retry_of" in first));
 });
+
+test("fixture result.transient: a thrown 529 publishes transient overloaded", () => {
+  const p = buildResultPayload(failedTaskResult("API Error: 529 Overloaded", "claude-opus-5-5"), fx);
+  assert.deepEqual(resultFixtureDiff(p, "result.transient"), []);
+});
+
+test("transient reasons: 503 is provider_5xx, ECONNRESET is network", () => {
+  assert.equal(buildResultPayload(failedTaskResult("503 Service Unavailable", "m"), meta).transientReason, "provider_5xx");
+  assert.equal(buildResultPayload(failedTaskResult("read ECONNRESET", "m"), meta).transientReason, "network");
+});
+
+test("ordinary failures and refusals are not transient", () => {
+  for (const msg of ["boom", "Task aborted before producing output (task timeout)", "tests failed: 3 of 500 passed", "402 This request requires more credits, or fewer max_tokens"]) {
+    const p = buildResultPayload(failedTaskResult(msg, "m"), meta);
+    assert.ok(!("transient" in p) && !("transientReason" in p), msg);
+  }
+});

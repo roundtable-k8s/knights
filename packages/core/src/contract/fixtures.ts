@@ -16,6 +16,7 @@ export const RESULT_FIXTURES = [
   "result.lost",
   "result.refused-credits",
   "result.refused-quota",
+  "result.transient",
   "result.structured",
 ] as const;
 export const ACTIVITY_FIXTURES = [

@@ -1,10 +1,11 @@
-import { taskResultFields, type ParsedTask, type TaskResult as ResultPayload } from "@roundtable/knight-core";
+import { taskResultFields, transientFailure, type ParsedTask, type TaskResult as ResultPayload } from "@roundtable/knight-core";
 import type { TaskResult } from "./knight.js";
 import { refusalCode } from "./result-extraction.js";
 
 /** TaskResult for a task that threw out of executeTask, so it publishes the same shape as an in-band failure. */
 export function failedTaskResult(errMsg: string, model: string): TaskResult {
   const refused = refusalCode(errMsg);
+  const transient = refused ? undefined : transientFailure(errMsg);
   return {
     result: `Task failed: ${errMsg}`,
     success: false,
@@ -14,6 +15,7 @@ export function failedTaskResult(errMsg: string, model: string): TaskResult {
     model,
     toolCalls: 0,
     ...(refused ? { refused } : {}),
+    ...(transient ? { transient } : {}),
   };
 }
 
@@ -40,6 +42,7 @@ export function buildResultPayload(
     ...(result.prs ? { prs: result.prs } : {}),
     ...(result.verdict ? { verdict: result.verdict } : {}),
     ...(result.refused ? { refused: result.refused } : {}),
+    ...(result.transient ? result.transient : {}),
     ...taskResultFields(meta.parsed, result.success),
     timestamp: meta.timestamp ?? new Date().toISOString(),
   };
