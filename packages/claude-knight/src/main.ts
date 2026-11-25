@@ -4,9 +4,9 @@ import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
-import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
+import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { initLogger, log, connectNats, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
 import * as metrics from "./metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -80,7 +80,7 @@ export async function main(): Promise<void> {
 
   await connectNats(config, `claude-knight-${config.knightName}`);
   metrics.natsConnected.labels(config.knightName).set(1);
-  startIntrospect(config);
+  startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
 
   let activeCount = 0;
   let shuttingDown = false;
@@ -89,7 +89,6 @@ export async function main(): Promise<void> {
   const setActive = (n: number) => {
     activeCount = n;
     setActiveTaskCount(n);
-    setIntrospectActiveTasks(n);
     metrics.activeTasks.labels(config.knightName).set(n);
   };
 

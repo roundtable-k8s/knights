@@ -1,8 +1,8 @@
 import http from "node:http";
 import type { KnightConfig } from "./config.js";
 import { registry } from "./metrics.js";
-import { getStatus as getNatsStatus } from "@roundtable/knight-core";
-import { handleIntrospect } from "./introspect.js";
+import { getStatus as getNatsStatus, handleIntrospect, introspectRequestFromQuery } from "@roundtable/knight-core";
+import { introspectOptions } from "./session-source.js";
 
 let server: http.Server | null = null;
 let skillCount = 0;
@@ -57,15 +57,7 @@ export function startHealthServer(config: KnightConfig): void {
       );
     } else if (url === "/introspect" || url?.startsWith("/introspect?")) {
       const urlObj = new URL(url, "http://localhost");
-      const type = (urlObj.searchParams.get("type") ?? "stats") as
-        | "stats"
-        | "recent"
-        | "tree"
-        | "history"
-        | "session";
-      const limit = parseInt(urlObj.searchParams.get("limit") ?? "20", 10);
-      const id = urlObj.searchParams.get("id") ?? undefined;
-      const result = await handleIntrospect({ type, limit, id }, config);
+      const result = await handleIntrospect(introspectRequestFromQuery(urlObj.searchParams), introspectOptions(config));
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result, null, 2));
     } else if (url === "/metrics") {

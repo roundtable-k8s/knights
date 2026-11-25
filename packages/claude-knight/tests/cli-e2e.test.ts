@@ -20,7 +20,9 @@ import { dirname, join } from "node:path";
 
 import { loadConfig, type KnightConfig } from "../src/config.js";
 import { executeTask, resetKnightState, type ExecuteOverrides } from "../src/knight.js";
-import { handleIntrospect } from "../src/introspect.js";
+import { handleIntrospect as coreIntrospect, type IntrospectRequest } from "@roundtable/knight-core";
+import { introspectOptions } from "../src/session-source.js";
+const handleIntrospect = (req: IntrospectRequest, cfg: KnightConfig) => coreIntrospect(req, introspectOptions(cfg));
 import { registry } from "../src/metrics.js";
 import { startMockAnthropic, type MockAnthropic } from "./helpers/mock-anthropic.js";
 

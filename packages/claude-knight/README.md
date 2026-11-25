@@ -75,7 +75,9 @@ Set `ACTIVITY_CONTENT=none` to drop all previews. `POD_NAME` and `NODE_NAME` (do
 pod; the pod falls back to the hostname and `node` is omitted when unset. Both runtimes share this
 implementation (`packages/core/src/activity.ts`, contract v1).
 
-Introspection also answers per pod on `<prefix>.introspect.<Knight>.<pod>`; every reply carries `pod` and
+Introspection is served by `packages/core` (`introspect.ts`) over this runtime's session source
+(`session-source.ts`). The knight-level subject uses queue group `introspect` (one replica answers); it also
+answers per pod on `<prefix>.introspect.<Knight>.<pod>`. Every reply carries `pod` and
 `node`, and `stats` has an `inflight` array (taskId, runId, chain/step, model, startedAt, lastHeartbeatAt).
 
 ## Authentication and billing

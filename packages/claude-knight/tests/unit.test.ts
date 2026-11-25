@@ -12,7 +12,7 @@ import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, 
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
 import { formatRequestResponse } from "../src/tools.js";
 import { taskWorkDir } from "../src/knight.js";
-import { itemsForMessage } from "../src/introspect.js";
+import { itemsForMessage } from "../src/session-source.js";
 
 const baseEnv = { KNIGHT_NAME: "Gawain", SUBSCRIBE_TOPICS: "rt.tasks.security.>" };
 
