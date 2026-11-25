@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadBaseConfig } from "../src/config.js";
+import { loadBaseConfig, maxConcurrentTasks, parseTopics, positiveIntEnv, floatEnv } from "../src/config.js";
 
 test("loadBaseConfig applies defaults", () => {
   assert.deepEqual(loadBaseConfig({ KNIGHT_NAME: "k" }), {
@@ -47,4 +47,33 @@ test("loadBaseConfig reads the optional memory env vars", () => {
 test("loadBaseConfig reads ROUNDTABLE_TABLE, none when empty", () => {
   assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", ROUNDTABLE_TABLE: "dev" }).table, "dev");
   assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", ROUNDTABLE_TABLE: "" }).table, "none");
+});
+
+
+test("maxConcurrentTasks never returns NaN, 0 or negatives", () => {
+  for (const v of ["abc", "0", "-3", "1.5"]) assert.equal(maxConcurrentTasks({ MAX_CONCURRENT_TASKS: v }, 2), 1);
+  assert.equal(maxConcurrentTasks({}, 2), 2);
+  assert.equal(maxConcurrentTasks({ MAX_CONCURRENT_TASKS: "4" }, 2), 4);
+});
+
+test("parseTopics trims and drops empty entries", () => {
+  assert.deepEqual(parseTopics("a, ,b,"), ["a", "b"]);
+});
+
+test("positiveIntEnv falls back on bad or below-minimum values", () => {
+  assert.equal(positiveIntEnv({ X: "abc" }, "X", 7), 7);
+  assert.equal(positiveIntEnv({ X: "0" }, "X", 7), 7);
+  assert.equal(positiveIntEnv({ X: "0" }, "X", 7, { min: 0 }), 0);
+  assert.equal(positiveIntEnv({ X: "5" }, "X", 7), 5);
+});
+
+test("floatEnv parses or falls back", () => {
+  assert.equal(floatEnv({ X: "0.5" }, "X", 1), 0.5);
+  assert.equal(floatEnv({ X: "nope" }, "X", 1), 1);
+});
+
+test("loadBaseConfig rejects non-positive timeouts", () => {
+  const c = loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: "0", DRAIN_TIMEOUT_MS: "-5" });
+  assert.equal(c.taskTimeoutMs, 1_800_000);
+  assert.equal(c.drainTimeoutMs, 1_860_000);
 });

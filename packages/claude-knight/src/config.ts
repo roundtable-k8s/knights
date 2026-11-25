@@ -1,5 +1,5 @@
 import os from "node:os";
-import { intEnv, loadBaseConfig, requireEnv, type BaseKnightConfig } from "@roundtable/knight-core";
+import { floatEnv, intEnv, loadBaseConfig, maxConcurrentTasks, parseTopics, requireEnv, type BaseKnightConfig } from "@roundtable/knight-core";
 
 /**
  * Runtime configuration. The first block is the env contract the Roundtable
@@ -70,13 +70,6 @@ export function planReserveFromEnv(env: Env = process.env): number {
   return Math.min(1, Math.max(0, floatEnv(env, "CLAUDE_PLAN_RESERVE", 0.8)));
 }
 
-function floatEnv(env: Env, name: string, fallback: number): number {
-  const raw = env[name];
-  if (raw == null || raw === "") return fallback;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 /**
  * Map the Knight CR's spec.model onto a model Claude Code accepts.
  *
@@ -115,12 +108,12 @@ export function loadConfig(env: Env = process.env): KnightConfig {
   return {
     ...loadBaseConfig(env),
     knightModel,
-    subscribeTopics: requireEnv(env, "SUBSCRIBE_TOPICS").split(",").map((s) => s.trim()).filter(Boolean),
+    subscribeTopics: parseTopics(requireEnv(env, "SUBSCRIBE_TOPICS")),
     natsTasksStream: env["NATS_TASKS_STREAM"] ?? "fleet_a_tasks",
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
     // The operator always sets this from spec.concurrency (CRD default 2). Set
     // concurrency: 1 on claude-knights unless the plan has headroom to spare.
-    maxConcurrentTasks: Math.max(1, intEnv(env, "MAX_CONCURRENT_TASKS", 1)),
+    maxConcurrentTasks: maxConcurrentTasks(env, 1),
     hostname: os.hostname(),
     podName: env["POD_NAME"] || os.hostname(),
     nodeName: env["NODE_NAME"] || os.hostname(),
