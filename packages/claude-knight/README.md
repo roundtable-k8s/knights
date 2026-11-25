@@ -142,6 +142,12 @@ A task payload may carry an optional `model` (a Claude alias or `claude-*` id); 
 | `CLAUDE_DISALLOWED_TOOLS` | — | extra built-ins to disable, comma separated |
 | `CLAUDE_CONFIG_DIR` | `/data/.claude-home` | Claude Code state, sessions, linked skills |
 
+### Telemetry
+
+With `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) set and `OTEL_SDK_DISABLED` not `true`, the Claude Code child gets its built-in OpenTelemetry export switched on: `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, and `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` set to `otlp`. Its `claude_code.interaction` span is parented to the knight's task span through `TRACEPARENT`, and `OTEL_SERVICE_NAME` defaults to `claude-knight`. Any of these the pod env already sets is left alone.
+
+Prompt and response content is captured by default (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` set to `1`). `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` sets them to `0`. This export runs inside the CLI, so `redactSecrets` does not touch it; redaction of these spans is done by the chart collector. `OTEL_LOG_RAW_API_BODIES` is never set. With no OTLP endpoint, the child env is unchanged.
+
 ### GitHub credentials
 
 GitHub App installation tokens expire after an hour, but env vars are frozen at pod start. When the Knight
