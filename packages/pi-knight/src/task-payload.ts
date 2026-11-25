@@ -36,6 +36,7 @@ export function buildResultPayload(
     ...(result.error ? { error: result.error } : {}),
     duration_ms: meta.durationMs,
     cost: result.cost,
+    ...(result.billing ? { billing: result.billing } : {}),
     tokens: result.tokens,
     model: result.model,
     tool_calls: result.toolCalls,

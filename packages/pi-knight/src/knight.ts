@@ -7,7 +7,7 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
+import { isLocalModel, resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import { dataPaths, type KnightConfig } from "./config.js";
 import { log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
@@ -17,7 +17,7 @@ import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
-import { describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
+import { LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
 
 
 export interface TaskResult {
@@ -28,6 +28,8 @@ export interface TaskResult {
   /** Populated when success is false. */
   error?: string;
   cost: number;
+  /** `local` when the model runs on an operator-supplied endpoint (cost is then 0). */
+  billing?: "local";
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   model: string;
   toolCalls: number;
@@ -216,7 +218,7 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
   const settingsManager = createTrustedSettingsManager(dataDir, dataDir);
   // In-memory overrides (never written to the data dir): env-driven retry cap and thinking budgets.
   settingsManager.applyOverrides({
-    retry: { provider: { maxRetryDelayMs: config.maxRetryDelayMs } },
+    retry: { provider: { maxRetryDelayMs: config.maxRetryDelayMs, timeoutMs: config.modelRequestTimeoutMs } },
     ...(thinkingLevel !== "off" && {
       thinkingBudgets: {
         low: config.thinkingBudgetLow,
@@ -485,7 +487,10 @@ export async function executeTask(
     const d = after - before;
     return Number.isFinite(d) ? Math.max(0, d) : 0;
   };
-  const taskCost = delta(statsAfter.cost, costBefore);
+  const ranModelObj = override?.model ?? defaultModel ?? sess.model;
+  const local = ranModelObj ? isLocalModel(ranModelObj) : false;
+  // Local endpoints cost nothing per token whatever a catalog entry says.
+  const taskCost = local ? 0 : delta(statsAfter.cost, costBefore);
   const taskToolCalls = delta(statsAfter.toolCalls, toolCallsBefore);
   const taskTokens = {
     input: delta(statsAfter.tokens.input, tokensBefore.input),
@@ -500,9 +505,16 @@ export async function executeTask(
   // A silent LLM error or abort (the Pi loop records those on the final assistant
   // message and resolves prompt() normally) is surfaced as the failure reason rather
   // than being masked by the generic no-output message.
-  const deliverable = getBestAssistantResult(sess);
+  let deliverable = getBestAssistantResult(sess);
+  // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
+  // (typical of local models whose endpoint lacks tool support, #27). Fail loudly, not
+  // as a success with no work done.
+  const toolCallsAsText = deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
+  if (toolCallsAsText) deliverable = undefined;
   const failureReason = deliverable == null
-    ? describeSessionFailure(sess, signal?.aborted ?? false)
+    ? (toolCallsAsText ? TOOL_CALLS_AS_TEXT_REASON : undefined) ??
+      describeSessionFailure(sess, signal?.aborted ?? false) ??
+      (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined)
     : undefined;
   const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
   const refused = success ? undefined : refusalCode(error);
@@ -548,6 +560,7 @@ export async function executeTask(
     success,
     error,
     cost: taskCost,
+    ...(local ? { billing: "local" as const } : {}),
     tokens: taskTokens,
     model: ranModel,
     toolCalls: taskToolCalls,

@@ -193,7 +193,7 @@ async function main(): Promise<void> {
       // task-outcome counter reflects the honest success/failure. (#31)
       metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
-      metrics.llmCost.labels(result.model, metrics.BILLING).inc(result.cost);
+      metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
       metrics.recordTokens(result.model, result.tokens);
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;

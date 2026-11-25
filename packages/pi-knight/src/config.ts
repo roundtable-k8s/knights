@@ -11,6 +11,8 @@ export interface KnightConfig extends BaseKnightConfig {
   hostname: string;
   thinkingLevel: string;
   maxRetryDelayMs: number;
+  /** HTTP request timeout for model calls (MODEL_REQUEST_TIMEOUT_MS). Local models can take minutes to a first token. */
+  modelRequestTimeoutMs: number;
   thinkingBudgetLow: number;
   thinkingBudgetMedium: number;
   thinkingBudgetHigh: number;
@@ -63,6 +65,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     thinkingLevel: env["KNIGHT_THINKING"] ?? "off",
     // 0 is valid: pi-ai treats it as "no cap" on provider-requested retry delays.
     maxRetryDelayMs: positiveIntEnv(env, "MAX_RETRY_DELAY_MS", 60000, { min: 0 }),
+    modelRequestTimeoutMs: positiveIntEnv(env, "MODEL_REQUEST_TIMEOUT_MS", 600000),
     thinkingBudgetLow: positiveIntEnv(env, "THINKING_BUDGET_LOW", 1024),
     thinkingBudgetMedium: positiveIntEnv(env, "THINKING_BUDGET_MEDIUM", 4096),
     thinkingBudgetHigh: positiveIntEnv(env, "THINKING_BUDGET_HIGH", 8192),

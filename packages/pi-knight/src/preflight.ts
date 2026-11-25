@@ -22,6 +22,7 @@
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { log } from "@roundtable/knight-core";
+import { isLocalModel } from "./model.js";
 
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -44,7 +45,7 @@ interface OllamaPs {
 
 /** True when the resolved model points at a local OpenAI-compatible endpoint. */
 export function isLocalEndpoint(model: Model<Api>): boolean {
-  return model.provider === "ollama" || LOCAL_HOST_RE.test(model.baseUrl);
+  return isLocalModel(model) || LOCAL_HOST_RE.test(model.baseUrl);
 }
 
 /** True when the endpoint is Ollama specifically (enables the num_ctx probe). */
