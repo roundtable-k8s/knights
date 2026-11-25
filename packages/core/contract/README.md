@@ -41,7 +41,7 @@ server's `max_payload` leaves after the rest of the result. Over the cap, the he
 with a `[... N bytes omitted ...]` line between them (so a trailing `Verdict:` line or PR URL survives),
 the cut never splits a UTF-8 character, and the result carries `result_truncated: true`. `prs` and
 `verdict` are read from the full text before the cut. A result within the cap is published unchanged and has
-no `result_truncated` field. `fixtures/result.truncated.json` is an example.
+no `result_truncated` field. The size is checked on the JSON-encoded payload (quotes, newlines and control characters grow when escaped), not on the raw text. A JetStream stream's `max_msg_size` is not read from the server; if it is lower than `max_payload`, lower `RESULT_MAX_BYTES` to match. `fixtures/result.truncated.json` is an example.
 
 ## Refusals
 

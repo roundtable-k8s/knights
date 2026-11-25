@@ -75,7 +75,13 @@ export function capResultText(result: TaskResult, maxBytes: number): TaskResult 
   if (buf.length <= maxBytes) return result;
 
   const markerRoom = Buffer.byteLength(`\n[... ${buf.length} bytes omitted ...]\n`);
-  const keep = Math.max(0, maxBytes - markerRoom);
+  if (maxBytes < markerRoom) {
+    // No room for the marker line: keep a plain UTF-8-safe prefix so the budget still holds.
+    let end = Math.max(0, maxBytes);
+    while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--;
+    return { ...result, result: buf.subarray(0, end).toString("utf8"), result_truncated: true };
+  }
+  const keep = maxBytes - markerRoom;
   let headEnd = Math.floor(keep * 0.6);
   let tailStart = buf.length - (keep - headEnd);
   // Move off UTF-8 continuation bytes (10xxxxxx) so no character is split.

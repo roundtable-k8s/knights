@@ -58,6 +58,21 @@ describe("publishResult cap", () => {
     assert.ok(Buffer.byteLength(c.sent[0]!) <= 20_000);
   });
 
+  for (const [name, unit] of [["newline", "\n"], ["quote", '"'], ["backslash", "\\"], ["control-char", "\u001b"], ["mixed", 'x\n"\u001b[0m\\']] as const) {
+    it(`fits max_payload with ${name}-heavy text`, async () => {
+      const c = capture();
+      await publishResult("t1", withText(unit.repeat(100_000)), { js: c.js, resultMaxBytes: 512 * 1024, maxPayload: 20_000 });
+      assert.ok(Buffer.byteLength(c.sent[0]!) <= 20_000, `${name}: ${Buffer.byteLength(c.sent[0]!)}`);
+      assert.equal((JSON.parse(c.sent[0]!) as TaskResult).result_truncated, true);
+    });
+  }
+
+  it("capResultText stays within a budget smaller than the marker", () => {
+    const out = capResultText(withText("é".repeat(100)), 10);
+    assert.ok(Buffer.byteLength(out.result) <= 10);
+    assert.equal(out.result_truncated, true);
+  });
+
   it("publishes a small result byte for byte", async () => {
     const c = capture();
     const r = withText("fine");

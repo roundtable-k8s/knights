@@ -557,7 +557,19 @@ function capForPayload(taskId: string, result: TaskResult, opts: PublishResultOp
     budget = Math.min(budget, maxPayload - overhead - PAYLOAD_MARGIN_BYTES);
   }
   budget = Math.max(budget, 256);
-  const capped = capResultText(result, budget);
+  let capped = capResultText(result, budget);
+  // JSON escaping grows the text (newline/quote 2x, control chars 6x), so measure the encoded
+  // payload and cut again with a smaller budget until it fits.
+  if (maxPayload && maxPayload > 0) {
+    while (budget > 256 && Buffer.byteLength(encodeResult(capped)) > maxPayload) {
+      const excess = Buffer.byteLength(encodeResult(capped)) - maxPayload;
+      const keptBytes = Buffer.byteLength(capped.result);
+      // Shrink by the excess, and at least by a ratio so heavy escaping converges quickly.
+      const next = Math.min(keptBytes - excess - 64, Math.floor(keptBytes * 0.9));
+      budget = Math.max(256, Math.min(budget - 1, next));
+      capped = capResultText(result, budget);
+    }
+  }
   if (capped !== result) {
     log.warn("Result text truncated to fit the payload limit", {
       taskId,
