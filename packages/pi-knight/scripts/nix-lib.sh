@@ -26,7 +26,7 @@ rt_nix_timeout_warning() {
 # rt_bootstrap_nix_bounded — bootstrap + profile repair under STARTUP_NIX_TIMEOUT.
 # Exits 124 on timeout. Runs in a child bash, so the functions are exported.
 rt_bootstrap_nix_bounded() {
-  export NIX_PROFILE
+  export NIX_PROFILE NIX_CONF
   export -f rt_log rt_write_nix_conf rt_bootstrap_nix rt_restore_profile
   timeout "$STARTUP_NIX_TIMEOUT" bash -c 'rt_bootstrap_nix && rt_restore_profile'
 }
@@ -63,7 +63,7 @@ rt_bootstrap_nix() {
   rt_log "Installing Nix to PVC..."
   mkdir -p /nix/store /nix/var/nix/profiles/per-user/node \
            /nix/var/nix/gcroots/per-user/node /nix/etc/nix
-  rt_write_nix_conf
+  rt_write_nix_conf || return 1
 
   local cache_tar
   cache_tar=$(ls /opt/nix-cache/nix-*.tar.xz 2>/dev/null | head -1)
