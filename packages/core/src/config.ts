@@ -11,6 +11,8 @@ export interface BaseKnightConfig {
   natsResultsPrefix: string;
   /** Total time a failing result publish is retried across NATS reconnects (RESULT_PUBLISH_RETRY_MS). Default 60 s. */
   resultPublishRetryMs: number;
+  /** Cap on the result text in bytes (RESULT_MAX_BYTES). Default 512 KB; the NATS max_payload can lower it. */
+  resultMaxBytes: number;
   /** Port for the health and metrics HTTP server (METRICS_PORT). */
   metricsPort: number;
   logLevel: string;
@@ -108,6 +110,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     natsUrl: env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
     resultPublishRetryMs: positiveIntEnv(env, "RESULT_PUBLISH_RETRY_MS", 60_000, { min: 0 }),
+    resultMaxBytes: positiveIntEnv(env, "RESULT_MAX_BYTES", 512 * 1024, { min: 1 }),
     metricsPort: intEnv(env, "METRICS_PORT", 3000),
     logLevel: env["LOG_LEVEL"] ?? "info",
     taskTimeoutMs,

@@ -9,6 +9,7 @@ test("loadBaseConfig applies defaults", () => {
     natsUrl: "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: "fleet-a.results",
     resultPublishRetryMs: 60_000,
+    resultMaxBytes: 512 * 1024,
     metricsPort: 3000,
     logLevel: "info",
     taskTimeoutMs: 1_800_000,

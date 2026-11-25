@@ -138,3 +138,11 @@ test("transient fields validate and classify provider errors only", async () => 
   assert.equal(transientFailure("Task timed out after 600s"), undefined);
   assert.equal(transientFailure("3 tests failed"), undefined);
 });
+
+// result.truncated is produced by publishResult (capResultText), not by a runtime's result builder,
+// so it is not in RESULT_FIXTURES (the runtimes rebuild those from inputs).
+test("fixture result.truncated is a valid TaskResult marked truncated", () => {
+  const f = JSON.parse(readFileSync(new URL("../contract/fixtures/result.truncated.json", import.meta.url), "utf8"));
+  assert.deepEqual(taskResultErrors(f), []);
+  assert.equal(f.result_truncated, true);
+});

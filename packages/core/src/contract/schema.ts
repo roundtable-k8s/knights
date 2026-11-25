@@ -107,6 +107,12 @@ export const TaskResult = Type.Object(
     knight: Type.String({ description: "The knight that ran the task." }),
     success: Type.Boolean({ description: "False when the task produced no deliverable; `error` then says why." }),
     result: Type.String({ description: "Task output, or the failure message when `success` is false." }),
+    result_truncated: Type.Optional(
+      Type.Boolean({
+        description:
+          "The `result` text was cut to fit the NATS payload limit (RESULT_MAX_BYTES): the head and the tail are kept with a `[... N bytes omitted ...]` line between them. Absent when the text is whole.",
+      }),
+    ),
     error: Type.Optional(Type.String({ description: "Set when `success` is false." })),
     duration_ms: count("Wall-clock run time in ms."),
     cost: count("USD. claude-knight in subscription mode reports the API-equivalent cost, not billed."),

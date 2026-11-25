@@ -32,6 +32,10 @@
       "type": "string",
       "description": "Task output, or the failure message when `success` is false."
     },
+    "result_truncated": {
+      "type": "boolean",
+      "description": "The `result` text was cut to fit the NATS payload limit (RESULT_MAX_BYTES): the head and the tail are kept with a `[... N bytes omitted ...]` line between them. Absent when the text is whole."
+    },
     "error": {
       "type": "string",
       "description": "Set when `success` is false."
