@@ -38,3 +38,11 @@ rt_run() {
   RT_PHASE_PID=""
   return "$rc"
 }
+
+# rt_phase_mark LABEL — log one line with the seconds spent since the previous
+# mark (or since the entrypoint started), so a slow start shows in the pod log.
+RT_PHASE_START="$SECONDS"
+rt_phase_mark() {
+  echo "[entrypoint] $(date '+%H:%M:%S') $1 took $((SECONDS - RT_PHASE_START))s"
+  RT_PHASE_START="$SECONDS"
+}

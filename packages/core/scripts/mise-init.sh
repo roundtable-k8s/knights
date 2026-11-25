@@ -20,6 +20,19 @@ set -e
 CONFIG_DIR="${CONFIG_DIR:-/config}"
 PERSIST_BIN="/data/bin"
 PERSIST_LIB="/data/lib"
+STARTUP_APT_TIMEOUT="${STARTUP_APT_TIMEOUT:-180}"
+STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-180}"
+
+# phase_done NAME START — one log line with the seconds a start-up phase took.
+phase_done() {
+  echo "mise-init: $1 took $(($(date +%s) - $2))s"
+}
+
+# apt_host — the host of the first apt mirror in /etc/apt/sources.list*.
+apt_host() {
+  cat /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null \
+    | grep -Eo 'https?://[^/[:space:]]+' | head -n 1 | sed 's|^https\{0,1\}://||'
+}
 
 # --- System packages (apt) ---
 APT_FILE="$CONFIG_DIR/apt.txt"
@@ -29,11 +42,20 @@ if [ -f "$APT_FILE" ]; then
   # Snapshot existing binaries so we can detect what's new
   ls /usr/bin/ /usr/sbin/ /usr/local/bin/ 2>/dev/null | sort > /tmp/bins-before.txt
 
-  apt-get update -qq
-  xargs -a "$APT_FILE" apt-get install -y --no-install-recommends
-  rm -rf /var/lib/apt/lists/*
-  echo "System packages installed."
+  APT_START=$(date +%s)
+  APT_OK=true
+  if ! timeout "$STARTUP_APT_TIMEOUT" apt-get update -qq ||
+     ! xargs -a "$APT_FILE" timeout "$STARTUP_APT_TIMEOUT" apt-get install -y --no-install-recommends; then
+    APT_OK=false
+    APT_HOST=$(apt_host)
+    [ -n "$APT_HOST" ] || APT_HOST="the apt mirror (deb.debian.org)"
+    echo "WARNING: apt gave up (timeout ${STARTUP_APT_TIMEOUT}s per step) or failed; could not reach $APT_HOST — check the egress allowlist. Continuing without apt packages."
+  fi
+  rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+  phase_done apt "$APT_START"
+  [ "$APT_OK" = true ] && echo "System packages installed."
 
+  if [ "$APT_OK" = true ]; then
   # Persist newly installed binaries + shared libraries to PVC
   mkdir -p "$PERSIST_BIN" "$PERSIST_LIB"
   ls /usr/bin/ /usr/sbin/ /usr/local/bin/ 2>/dev/null | sort > /tmp/bins-after.txt
@@ -80,6 +102,7 @@ if [ -f "$APT_FILE" ]; then
   echo "  Persisted: perl modules"
 
   echo "Persisted $(ls "$PERSIST_BIN" | wc -l) binaries to $PERSIST_BIN"
+  fi
 fi
 
 # --- Static binary downloads (bins.txt) ---
@@ -137,8 +160,15 @@ fi
 PIP_FILE="$CONFIG_DIR/pip.txt"
 if [ -f "$PIP_FILE" ]; then
   echo "Installing Python packages from $PIP_FILE..."
-  pip install --no-cache-dir -r "$PIP_FILE"
-  echo "Python packages installed."
+  PIP_START=$(date +%s)
+  if timeout "$STARTUP_PIP_TIMEOUT" pip install --no-cache-dir -r "$PIP_FILE"; then
+    echo "Python packages installed."
+  else
+    rc=$?
+    PIP_HOST=$(echo "${PIP_INDEX_URL:-https://pypi.org/simple}" | sed 's|^[a-z]*://||; s|^[^@/]*@||; s|[/:].*||')
+    echo "WARNING: pip install gave up (exit $rc, timeout ${STARTUP_PIP_TIMEOUT}s); could not reach $PIP_HOST (and files.pythonhosted.org) — check the egress allowlist. Continuing without pip packages."
+  fi
+  phase_done pip "$PIP_START"
 fi
 
 # --- mise tools ---
@@ -166,6 +196,7 @@ if [ -f "$MISE_TOML" ]; then
     export MISE_DATA_DIR="/data/.mise"
     export MISE_CONFIG_FILE="$MISE_TOML"
     export MISE_YES=1
+    MISE_START=$(date +%s)
     MISE_LOG="$(mktemp)"
     # Run from the config dir so the image baseline /app/mise.toml is not picked up.
     if (cd "$CONFIG_DIR" && timeout "$MISE_INSTALL_TIMEOUT" mise install) >"$MISE_LOG" 2>&1; then
@@ -181,6 +212,7 @@ if [ -f "$MISE_TOML" ]; then
       echo "WARNING: mise install gave up (exit $rc, timeout ${MISE_INSTALL_TIMEOUT}s); could not reach $HOST — check the egress allowlist. Continuing without knight mise tools."
     fi
     rm -f "$MISE_LOG"
+    phase_done mise "$MISE_START"
   fi
 fi
 
