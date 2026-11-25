@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseVerdict, resolvePrs, type PRRef, type Verdict } from "./structured.js";
+import { parseVerdict, resolvePrs, type PRRef, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;

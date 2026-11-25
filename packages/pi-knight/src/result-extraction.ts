@@ -1,4 +1,13 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import {
+  isGitPush,
+  mergePrs,
+  parseVerdict,
+  prsFromBash,
+  resolvePrs,
+  type PRRef,
+  type Verdict,
+} from "@roundtable/knight-core";
 
 export const NON_DELIVERABLE_PATTERNS = [
   /^\s*\{\s*"(?:type|name)"\s*:\s*"function"/s,
@@ -139,4 +148,54 @@ export function getBestAssistantResult(sess: AgentSession): string | undefined {
   }
 
   return suspiciousFallback;
+}
+
+/** Structured TaskResult fields `prs` and `verdict` (omitted by the caller when empty). */
+export interface Structured {
+  prs: PRRef[];
+  verdict?: Verdict;
+}
+
+/** `{command, output}` pairs for the successful bash calls in pi session messages. */
+export function bashCalls(messages: unknown[]): Array<{ command: string; output: string }> {
+  const results = new Map<string, { text: string; isError: boolean }>();
+  for (const m of messages as Array<Record<string, any>>) {
+    if (m?.role !== "toolResult" || !m.toolCallId) continue;
+    const text = Array.isArray(m.content)
+      ? m.content.map((p: any) => (p?.type === "text" ? p.text ?? "" : "")).join("\n")
+      : typeof m.content === "string" ? m.content : "";
+    results.set(m.toolCallId, { text, isError: Boolean(m.isError) });
+  }
+  const calls: Array<{ command: string; output: string }> = [];
+  for (const m of messages as Array<Record<string, any>>) {
+    if (m?.role !== "assistant" || !Array.isArray(m.content)) continue;
+    for (const p of m.content) {
+      if (p?.type !== "toolCall" || p.name !== "bash") continue;
+      const command = p.arguments?.command;
+      const res = results.get(p.id);
+      if (typeof command !== "string" || !res || res.isError) continue;
+      calls.push({ command, output: res.text });
+    }
+  }
+  return calls;
+}
+
+/**
+ * PRs from the gh/git commands the agent ran (core `prsFromBash`), falling back to
+ * PR URLs in the final message, and the verdict from a final `Verdict:` line.
+ * pi-specific: when the fallback is used and the agent ran `git push`, those PRs
+ * are reported as updated.
+ *
+ * @param messages only the messages of THIS task (sessions are shared across a run).
+ */
+export function extractStructured(messages: unknown[], finalText: string): Structured {
+  const fromCommands: PRRef[] = [];
+  let pushed = false;
+  for (const { command, output } of bashCalls(messages)) {
+    if (command.split(/&&|\|\||;|\n|\|/).some(isGitPush)) pushed = true;
+    mergePrs(fromCommands, prsFromBash(command, output));
+  }
+  let prs = resolvePrs(fromCommands, finalText);
+  if (!fromCommands.length && pushed) prs = prs.map((p) => ({ ...p, action: "updated" as const }));
+  return { prs, verdict: parseVerdict(finalText) };
 }
