@@ -70,10 +70,13 @@ const LOCAL_PROVIDER_BASE_URLS: Record<string, string> = {
 export const DEFAULT_CONTEXT_WINDOW = 131072;
 
 /**
- * Providers registered from the environment (no catalog / models.json entry): by
- * construction an operator-supplied OpenAI-compatible endpoint, so billed locally.
+ * Providers registered from the environment (no catalog / models.json entry), with the
+ * endpoint they were registered on: by construction an operator-supplied OpenAI-compatible
+ * endpoint, so billed locally. Matching the endpoint as well keeps a hosted model of the same
+ * provider name (an `openai/...` override on a knight whose default points OpenAI at a local
+ * server) from being reported as local.
  */
-const envProviders = new Set<string>();
+const envProviders = new Map<string, string>();
 
 /**
  * True when a model runs on an operator-supplied endpoint (Ollama, vLLM, LiteLLM, ...)
@@ -83,7 +86,7 @@ const envProviders = new Set<string>();
 export function isLocalModel(model: Pick<Model<Api>, "provider" | "baseUrl">): boolean {
   return (
     model.provider === "ollama" ||
-    envProviders.has(model.provider) ||
+    (envProviders.has(model.provider) && envProviders.get(model.provider) === model.baseUrl) ||
     /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(model.baseUrl ?? "")
   );
 }
@@ -231,7 +234,7 @@ export async function resolveModel(
     });
     // Register the endpoint as a provider on the runtime so request auth, headers and
     // streaming resolve through it like any catalog model.
-    envProviders.add(provider);
+    envProviders.set(provider, baseUrl);
     modelRuntime.registerProvider(provider, {
       baseUrl,
       api: "openai-completions",

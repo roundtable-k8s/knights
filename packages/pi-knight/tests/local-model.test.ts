@@ -119,3 +119,16 @@ test("isLocalModel is false for hosted providers", () => {
   assert.equal(isLocalModel({ provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }), false);
   assert.equal(isLocalModel({ provider: "ollama", baseUrl: "http://ollama-pool.ai.svc:11434/v1" }), true);
 });
+
+test("isLocalModel: a hosted model sharing an env-registered provider name is not local", async () => {
+  const saved = process.env.KNIGHT_MODEL_BASE_URL;
+  process.env.KNIGHT_MODEL_BASE_URL = "http://llm-pool.ai.svc.cluster.local:8000/v1";
+  try {
+    const { model } = await resolveModel("openai/local-tag-xyz");
+    assert.equal(isLocalModel(model), true);
+    assert.equal(isLocalModel({ provider: model.provider, baseUrl: "https://api.openai.com/v1" }), false);
+  } finally {
+    if (saved === undefined) delete process.env.KNIGHT_MODEL_BASE_URL;
+    else process.env.KNIGHT_MODEL_BASE_URL = saved;
+  }
+});

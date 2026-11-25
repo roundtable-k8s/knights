@@ -49,13 +49,6 @@ export function refusalCode(reason?: string): "credits" | undefined {
   return /credit|max[ _-]?tokens/i.test(reason) ? "credits" : undefined;
 }
 
-/**
- * Describe why a session ended without a deliverable. The Pi agent loop never throws on
- * LLM failures — a stream error or abort ends the loop silently, recorded only as
- * stopReason "error"/"aborted" (plus errorMessage) on the final assistant message. If we
- * don't look at those, every API failure, rate limit, and timeout gets reported as the
- * generic "no deliverable output", which sends whoever is debugging after the wrong bug.
- */
 export const TOOL_CALLS_AS_TEXT_REASON =
   "Model returned tool calls as plain text instead of structured tool_calls, so no tool ran. " +
   "The model or its endpoint does not support tool calling in the OpenAI format; use a tool-capable model.";
@@ -65,6 +58,13 @@ export const LOCAL_NO_TOOL_CALLS_REASON =
   "Local model produced no output and made no tool calls. It may not support tool calling " +
   "(or the endpoint dropped the tools); check the model's tool support and the endpoint logs.";
 
+/**
+ * Describe why a session ended without a deliverable. The Pi agent loop never throws on
+ * LLM failures — a stream error or abort ends the loop silently, recorded only as
+ * stopReason "error"/"aborted" (plus errorMessage) on the final assistant message. If we
+ * don't look at those, every API failure, rate limit, and timeout gets reported as the
+ * generic "no deliverable output", which sends whoever is debugging after the wrong bug.
+ */
 export function describeSessionFailure(
   sess: AgentSession,
   taskAborted: boolean,

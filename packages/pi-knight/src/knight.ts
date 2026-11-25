@@ -509,13 +509,17 @@ export async function executeTask(
   // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
   // (typical of local models whose endpoint lacks tool support, #27). Fail loudly, not
   // as a success with no work done.
-  const toolCallsAsText = deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
+  // Local models only: a hosted model that answers in prose that merely mentions
+  // "tool_calls": keeps its old behaviour.
+  const toolCallsAsText = local && deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
   if (toolCallsAsText) deliverable = undefined;
-  const failureReason = deliverable == null
-    ? (toolCallsAsText ? TOOL_CALLS_AS_TEXT_REASON : undefined) ??
-      describeSessionFailure(sess, signal?.aborted ?? false) ??
-      (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined)
-    : undefined;
+  let failureReason: string | undefined;
+  if (toolCallsAsText) {
+    failureReason = TOOL_CALLS_AS_TEXT_REASON;
+  } else if (deliverable == null) {
+    failureReason = describeSessionFailure(sess, signal?.aborted ?? false) ??
+      (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
+  }
   const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
   const refused = success ? undefined : refusalCode(error);
   // Only an LLM call failure is a provider error; never the agent's own output or a task timeout.

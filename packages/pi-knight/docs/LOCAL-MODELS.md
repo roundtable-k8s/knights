@@ -35,7 +35,7 @@ Under isolation a knight reaches an in-cluster model server only through
 operator CRD of your release.
 
 ```yaml
-apiVersion: roundtable.io/v1alpha1
+apiVersion: ai.roundtable.io/v1alpha1
 kind: Knight
 metadata:
   name: scribe-local
@@ -45,7 +45,7 @@ spec:
     allowedServices:
       - name: ollama-pool
         namespace: ai
-        port: 11434
+        ports: [11434]
   env:
     - name: KNIGHT_MODEL_BASE_URL
       value: http://ollama-pool.ai.svc.cluster.local:11434/v1
