@@ -1,7 +1,7 @@
 // Generic activity behaviour (bounds, redaction, rate limit, schema) is tested in packages/core.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listInflight, TaskActivity } from "@roundtable/knight-core";
+import { listInflight, SlotPool, TaskActivity } from "@roundtable/knight-core";
 import { applyMessage, newStreamState } from "../src/stream.js";
 
 type Pub = { subject: string; ev: Record<string, any> };
@@ -55,4 +55,32 @@ test("two concurrent tasks produce separate, correctly keyed streams via applyMe
     b.close();
   }
   assert.equal(listInflight().length, 0);
+});
+
+test("with concurrency 2, a third task reuses the freed slot instead of sharing the running task's", () => {
+  const out: Pub[] = [];
+  const slots = new SlotPool();
+  // Same wiring as main.ts processTask: acquire before task.started, release when the task ends.
+  const start = (id: string) => {
+    const slot = slots.acquire();
+    const act = new TaskActivity({
+      knight: "K", prefix: "p", taskId: id, identity: { pod: "pod-a", node: "node-1" }, runId: `run-${id}`,
+      slot, concurrency: 2, publish: (subject, payload) => out.push({ subject, ev: JSON.parse(payload) }), now: () => 1_000_000,
+    });
+    act.started();
+    return () => { act.close(); slots.release(slot); };
+  };
+  const endA = start("A");
+  const endB = start("B");
+  endA();
+  const endC = start("C");
+  try {
+    const slotOf = (id: string) => out.find((o) => o.ev.taskId === id && o.ev.type === "task.started")!.ev.slot;
+    assert.equal(slotOf("A"), 0);
+    assert.equal(slotOf("B"), 1);
+    assert.equal(slotOf("C"), 0);
+  } finally {
+    endB();
+    endC();
+  }
 });

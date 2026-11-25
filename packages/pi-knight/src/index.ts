@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   let puller: Awaited<ReturnType<typeof subscribe>> | null = null;
   let shuttingDown = false;
   // Concurrency slots (0-based) in use, reported on task.started.
-  const usedSlots = new Set<number>();
+  const slots = new SlotPool();
 
   // Process a single task
   async function processTask(delivery: TaskDelivery): Promise<void> {
@@ -146,9 +146,7 @@ async function main(): Promise<void> {
     const { taskId, runId, model, chainName, stepName, timestamp, attempt } = delivery.task;
     const taskText = promptWithRetryContext(delivery.task);
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
-    let slot = 0;
-    while (usedSlots.has(slot)) slot++;
-    usedSlots.add(slot);
+    const slot = slots.acquire();
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
     const activity = new TaskActivity({
       knight: config.knightName,
@@ -215,7 +213,7 @@ async function main(): Promise<void> {
       clearInterval(heartbeat);
       activity.close();
       knightService?.markTaskFinished();
-      usedSlots.delete(slot);
+      slots.release(slot);
       delivery.ack();
       activeCount--;
       setActiveTaskCount(activeCount);
