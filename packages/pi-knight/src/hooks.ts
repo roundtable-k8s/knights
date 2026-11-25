@@ -7,36 +7,17 @@
  * runner, so extensions are the supported way to intercept tool execution.
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { containsSecret, log, redactSecrets } from "@roundtable/knight-core";
+import { checkBashCommand, isTokenSecret, log, redactSecrets } from "@roundtable/knight-core";
 import { toolCallsTotal, toolCallDuration, toolCallsBlocked } from "./runtime-metrics.js";
-
-// ─── Dangerous operation patterns ───────────────────────────────────
-
-/** Bash commands that should be blocked outright */
-const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
-  { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+\/(?:\s|$|\*)/, reason: "Recursive delete at root level" },
-  // Match the flag as a whole token: not a branch like `fix-f`, and --force-with-lease stays allowed.
-  // Known residual false positive: the same text as a quoted argument (e.g. inside `echo`) also matches.
-  // The short-flag check (`-f` anywhere in the flag cluster) is deliberately broad; it fails safe.
-  { pattern: /\bgit\s+push\b[^;&|\n]*\s--force(?=\s|$)/, reason: "Force push without lease (use --force-with-lease or new commits)" },
-  { pattern: /\bgit\s+push\b[^;&|\n]*\s-[a-zA-Z]*f[a-zA-Z]*(?=\s|$)/, reason: "Force push (use new commits instead)" },
-  { pattern: /\bchmod\s+(-R\s+)?777\b/, reason: "World-writable permissions" },
-  { pattern: /\bdd\s+.*of=\/dev\//, reason: "Direct device write" },
-  { pattern: /\bmkfs(\.\w+)?\b/, reason: "Filesystem format" },
-];
 
 // ─── Pure helpers ──────────────────────────────────────────────────
 
 /** Reason a bash command must be blocked, or undefined when it is allowed. */
 export function findBlockedBashReason(command: string): string | undefined {
-  return BLOCKED_BASH_PATTERNS.find(({ pattern }) => pattern.test(command))?.reason;
+  return checkBashCommand(command);
 }
 
-/**
- * Token-shaped secrets only (keys, PATs, JWTs, PEM blocks): this text goes to and from the
- * model, where redacting `password=...` context would corrupt code it reads or edits.
- */
-const isSecret = (text: string): boolean => containsSecret(text, "tokens");
+const isSecret = isTokenSecret;
 
 function truncateArgs(args: unknown): string {
   const str = JSON.stringify(args);

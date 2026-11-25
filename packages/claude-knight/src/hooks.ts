@@ -1,6 +1,6 @@
 /**
- * Claude Code hooks for the sdk runtime: the same bash guardrails pi-knight
- * enforces, plus tool metrics. Registered as SDK callback hooks, so they run in
+ * Claude Code hooks for the sdk runtime: the same guardrails pi-knight
+ * enforces (bash commands, secret writes), plus tool metrics. Registered as SDK callback hooks, so they run in
  * this process and apply even with permissionMode "bypassPermissions". The cli
  * runtime uses a command hook with the same rules instead (hook-cli.ts).
  */
@@ -9,7 +9,7 @@ import { decidePreToolUse } from "./guardrails.js";
 import { log } from "@roundtable/knight-core";
 import { toolCallDuration, toolCallsBlocked, toolCallsTotal } from "./runtime-metrics.js";
 
-export { BLOCKED_BASH_PATTERNS, checkBashCommand } from "./guardrails.js";
+export { BLOCKED_BASH_PATTERNS, checkBashCommand } from "@roundtable/knight-core";
 
 /** tool_use_id → start time (ms); filled by PreToolUse, drained by PostToolUse[Failure]. */
 const toolStarts = new Map<string, number>();
@@ -19,8 +19,12 @@ async function preToolUse(input: HookInput) {
   if (!decision) return {};
   // A blocked call never runs, so no PostToolUse follows to drain its start time.
   if (input.hook_event_name === "PreToolUse") toolStarts.delete(input.tool_use_id);
-  log.warn("Blocked dangerous bash command", { reason: decision.reason, command: decision.command.slice(0, 200) });
-  toolCallsBlocked.inc({ tool: "Bash", reason: decision.reason });
+  if (input.hook_event_name === "PreToolUse" && input.tool_name === "Bash") {
+    log.warn("Blocked dangerous bash command", { reason: decision.reason, command: decision.command.slice(0, 200) });
+  } else {
+    log.warn("Blocked secret write", { tool: "tool_name" in input ? input.tool_name : undefined, reason: decision.reason });
+  }
+  toolCallsBlocked.inc({ tool: "tool_name" in input ? input.tool_name : "Bash", reason: decision.reason });
   return decision.output;
 }
 
@@ -45,7 +49,7 @@ async function postToolUse(input: HookInput) {
 
 export function buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   return {
-    PreToolUse: [{ hooks: [startTimer] }, { matcher: "Bash", hooks: [preToolUse] }],
+    PreToolUse: [{ hooks: [startTimer] }, { matcher: "Bash|Write|Edit|MultiEdit", hooks: [preToolUse] }],
     PostToolUse: [{ hooks: [postToolUse] }],
     PostToolUseFailure: [{ hooks: [postToolUse] }],
   };
