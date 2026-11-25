@@ -60,7 +60,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     subscribeTopics: parseTopics(requireEnv(env, "SUBSCRIBE_TOPICS")),
     natsTasksStream: env["NATS_TASKS_STREAM"] ?? "fleet_a_tasks",
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
-    maxConcurrentTasks: maxConcurrentTasks(env, 2),
+    maxConcurrentTasks: maxConcurrentTasks(env),
     hostname: os.hostname(),
     thinkingLevel: env["KNIGHT_THINKING"] ?? "off",
     // 0 is valid: pi-ai treats it as "no cap" on provider-requested retry delays.

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { log } from "./logger.js";
@@ -72,11 +72,30 @@ export function memoryPromptSection(paths: MemoryPaths): string {
   return lines.join("\n");
 }
 
-/** Write `data` to `file` via a temp file and rename, so a concurrent reader never sees a partial file. */
-export function writeFileAtomic(file: string, data: string): void {
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, data, "utf8");
-  renameSync(tmp, file);
+/** Filesystem steps of writeFileAtomic; overridable so tests can inject a failure between write and rename. */
+export interface AtomicFsOps {
+  write: (path: string, data: string) => void;
+  rename: (from: string, to: string) => void;
+}
+
+const defaultAtomicOps: AtomicFsOps = {
+  write: (p, d) => writeFileSync(p, d, "utf8"),
+  rename: renameSync,
+};
+
+/**
+ * Write `data` to `file` via a temp file and rename, so a concurrent reader never sees a partial file
+ * and a crash or failure leaves the previous file intact (the temp file is removed on failure).
+ */
+export function writeFileAtomic(file: string, data: string, ops: AtomicFsOps = defaultAtomicOps): void {
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`;
+  try {
+    ops.write(tmp, data);
+    ops.rename(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /**

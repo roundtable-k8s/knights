@@ -70,7 +70,7 @@ A task payload may carry an optional `model` (`provider/model`, routing suffixes
 |----------|-------------|---------|
 | `NATS_URL` | NATS server URL | `nats://nats.database.svc.cluster.local:4222` |
 | `TASK_TIMEOUT_MS` | Default task timeout (ms) | `1800000` (30 min) |
-| `MAX_CONCURRENT_TASKS` | Max parallel task execution | `2` |
+| `MAX_CONCURRENT_TASKS` | Max parallel task execution (same default in claude-knight; the operator always sets it) | `1` |
 
 ### Sessions
 Every task gets a fresh agent session unless it continues a chain run: tasks
