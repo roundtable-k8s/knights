@@ -10,7 +10,7 @@
  * Also keeps the registry of in-flight tasks that introspection reports (`listInflight`).
  */
 import { log } from "./logger.js";
-import { getConnection, StringCodec } from "./nats/index.js";
+import { getConnection } from "./nats/index.js";
 
 export const ACTIVITY_VERSION = 1;
 export const MAX_EVENT_BYTES = 8 * 1024;
@@ -217,11 +217,9 @@ export function classifyError(error: string): ErrorClass {
 
 export type ActivityPublish = (subject: string, payload: string) => void;
 
-const sc = StringCodec();
-
 /** Core NATS publish on the shared connection (never JetStream). */
 export const natsActivityPublish: ActivityPublish = (subject, payload) => {
-  getConnection()?.publish(subject, sc.encode(payload));
+  getConnection()?.publish(subject, payload);
 };
 
 export interface TaskActivityInit {

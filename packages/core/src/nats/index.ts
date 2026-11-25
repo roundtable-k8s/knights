@@ -1,19 +1,16 @@
+import { connect as natsConnect, type NatsConnection } from "@nats-io/transport-node";
 import {
-  connect as natsConnect,
-  type NatsConnection,
+  jetstream,
+  jetstreamManager,
   type JetStreamClient,
   type JetStreamManager,
-  StringCodec as NatsStringCodec,
   AckPolicy,
   DeliverPolicy,
-} from "nats";
+} from "@nats-io/jetstream";
 import { log } from "../logger.js";
 import { assertTaskResult, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
-const sc = NatsStringCodec();
-
-// Re-export StringCodec for the runtimes' tools
-export { NatsStringCodec as StringCodec };
+const decoder = new TextDecoder();
 
 /** What connectNats needs from the knight's config. */
 export interface NatsConnectConfig {
@@ -72,7 +69,7 @@ export async function connectNats(config: NatsConnectConfig, clientName: string)
     }
   })();
 
-  js = nc.jetstream();
+  js = jetstream(nc);
 }
 
 /** Heartbeat window: the server redelivers (here: dead-letters) a task whose ack is overdue by this much. */
@@ -82,7 +79,7 @@ export const HEARTBEAT_MS = 10_000;
 /** Max time one pull request waits for messages before it is re-issued. */
 const FETCH_EXPIRES_MS = 5_000;
 
-/** The subset of a JetStream message the puller needs (satisfied by nats.js JsMsg). */
+/** The subset of a JetStream message the puller needs (satisfied by @nats-io/jetstream JsMsg). */
 export interface PulledMsg {
   data: Uint8Array;
   subject: string;
@@ -166,7 +163,7 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
   })();
 
   function handleMsg(msg: PulledMsg): void {
-    const raw = sc.decode(msg.data);
+    const raw = decoder.decode(msg.data);
     const subject = msg.subject;
     const subjectTaskId = subject.split(".").pop() || "unknown";
     const parsed = parseTask(raw, subjectTaskId);
@@ -232,7 +229,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   if (!nc || !js) throw new Error("NATS not connected");
   _config = config;
 
-  const jsm: JetStreamManager = await nc.jetstreamManager();
+  const jsm: JetStreamManager = await jetstreamManager(nc);
 
   // Create/bind durable pull consumer
   const durableName = `${config.knightName}-consumer`;
@@ -327,11 +324,15 @@ function watchLostTasks(
   (async () => {
     for await (const m of sub) {
       try {
-        const adv = JSON.parse(sc.decode(m.data)) as { stream_seq?: number };
+        const adv = m.json<{ stream_seq?: number }>();
         if (typeof adv.stream_seq !== "number") continue;
         const stored = await jsm.streams.getMessage(stream, { seq: adv.stream_seq });
+        if (!stored) {
+          log.warn("Lost task no longer in the stream — cannot report it", { seq: adv.stream_seq });
+          continue;
+        }
         const subjectTaskId = stored.subject.split(".").pop() || "unknown";
-        const parsed = parseTask(sc.decode(stored.data), subjectTaskId);
+        const parsed = parseTask(stored.string(), subjectTaskId);
         log.warn("Task delivered but never acked — reporting failure", { taskId: parsed.taskId, seq: adv.stream_seq });
         await onLost(parsed);
       } catch (err) {
@@ -356,8 +357,7 @@ export async function publishResult(
 
   const prefix = _config?.natsResultsPrefix ?? "fleet-a.results";
   const subject = `${prefix}.${taskId}`;
-  const data = sc.encode(encodeResult(result));
-  await js.publish(subject, data);
+  await js.publish(subject, encodeResult(result));
   log.info("Result published", { taskId, subject });
 }
 

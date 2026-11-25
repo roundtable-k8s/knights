@@ -12,9 +12,8 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getJetStream, getConnection, StringCodec, log } from "@roundtable/knight-core";
+import { getJetStream, getConnection, log } from "@roundtable/knight-core";
 
-const sc = StringCodec();
 
 // Knight identity — set once at startup for self-echo prevention
 let _knightName = "unknown";
@@ -79,7 +78,7 @@ export const natsPublishTool = defineTool({
     }
 
     try {
-      await js.publish(params.subject, sc.encode(params.message));
+      await js.publish(params.subject, params.message);
       log.info("nats_publish tool", { subject: params.subject, size: params.message.length });
       // terminate: the message is delivered, so no follow-up LLM turn is needed.
       return { ...textResult(`Published to ${params.subject} (${params.message.length} bytes)`), terminate: true };
@@ -184,13 +183,13 @@ const natsRequestTool = defineTool({
         timestamp: new Date().toISOString(),
         metadata: { timeout_ms: timeoutMs, table_prefix: _natsPrefix },
       });
-      await js.publish(taskSubject, sc.encode(payload));
+      await js.publish(taskSubject, payload);
       log.info("nats_request: task published", { taskId, subject: taskSubject });
       onUpdate?.(textResult(`Task sent to ${params.knight}; awaiting response (timeout ${Math.round(timeoutMs / 1000)}s)…`));
 
       // Wait for result
       for await (const msg of sub) {
-        const raw = sc.decode(msg.data);
+        const raw = msg.string();
         try {
           const result = JSON.parse(raw);
           const success = result.success ?? true;
