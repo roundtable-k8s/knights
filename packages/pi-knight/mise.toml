@@ -7,4 +7,4 @@ ripgrep = "latest"
 # Python — many arsenal skill scripts depend on it
 python = "3.12"
 # yq — YAML processing for skill scripts
-"github:mikefarah/yq" = "latest"
+yq = "latest"

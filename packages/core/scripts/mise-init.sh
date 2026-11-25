@@ -1,6 +1,6 @@
 #!/bin/sh
 # mise-init.sh — Install knight-specific tools at pod startup.
-# Runs as an init container before the main pi-knight process.
+# Shared by claude-knight and pi-knight; runs before the main knight process.
 #
 # Three sources of knight-specific tools:
 #   1. /config/apt.txt    — system packages (apt-get install)
@@ -17,11 +17,12 @@
 
 set -e
 
+CONFIG_DIR="${CONFIG_DIR:-/config}"
 PERSIST_BIN="/data/bin"
 PERSIST_LIB="/data/lib"
 
 # --- System packages (apt) ---
-APT_FILE="/config/apt.txt"
+APT_FILE="$CONFIG_DIR/apt.txt"
 if [ -f "$APT_FILE" ]; then
   echo "Installing system packages from $APT_FILE..."
 
@@ -84,7 +85,7 @@ fi
 # --- Static binary downloads (bins.txt) ---
 # Format: one URL per line, downloaded to /data/bin/
 # Supports .zip archives (extracts all executables)
-BINS_FILE="/config/bins.txt"
+BINS_FILE="$CONFIG_DIR/bins.txt"
 if [ -f "$BINS_FILE" ]; then
   echo "Downloading static binaries from $BINS_FILE..."
   mkdir -p "$PERSIST_BIN"
@@ -133,7 +134,7 @@ if [ -f "$BINS_FILE" ]; then
 fi
 
 # --- pip packages ---
-PIP_FILE="/config/pip.txt"
+PIP_FILE="$CONFIG_DIR/pip.txt"
 if [ -f "$PIP_FILE" ]; then
   echo "Installing Python packages from $PIP_FILE..."
   pip install --no-cache-dir -r "$PIP_FILE"
@@ -141,16 +142,46 @@ if [ -f "$PIP_FILE" ]; then
 fi
 
 # --- mise tools ---
-MISE_TOML="/config/mise.toml"
+# Only runs when the config lists at least one tool: an empty or comment-only
+# file must not trigger any network access (and must not fall back to the
+# image baseline /app/mise.toml, which is baked in at build time).
+MISE_TOML="$CONFIG_DIR/mise.toml"
+MISE_INSTALL_TIMEOUT="${MISE_INSTALL_TIMEOUT:-120}"
+
+# Assumes the `[tools]` table form (what the operator renders into mise.toml);
+# inline or dotted forms like `tools.ripgrep = ...` are not detected.
+mise_has_tools() {
+  awk '
+    /^[[:space:]]*\[/ { s = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*(#.*)?$/); next }
+    s && $0 !~ /^[[:space:]]*(#.*)?$/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
 if [ -f "$MISE_TOML" ]; then
-  echo "Installing knight-specific tools from $MISE_TOML..."
-  export MISE_DATA_DIR="/data/.mise"
-  export MISE_CONFIG_FILE="$MISE_TOML"
-  export MISE_YES=1
-  mise install
-  mise reshim
-  echo "Knight tools installed to /data/.mise/shims:"
-  ls /data/.mise/shims/ 2>/dev/null || echo "(none)"
+  if ! mise_has_tools "$MISE_TOML"; then
+    echo "No tools listed in $MISE_TOML — skipping mise install."
+  else
+    echo "Installing knight-specific tools from $MISE_TOML (timeout ${MISE_INSTALL_TIMEOUT}s)..."
+    export MISE_DATA_DIR="/data/.mise"
+    export MISE_CONFIG_FILE="$MISE_TOML"
+    export MISE_YES=1
+    MISE_LOG="$(mktemp)"
+    # Run from the config dir so the image baseline /app/mise.toml is not picked up.
+    if (cd "$CONFIG_DIR" && timeout "$MISE_INSTALL_TIMEOUT" mise install) >"$MISE_LOG" 2>&1; then
+      cat "$MISE_LOG"
+      mise reshim
+      echo "Knight tools installed to /data/.mise/shims:"
+      ls /data/.mise/shims/ 2>/dev/null || echo "(none)"
+    else
+      rc=$?
+      tail -n 20 "$MISE_LOG"
+      HOST=$(grep -Eo 'https?://[^/[:space:]"]+' "$MISE_LOG" | tail -n 1 | sed 's|^https\{0,1\}://||')
+      [ -n "$HOST" ] || HOST="mise-versions.jdx.dev, github.com or api.github.com"
+      echo "WARNING: mise install gave up (exit $rc, timeout ${MISE_INSTALL_TIMEOUT}s); could not reach $HOST — check the egress allowlist. Continuing without knight mise tools."
+    fi
+    rm -f "$MISE_LOG"
+  fi
 fi
 
 if [ ! -f "$APT_FILE" ] && [ ! -f "$PIP_FILE" ] && [ ! -f "$MISE_TOML" ]; then

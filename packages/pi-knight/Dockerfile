@@ -59,6 +59,8 @@ COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /app/packages/pi-knight/package.json ./
 COPY packages/pi-knight/defaults/ ./defaults/
 COPY packages/pi-knight/scripts/ ./scripts/
+# Shared start-up script (identical for both runtimes).
+COPY packages/core/scripts/mise-init.sh ./scripts/mise-init.sh
 # GitHub token-file support (roundtable-k8s/roundtable#194): a git credential
 # helper and a gh shim that read $GITHUB_TOKEN_FILE on every call. The
 # entrypoint puts /opt/roundtable/bin first on PATH when that file is set.
@@ -66,8 +68,15 @@ RUN install -D -m 0755 scripts/github/git-credential-roundtable /usr/local/bin/g
     && install -D -m 0755 scripts/github/gh /opt/roundtable/bin/gh
 
 # ── Runtime ───────────────────────────────────────────────────────
+# Baseline tools live in /app/.mise; the writable data dir is /data/.mise.
+# Shared install dirs let mise find the baked tools without any network.
 ENV MISE_DATA_DIR=/data/.mise \
+    MISE_SHARED_INSTALL_DIRS=/app/.mise/installs \
     MISE_YES=1
+
+# Smoke check: baseline shims resolve offline from an empty data dir (shims, not
+# `mise exec`, which falls back to same-named binaries on the system PATH).
+RUN MISE_OFFLINE=1 MISE_DATA_DIR=/tmp/empty-mise MISE_CONFIG_FILE=/app/mise.toml sh -c 'for t in rg python yq; do /app/.mise/shims/$t --version || exit 1; done'
 
 # Non-root
 USER node
