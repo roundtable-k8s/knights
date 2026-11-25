@@ -69,8 +69,9 @@ COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /app/packages/claude-knight/package.json ./
 COPY packages/claude-knight/defaults/ ./defaults/
 COPY packages/claude-knight/scripts/ ./scripts/
-# Shared start-up script (identical for both runtimes).
+# Shared start-up scripts (identical for both runtimes).
 COPY packages/core/scripts/mise-init.sh ./scripts/mise-init.sh
+COPY packages/core/scripts/startup-signals.sh ./scripts/startup-signals.sh
 
 # ── Claude Code CLI (`claude` on PATH, for CLAUDE_RUNTIME=cli) ──
 # Pinned. The Agent SDK's platform package ships the official Claude Code

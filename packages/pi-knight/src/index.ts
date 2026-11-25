@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -15,7 +15,19 @@ async function main(): Promise<void> {
   scrubAgentEnv();
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
-  const telemetry = await startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
+  // Signal handlers before any network call: a pod deleted during start-up exits now
+  // (closing what is open) instead of starting up and taking tasks (see startup-signals.ts).
+  // eslint-disable-next-line prefer-const -- the start-up handlers close it, and can run before it is assigned
+  let telemetry: Awaited<ReturnType<typeof startTelemetry>> | undefined;
+  const signals = installStartupSignalHandlers({
+    cleanup: async () => {
+      await drain().catch((e) => log.error("NATS drain error", { error: String(e) }));
+      await stopHealthServer();
+      await telemetry?.shutdown();
+    },
+    exit: (code) => process.exit(code),
+  });
+  telemetry = await startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
 
@@ -212,34 +224,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
-  puller = await subscribe(config, {
-    freeSlots: () => (shuttingDown ? 0 : config.maxConcurrentTasks - activeCount),
-    // Skip self-echo — ignore messages published by this knight back to its own topic
-    accept: (parsed) => {
-      const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
-      if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId, from: parsed.from });
-      return !self;
-    },
-    onTask: (delivery) => {
-      void processTask(delivery);
-    },
-    onLost: async (parsed) => {
-      metrics.recordLostTask();
-      await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel, parsed }));
-    },
-    // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
-    onInvalid: async (parsed) => {
-      metrics.tasksTotal.labels("error").inc();
-      await publishResult(parsed.taskId, invalidTaskResult({
-        taskId: parsed.taskId,
-        knight: config.knightName,
-        model: config.knightModel,
-        invalid: parsed.invalid ?? "invalid",
-      }));
-    },
-  });
-
   // Graceful shutdown (sequence lives in drain.ts so tests run the real thing)
   const shutdown = createShutdown({
     setDraining: (d) => {
@@ -264,11 +248,42 @@ async function main(): Promise<void> {
     cleanup: async () => {
       metrics.natsConnected.labels().set(0);
       await stopHealthServer();
-      await telemetry.shutdown();
+      await telemetry?.shutdown();
     },
     exit: (code) => process.exit(code),
   });
-  installSignalHandlers(shutdown);
+  // Ready: later signals run the full shutdown above. If one came during start-up the
+  // start-up exit is already running: do not start the pull loop.
+  if (!signals.ready(shutdown)) return;
+
+  // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
+  puller = await subscribe(config, {
+    // Guard: never fetch once a termination was requested, even one that came during start-up.
+    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeCount),
+    // Skip self-echo — ignore messages published by this knight back to its own topic
+    accept: (parsed) => {
+      const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
+      if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId, from: parsed.from });
+      return !self;
+    },
+    onTask: (delivery) => {
+      void processTask(delivery);
+    },
+    onLost: async (parsed) => {
+      metrics.recordLostTask();
+      await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel, parsed }));
+    },
+    // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
+    onInvalid: async (parsed) => {
+      metrics.tasksTotal.labels("error").inc();
+      await publishResult(parsed.taskId, invalidTaskResult({
+        taskId: parsed.taskId,
+        knight: config.knightName,
+        model: config.knightModel,
+        invalid: parsed.invalid ?? "invalid",
+      }));
+    },
+  });
 
   log.info("Pi-Knight ready");
 }

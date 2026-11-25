@@ -10,6 +10,7 @@ export * from "./introspect.js";
 export type { ActivityEvent } from "./activity.js";
 export { ActivityEvent as ActivityEventSchema } from "./contract/schema.js";
 export * from "./drain.js";
+export * from "./startup-signals.js";
 export * from "./health.js";
 export * from "./metrics.js";
 export * from "./memory.js";
