@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import type { NatsConnection } from "nats";
+import type { NatsConnection } from "@nats-io/transport-node";
 import {
   handleIntrospect,
   introspectRequestFromQuery,
@@ -196,7 +196,7 @@ describe("startIntrospect", () => {
     const subs: { subject: string; queue?: string; push: (data: string) => Promise<string> }[] = [];
     const nc = {
       subscribe(subject: string, o?: { queue?: string }) {
-        const pending: { data: Uint8Array; respond: (d: Uint8Array) => boolean }[] = [];
+        const pending: { data: Uint8Array; respond: (d: string | Uint8Array) => boolean }[] = [];
         let wake: (() => void) | null = null;
         const iter = {
           async *[Symbol.asyncIterator]() {
@@ -211,7 +211,7 @@ describe("startIntrospect", () => {
           queue: o?.queue,
           push: (data) =>
             new Promise<string>((resolve) => {
-              pending.push({ data: new TextEncoder().encode(data), respond: (d) => (resolve(new TextDecoder().decode(d)), true) });
+              pending.push({ data: new TextEncoder().encode(data), respond: (d) => (resolve(typeof d === "string" ? d : new TextDecoder().decode(d)), true) });
               wake?.();
             }),
         });

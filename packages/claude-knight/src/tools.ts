@@ -7,10 +7,9 @@
  */
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { getConnection, getJetStream, StringCodec, log } from "@roundtable/knight-core";
+import { getConnection, getJetStream, log } from "@roundtable/knight-core";
 import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
-const sc = StringCodec();
 
 let knightName = "unknown";
 let natsPrefix = "fleet-a";
@@ -62,7 +61,7 @@ const natsPublish = tool(
       return text("Error: Cannot publish an empty message.", true);
     }
     try {
-      await js.publish(subject, sc.encode(message));
+      await js.publish(subject, message);
       log.info("nats_publish tool", { subject, size: message.length });
       return text(`Published to ${subject} (${message.length} bytes)`);
     } catch (err) {
@@ -104,27 +103,25 @@ const natsRequest = tool(
       const sub = nc.subscribe(resultSubject, { max: 1, timeout: timeoutMs });
       await js.publish(
         taskSubject,
-        sc.encode(
-          JSON.stringify({
-            task,
-            task_id: taskId,
-            domain,
-            from: knightName.toLowerCase(),
-            dispatched_by: knightName,
-            timestamp: new Date().toISOString(),
-            metadata: { timeout_ms: timeoutMs, table_prefix: natsPrefix },
-          }),
-        ),
+        JSON.stringify({
+          task,
+          task_id: taskId,
+          domain,
+          from: knightName.toLowerCase(),
+          dispatched_by: knightName,
+          timestamp: new Date().toISOString(),
+          metadata: { timeout_ms: timeoutMs, table_prefix: natsPrefix },
+        }),
       );
       for await (const msg of sub) {
-        const response = formatRequestResponse(knight, sc.decode(msg.data));
+        const response = formatRequestResponse(knight, msg.string());
         log.info("nats_request: response received", { taskId, isError: response.isError ?? false });
         return response;
       }
       return text(`Timeout: ${knight} did not respond within ${Math.round(timeoutMs / 1000)}s`, true);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // nats.js rejects the iterator on subscription timeout
+      // the subscription iterator throws a TimeoutError ("timeout") when no reply arrives in time
       if (/timeout/i.test(msg)) {
         return text(`Timeout: ${knight} did not respond within ${Math.round(timeoutMs / 1000)}s`, true);
       }

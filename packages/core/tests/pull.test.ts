@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { AckPolicy, connect, type NatsConnection } from "nats";
+import { connect, type NatsConnection } from "@nats-io/transport-node";
+import { AckPolicy, jetstream, jetstreamManager } from "@nats-io/jetstream";
 import { connectNats, drain, publishResult, startPullLoop, subscribe, type NatsSubscribeConfig, type PulledMsg, type TaskDelivery } from "../src/nats/index.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -150,7 +151,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     for (let i = 0; i < 100; i++) {
       try { admin = await connect({ servers: config.natsUrl }); break; } catch { await sleep(100); }
     }
-    const jsm = await admin.jetstreamManager();
+    const jsm = await jetstreamManager(admin);
     await jsm.streams.add({ name: "TASKS", subjects: ["fleet-a.tasks.>", "fleet-a.results.>"] });
     await connectNats(config, "test-knight-Tester");
   });
@@ -162,8 +163,8 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const publishTask = (id: string) =>
-    admin.jetstream().publish(`fleet-a.tasks.tester.${id}`, new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })));
+  const publishTask = (id: string, topic = "tester") =>
+    jetstream(admin).publish(`fleet-a.tasks.${topic}.${id}`, new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })));
 
   it("holds backlog in the stream (lag), takes the next task when a slot frees, and recovers a crashed task", async () => {
     for (const id of ["a", "b", "c", "d"]) await publishTask(id);
@@ -187,7 +188,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     await waitFor(() => deliveries.length === 1);
     await sleep(300);
     assert.equal(deliveries.length, 1, "only one slot, so only one task taken");
-    const jsm = await admin.jetstreamManager();
+    const jsm = await jetstreamManager(admin);
     const info = await jsm.consumers.info("TASKS", "Tester-consumer");
     assert.equal(info.num_pending, 3, "lag reflects the backlog still in the stream");
     assert.equal(info.num_ack_pending, 1);
@@ -209,13 +210,56 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     // "crash": task b is never acked and never heartbeats -> reported, not silently lost or re-run
     await waitFor(() => lost.length === 1, 10_000);
     assert.deepEqual(lost, ["b"]);
-    const results = await admin.jetstream().consumers.get("TASKS", await (async () => {
+    const results = await jetstream(admin).consumers.get("TASKS", await (async () => {
       const ci = await jsm.consumers.add("TASKS", { filter_subject: "fleet-a.results.b", ack_policy: AckPolicy.None });
       return ci.name;
     })());
     const m = await results.next({ expires: 2000 });
     assert.equal(JSON.parse(new TextDecoder().decode(m!.data)).error, "lost");
     assert.equal(deliveries.filter((d) => d.task.taskId === "b").length, 1, "never redelivered");
+    await puller.stop();
+  });
+
+  it("sends in-progress heartbeats for a running task and acks it exactly once (#8)", async () => {
+    const beater: NatsSubscribeConfig = { ...config, knightName: "Beater", subscribeTopics: ["fleet-a.tasks.beater.>"] };
+    // Watch the consumer's ack subject on the wire: +WPI is working(), +ACK the final ack.
+    const acks: string[] = [];
+    const ackSub = admin.subscribe("$JS.ACK.TASKS.Beater-consumer.>");
+    void (async () => { for await (const m of ackSub) acks.push(m.string()); })();
+    await admin.flush();
+
+    let active = 0;
+    const lost: string[] = [];
+    const done: string[] = [];
+    const puller = await subscribe(beater, {
+      ackWaitMs: 1000,
+      freeSlots: () => 1 - active,
+      onLost: (t) => { lost.push(t.taskId); },
+      // What the runtimes do: heartbeat while the task runs, then ack once it finished.
+      onTask: (d) => {
+        active++;
+        const hb = setInterval(() => d.working(), 300);
+        setTimeout(() => {
+          clearInterval(hb);
+          d.ack();
+          done.push(d.task.taskId);
+          active--;
+        }, 2500);
+      },
+    });
+    await publishTask("hb1", "beater");
+    await waitFor(() => done.length === 1, 10_000);
+    await sleep(1500); // past ack_wait: a missed heartbeat or ack would surface as a lost task by now
+
+    const info = await (await jetstreamManager(admin)).consumers.info("TASKS", "Beater-consumer");
+    assert.deepEqual(lost, [], "heartbeats kept the task alive past ack_wait");
+    assert.equal(info.num_ack_pending, 0);
+    assert.equal(info.num_redelivered, 0);
+    assert.equal(info.ack_floor.consumer_seq, 1, "the task is acked");
+    assert.ok(acks.filter((a) => a === "+WPI").length >= 5, `heartbeats sent while running: ${JSON.stringify(acks)}`);
+    assert.equal(acks.filter((a) => a !== "+WPI").length, 1, `exactly one final ack: ${JSON.stringify(acks)}`);
+    assert.equal(acks.at(-1), "+ACK");
+    ackSub.unsubscribe();
     await puller.stop();
   });
 });

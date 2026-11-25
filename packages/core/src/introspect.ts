@@ -10,9 +10,9 @@
  * `session` (one persisted session, paged). The routing, paging, limits and the
  * reply envelope live here; each runtime supplies only a {@link SessionSource}.
  */
-import type { NatsConnection, Subscription } from "nats";
+import type { NatsConnection, Subscription } from "@nats-io/transport-node";
 import { log } from "./logger.js";
-import { getConnection, StringCodec } from "./nats/index.js";
+import { getConnection } from "./nats/index.js";
 
 export type IntrospectType = "stats" | "recent" | "tree" | "history" | "session";
 export const INTROSPECT_TYPES: readonly IntrospectType[] = ["stats", "recent", "tree", "history", "session"];
@@ -235,7 +235,7 @@ export interface StartIntrospectOptions<E = unknown> extends IntrospectOptions<E
   nc?: NatsConnection | null;
 }
 
-const sc = StringCodec();
+const decoder = new TextDecoder();
 
 /**
  * Subscribe the responder: `<prefix>.introspect.<Knight>` in queue group
@@ -260,7 +260,7 @@ async function serve<E>(sub: Subscription, opts: IntrospectOptions<E>): Promise<
   for await (const msg of sub) {
     let req: IntrospectRequest = { type: "stats" };
     try {
-      const parsed = JSON.parse(sc.decode(msg.data));
+      const parsed = JSON.parse(decoder.decode(msg.data));
       if (parsed && typeof parsed === "object") req = parsed;
     } catch {
       // not JSON: default to stats
@@ -274,6 +274,6 @@ async function serve<E>(sub: Subscription, opts: IntrospectOptions<E>): Promise<
       const { pod, node } = opts.identity;
       body = { pod, ...(node ? { node } : {}), error };
     }
-    msg.respond(sc.encode(JSON.stringify(body)));
+    msg.respond(JSON.stringify(body));
   }
 }
