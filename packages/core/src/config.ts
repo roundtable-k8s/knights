@@ -11,6 +11,10 @@ export interface BaseKnightConfig {
   taskTimeoutMs: number;
   /** Max wait for in-flight tasks after SIGTERM. Default taskTimeoutMs + 60s, matching the operator's terminationGracePeriodSeconds. */
   drainTimeoutMs: number;
+  /** Per-knight memory volume (KNIGHT_MEMORY_DIR). Unset: memory stays in /data. */
+  memoryDir?: string;
+  /** Read-only root of every knight's memory (KNIGHT_MEMORY_ROOT). */
+  memoryRoot?: string;
 }
 
 export function requireEnv(env: Env, name: string): string {
@@ -36,5 +40,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     logLevel: env["LOG_LEVEL"] ?? "info",
     taskTimeoutMs,
     drainTimeoutMs: intEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
+    ...(env["KNIGHT_MEMORY_DIR"] ? { memoryDir: env["KNIGHT_MEMORY_DIR"] } : {}),
+    ...(env["KNIGHT_MEMORY_ROOT"] ? { memoryRoot: env["KNIGHT_MEMORY_ROOT"] } : {}),
   };
 }

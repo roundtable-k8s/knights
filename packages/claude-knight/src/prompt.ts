@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { memoryPromptSection, resolveMemoryPaths } from "@roundtable/knight-core";
 import type { KnightConfig } from "./config.js";
 import { browserEnabled } from "./browser.js";
 
@@ -70,7 +71,12 @@ state the assumption in your final answer, and complete the work.
 5. Your final message IS the deliverable. The runtime publishes it as the task result.
    When asked for a report, the final message is the report — never describe what you
    would write. Always end with a plain-text message stating the result.
-</critical_rules>`;
+</critical_rules>${memorySection(config)}`;
+}
+
+function memorySection(config: KnightConfig): string {
+  const text = memoryPromptSection(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
+  return text ? `\n\n${text}` : "";
 }
 
 export function buildAppendPrompt(config: KnightConfig, taskDir?: string): string {

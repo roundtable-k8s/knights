@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -40,6 +40,8 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
 export async function main(): Promise<void> {
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel);
+  migrateMemory({ memoryDir: config.memoryDir, dataDir: config.workDir });
+  ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
   // Introspect in this process reads the same config dir the Claude Code child
   // processes write to.
   process.env["CLAUDE_CONFIG_DIR"] = config.claudeConfigDir;
