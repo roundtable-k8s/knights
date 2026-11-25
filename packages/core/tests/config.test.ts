@@ -8,6 +8,7 @@ test("loadBaseConfig applies defaults", () => {
     table: "none",
     natsUrl: "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: "fleet-a.results",
+    resultPublishRetryMs: 60_000,
     metricsPort: 3000,
     logLevel: "info",
     taskTimeoutMs: 1_800_000,
@@ -76,4 +77,11 @@ test("loadBaseConfig rejects non-positive timeouts", () => {
   const c = loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: "0", DRAIN_TIMEOUT_MS: "-5" });
   assert.equal(c.taskTimeoutMs, 1_800_000);
   assert.equal(c.drainTimeoutMs, 1_860_000);
+});
+
+test("loadBaseConfig reads RESULT_PUBLISH_RETRY_MS (default 60 s, 0 disables retries)", () => {
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k" }).resultPublishRetryMs, 60_000);
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", RESULT_PUBLISH_RETRY_MS: "5000" }).resultPublishRetryMs, 5000);
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", RESULT_PUBLISH_RETRY_MS: "0" }).resultPublishRetryMs, 0);
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", RESULT_PUBLISH_RETRY_MS: "x" }).resultPublishRetryMs, 60_000);
 });

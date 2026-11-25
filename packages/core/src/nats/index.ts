@@ -1,4 +1,4 @@
-import { connect as natsConnect, type NatsConnection } from "@nats-io/transport-node";
+import { connect as natsConnect, InvalidArgumentError, type NatsConnection } from "@nats-io/transport-node";
 import {
   jetstream,
   jetstreamManager,
@@ -19,6 +19,8 @@ const decoder = new TextDecoder();
 export interface NatsConnectConfig {
   natsUrl: string;
   knightName: string;
+  /** Total time publishResult keeps retrying a failing publish (RESULT_PUBLISH_RETRY_MS). Default 60 s. */
+  resultPublishRetryMs?: number;
 }
 
 /** What subscribe needs: the durable consumer is `<knightName>-consumer` on natsTasksStream. */
@@ -44,7 +46,13 @@ export function getStatus(): { connected: boolean } {
  * Connect to NATS. `clientName` is the connection name shown in the server's monitoring
  * (e.g. `pi-knight-<name>`, `claude-knight-<name>-mcp`).
  */
-export async function connectNats(config: NatsConnectConfig, clientName: string): Promise<void> {
+export async function connectNats(
+  config: NatsConnectConfig,
+  clientName: string,
+  /** Called with the initial state (true) and on every disconnect/reconnect. */
+  onStatus?: (connected: boolean) => void,
+): Promise<void> {
+  _retryMs = config.resultPublishRetryMs ?? RESULT_PUBLISH_RETRY_MS;
   log.info("Connecting to NATS", { url: config.natsUrl });
 
   nc = await natsConnect({
@@ -57,6 +65,7 @@ export async function connectNats(config: NatsConnectConfig, clientName: string)
 
   connected = true;
   log.info("NATS connected");
+  onStatus?.(true);
 
   // Monitor connection status
   (async () => {
@@ -65,9 +74,11 @@ export async function connectNats(config: NatsConnectConfig, clientName: string)
       if (status.type === "disconnect" || status.type === "error") {
         connected = false;
         log.warn("NATS disconnected", { type: status.type });
+        onStatus?.(false);
       } else if (status.type === "reconnect") {
         connected = true;
         log.info("NATS reconnected");
+        onStatus?.(true);
       }
     }
   })();
@@ -485,20 +496,98 @@ function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLos
 
 // Module-level config ref for publishResult (set during subscribe)
 let _config: NatsSubscribeConfig | null = null;
+let _retryMs = 60_000;
 
+/** Default total time publishResult retries a failing publish. */
+export const RESULT_PUBLISH_RETRY_MS = 60_000;
+/** While connected, "no responders" is retried this long (a stream electing a leader) before it counts as a missing stream. */
+export const NO_RESPONDERS_RETRY_MS = 10_000;
+const RETRY_INITIAL_DELAY_MS = 500;
+const RETRY_MAX_DELAY_MS = 5_000;
+
+export interface PublishResultOptions {
+  /** Total retry budget in ms (0 = a single attempt). Default: RESULT_PUBLISH_RETRY_MS / the connectNats config. */
+  retryMs?: number;
+  /** JetStream client to use instead of the one from connectNats (tests). */
+  js?: Pick<JetStreamClient, "publish">;
+  /** Budget for "no responders" while connected (leader election); a missing stream fails after this. Default 10 s. */
+  noRespondersRetryMs?: number;
+  /** Connection state probe (tests). Default: the live connection. */
+  isConnected?: () => boolean;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}
+
+/**
+ * True for an error no retry can fix: a payload over the server's max_payload, a bad argument,
+ * or a 4xx JetStream API answer. "Nobody answered" is not here: see isNoRespondersError.
+ */
+export function isNonRetryablePublishError(err: unknown): boolean {
+  if (err instanceof InvalidArgumentError || err instanceof TypeError) return true;
+  if (err instanceof JetStreamApiError) return err.status >= 400 && err.status < 500;
+  return false;
+}
+
+/** js.publish reports "nobody answered" as JetStreamNotEnabled (class not exported by the package). */
+export function isNoRespondersError(err: unknown): boolean {
+  return err instanceof Error && err.message === "jetstream is not enabled";
+}
+
+/**
+ * Publish a task result to `<resultsPrefix>.<taskId>`. A failing publish (NATS reconnecting,
+ * leader change) is retried with exponential backoff (0.5 s doubling to 5 s) for up to the
+ * retry budget; errors that cannot succeed are thrown at once.
+ */
 export async function publishResult(
   taskId: string,
   result: TaskResult,
+  opts: PublishResultOptions = {},
 ): Promise<void> {
-  if (!js) throw new Error("NATS not connected — cannot publish result");
+  const client = opts.js ?? js;
+  if (!client) throw new Error("NATS not connected — cannot publish result");
 
   // Contract check in tests only (node --test sets NODE_TEST_CONTEXT); never at runtime.
   if (process.env.NODE_TEST_CONTEXT) assertTaskResult(result);
 
   const prefix = _config?.natsResultsPrefix ?? "fleet-a.results";
   const subject = `${prefix}.${taskId}`;
-  await js.publish(subject, encodeResult(result));
-  log.info("Result published", { taskId, subject });
+  const payload = encodeResult(result);
+  const now = opts.now ?? Date.now;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const deadline = now() + (opts.retryMs ?? _retryMs);
+  const maxDelay = opts.maxDelayMs ?? RETRY_MAX_DELAY_MS;
+  let delay = opts.initialDelayMs ?? RETRY_INITIAL_DELAY_MS;
+  const noRespondersMs = opts.noRespondersRetryMs ?? NO_RESPONDERS_RETRY_MS;
+  let noRespondersSince: number | undefined;
+  // Same msgID on every attempt: a timed-out publish may have been stored, and JetStream
+  // drops the duplicate (default duplicate window 2 min > the retry budget).
+  const msgID = `result-${taskId}`;
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.publish(subject, payload, { msgID });
+      log.info("Result published", { taskId, subject, ...(attempt > 1 ? { attempt } : {}) });
+      return;
+    } catch (err) {
+      const remaining = deadline - now();
+      if (isNonRetryablePublishError(err) || remaining <= 0) throw err;
+      if (isNoRespondersError(err) && (opts.isConnected ?? (() => connected))()) {
+        // Connected but nobody answered: a leader election, or no stream for the subject. Fail fast on the latter.
+        noRespondersSince ??= now();
+        if (now() - noRespondersSince >= noRespondersMs) throw err;
+      } else {
+        noRespondersSince = undefined;
+      }
+      const wait = Math.min(delay, remaining);
+      log.warn("Result publish failed — retrying", {
+        taskId, subject, attempt, retryInMs: wait, error: err instanceof Error ? err.message : String(err),
+      });
+      await sleep(wait);
+      delay = Math.min(delay * 2, maxDelay);
+    }
+  }
 }
 
 export async function drain(): Promise<void> {

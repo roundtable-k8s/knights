@@ -104,8 +104,7 @@ export async function main(): Promise<void> {
   configureTools(config.knightName, config.natsResultsPrefix);
   setSkillCount(await waitForSkills(config));
 
-  await connectNats(config, `claude-knight-${config.knightName}`);
-  metrics.natsConnected.labels().set(1);
+  await connectNats(config, `claude-knight-${config.knightName}`, metrics.setNatsConnected);
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
   // Agent-card roster for find_knights / nats_request by name: a KV watch on <table>.* (none without KNIGHT_CARDS_BUCKET).
   void initRoster(process.env, config.knightName, getConnection)?.start();
@@ -219,13 +218,21 @@ export async function main(): Promise<void> {
 
       const durationMs = Date.now() - started;
       activity.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
-      await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }));
 
+      // Metrics first: a result that cannot be published must not lose them or turn a success into an error. (#91)
       metrics.tasksTotal.labels(outcome.success ? "success" : "error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
       metrics.llmCost.labels(outcome.model, outcome.billing).inc(outcome.cost);
       metrics.recordTokens(outcome.model, outcome.tokens);
       if (outcome.usageLimited) metrics.usageLimitHits.labels().inc();
+
+      try {
+        await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }));
+      } catch (e) {
+        // Do not publish a made-up failure for a task that ran: the real result is lost, say so.
+        log.error("Failed to publish task result — result lost", { taskId: parsed.taskId, error: e instanceof Error ? e.message : String(e) });
+        metrics.tasksTotal.labels("publish_failed").inc();
+      }
     } catch (err) {
       const durationMs = Date.now() - started;
       const errMsg = err instanceof Error ? err.message : String(err);
