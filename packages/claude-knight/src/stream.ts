@@ -162,7 +162,11 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
         const at = text.indexOf(BLOCK_REASON_PREFIX);
         if (b.is_error && at >= 0) {
           const reason = text.slice(at + BLOCK_REASON_PREFIX.length).split("\n")[0]!.trim();
-          log.warn("Blocked dangerous bash command", { taskId, reason, command: command.slice(0, 200) });
+          if (tool === "Bash") {
+            log.warn("Blocked dangerous bash command", { taskId, reason, command: command.slice(0, 200) });
+          } else {
+            log.warn("Blocked secret write", { taskId, tool, reason });
+          }
           toolCallsBlocked.inc({ tool, reason });
         }
       }

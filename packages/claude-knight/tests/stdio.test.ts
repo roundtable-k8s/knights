@@ -248,6 +248,32 @@ test("cli stream logs the blocked command (truncated to 200 chars)", async () =>
   }
 });
 
+test("cli stream logs a blocked secret write as such, not as a bash command", async () => {
+  const { applyMessage, newStreamState } = await import("../src/stream.js");
+  const { setLogStream } = await import("@roundtable/knight-core");
+  const lines: string[] = [];
+  const sink = new PassThrough();
+  sink.on("data", (d) => lines.push(String(d)));
+  setLogStream(sink);
+  try {
+    const state = newStreamState();
+    const ctx = { config: { knightName: "k", runtime: "cli" }, taskId: "t2", countTools: true } as never;
+    applyMessage({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Write", input: { file_path: "/x", content: "T=secret" } }] } } as never, state, ctx);
+    applyMessage({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "w1", is_error: true, content: "Blocked by knight safety policy: secret_in_content" }] },
+    } as never, state, ctx);
+    const parsed = lines.join("").trim().split("\n").map((l) => JSON.parse(l));
+    assert.equal(parsed.some((e) => e.msg === "Blocked dangerous bash command"), false);
+    const entry = parsed.find((e) => e.msg === "Blocked secret write");
+    assert.ok(entry, "expected a Blocked secret write log line");
+    assert.deepEqual([entry.taskId, entry.tool, entry.reason], ["t2", "Write", "secret_in_content"]);
+    assert.equal("command" in entry, false);
+  } finally {
+    setLogStream(process.stdout);
+  }
+});
+
 test("hook denies Write, Edit and MultiEdit that carry a token-shaped secret", () => {
   const token = `ghp_${"a".repeat(36)}`;
   const inputs: Array<[string, unknown]> = [
