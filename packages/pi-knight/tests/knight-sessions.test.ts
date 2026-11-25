@@ -284,3 +284,47 @@ test("executeTask: per-task model applies on the run's own session, under its lo
   __setTaskModelResolverForTests(null);
   __setSessionFactoryForTests(null);
 });
+
+test("executeTask: a failed model restore drops the run's session; the next step gets a fresh one on the default", async () => {
+  const { created, disposed } = setup();
+  __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));
+  const origCreate = created.length;
+  const r1 = await executeTask("a1", config, undefined, "run-rf", "rf1", { model: "m/opus" });
+  assert.equal(r1.success, true);
+  assert.equal(created.length, origCreate + 1);
+  // Make the restore fail on the first session.
+  // (a fresh run so we can patch the session before its override task)
+  __setSessionFactoryForTests(null);
+  const disposed2: number[] = [];
+  const sessions: ReturnType<typeof fakeSession>[] = [];
+  __setSessionFactoryForTests(async () => {
+    const s = fakeSession(sessions.length + 1, disposed2);
+    const realSet = s.setModel.bind(s);
+    s.setModel = async function (m: any) {
+      if (m.id === "default") throw new Error("restore boom");
+      return realSet(m);
+    };
+    sessions.push(s);
+    return s as any;
+  });
+  const a = await executeTask("b1", config, undefined, "run-rf2", "rf2", { model: "m/opus" });
+  assert.equal(a.success, true, "the task itself still succeeds");
+  assert.deepEqual(disposed2, [1], "the stuck session is disposed");
+  const b = await executeTask("b2", config, undefined, "run-rf2", "rf3");
+  assert.equal(sessions.length, 2, "next step of the run created a new session");
+  assert.equal(sessions[1].model.id, "default", "on the knight default");
+  assert.deepEqual(sessions[1].messages.map((m) => m.content), ["b2", "done: b2"]);
+  assert.equal(b.model, "x/y");
+  void disposed;
+  __setTaskModelResolverForTests(null);
+  __setSessionFactoryForTests(null);
+});
+
+test("executeTask: TaskResult.model reports the resolved provider/id, not the requested alias", async () => {
+  setup();
+  __setTaskModelResolverForTests(async () => ({ model: { provider: "anthropic", id: "claude-opus-4-5-20251101" } as any }));
+  const r = await executeTask("t", config, undefined, "run-alias", "al1", { model: "opus" });
+  assert.equal(r.model, "anthropic/claude-opus-4-5-20251101");
+  __setTaskModelResolverForTests(null);
+  __setSessionFactoryForTests(null);
+});
