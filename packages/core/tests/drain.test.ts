@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { describe, it } from "node:test";
 import { createShutdown, installSignalHandlers, waitForInflight } from "../src/drain.ts";
 import { startHealthServer, stopHealthServer, setDraining } from "../src/health.ts";
-import { startPullLoop, type PulledMsg } from "@roundtable/knight-core";
-import type { KnightConfig } from "../src/config.ts";
+import { startPullLoop, type PulledMsg } from "../src/nats/index.ts";
+import { createKnightMetrics } from "../src/metrics.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -29,7 +29,7 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
   let exitCode: number | null = null;
   const aborters: Array<() => void> = [];
   const port = await freePort();
-  startHealthServer({ knightName: "T", metricsPort: port } as unknown as KnightConfig);
+  startHealthServer({ knightName: "T", port, registry: createKnightMetrics({ prefix: "test_knight" }).registry });
 
   const mkMsg = (id: string): PulledMsg => ({
     data: new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })),

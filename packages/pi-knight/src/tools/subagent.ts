@@ -11,7 +11,7 @@ import { createAgentSession, DefaultResourceLoader, defineTool, type AgentSessio
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager } from "../model.js";
 import { log } from "@roundtable/knight-core";
-import * as metrics from "../metrics.js";
+import * as metrics from "../runtime-metrics.js";
 
 const SpawnParams = Type.Object({
   task: Type.String({ description: "Task for the sub-agent to execute" }),

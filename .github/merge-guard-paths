@@ -3,23 +3,19 @@
 # `protected-paths` label (visibility only). Read from the base branch.
 ^\.github/
 # Shared knight core: lifecycle (drain), NATS contract and health.
-^packages/core/src/(nats|drain|health)\.ts$
+^packages/core/src/(nats|drain|health|metrics)\.ts$
 ^packages/core/src/(nats|contract)/
 # pi-knight: knight lifecycle, task/result contract, safety guardrails and auth.
-^packages/pi-knight/src/drain\.ts$
 ^packages/pi-knight/src/nats\.ts$
 ^packages/pi-knight/src/result\.ts$
 ^packages/pi-knight/src/result-extraction\.ts$
-^packages/pi-knight/src/health\.ts$
 ^packages/pi-knight/src/guardrails\.ts$
 ^packages/pi-knight/src/hooks\.ts$
 ^packages/pi-knight/src/hook-cli\.ts$
 ^packages/pi-knight/src/auth\.ts$
 # claude-knight: same contract.
-^packages/claude-knight/src/drain\.ts$
 ^packages/claude-knight/src/nats\.ts$
 ^packages/claude-knight/src/result\.ts$
-^packages/claude-knight/src/health\.ts$
 ^packages/claude-knight/src/guardrails\.ts$
 ^packages/claude-knight/src/hooks\.ts$
 ^packages/claude-knight/src/hook-cli\.ts$

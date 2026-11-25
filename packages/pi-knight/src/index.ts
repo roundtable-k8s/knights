@@ -1,8 +1,6 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
 import { hostname } from "node:os";
-import { createShutdown, installSignalHandlers } from "./drain.js";
-import { startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "./health.js";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -10,7 +8,7 @@ import { introspectOptions } from "./session-source.js";
 import { resolveModel } from "./model.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
-import * as metrics from "./metrics.js";
+import * as metrics from "./runtime-metrics.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -23,7 +21,13 @@ async function main(): Promise<void> {
   });
 
   // Start health/metrics HTTP server
-  startHealthServer(config);
+  startHealthServer({
+    knightName: config.knightName,
+    port: config.metricsPort,
+    registry: metrics.registry,
+    readyExtras: () => ({ model: config.knightModel }),
+    routes: { "/introspect": (url) => handleIntrospect(introspectRequestFromQuery(url.searchParams), introspectOptions(config)) },
+  });
   log.info("Health server started", { port: config.metricsPort });
 
   // Preflight the model endpoint before doing anything else. For local endpoints

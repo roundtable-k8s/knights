@@ -10,7 +10,7 @@
  */
 import type { SDKRateLimitInfo } from "@anthropic-ai/claude-agent-sdk";
 import client from "prom-client";
-import { registry } from "./metrics.js";
+import { registry } from "./runtime-metrics.js";
 
 const utilizationGauge = new client.Gauge({
   name: "claude_knight_plan_utilization",

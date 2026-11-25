@@ -1,8 +1,6 @@
 import http from "node:http";
-import type { KnightConfig } from "./config.js";
-import { introspectOptions } from "./session-source.js";
-import { registry } from "./metrics.js";
-import { getStatus as getNatsStatus, handleIntrospect, introspectRequestFromQuery } from "@roundtable/knight-core";
+import type { Registry } from "prom-client";
+import { getStatus as getNatsStatus } from "./nats/index.js";
 
 let server: http.Server | null = null;
 let skillCount = 0;
@@ -28,24 +26,40 @@ export function getDegradedReason(): string | null {
   return degradedReason;
 }
 
+/** An extra JSON route (e.g. /introspect). The return value is served as 200 JSON, indented. */
+export type HealthRoute = (url: URL) => unknown | Promise<unknown>;
+
+export interface HealthServerOptions {
+  knightName: string;
+  /** Port for /health, /ready, /metrics and the extra routes. */
+  port: number;
+  /** Registry served on /metrics. */
+  registry: Registry;
+  /** Runtime-specific fields merged into the /ready body (before `knight`). */
+  readyExtras?: () => Record<string, unknown>;
+  /** Extra routes keyed by exact pathname, e.g. { "/introspect": handler }. */
+  routes?: Record<string, HealthRoute>;
+}
+
 /**
- * Same endpoints and probe semantics as pi-knight: /health is liveness (always
- * 200 while the process is up, so the startup probe passes in degraded state),
- * /ready is 200 only when NATS is connected and nothing marked the knight
- * degraded (missing credential, plan reserve reached).
+ * /health is liveness (always 200 while the process is up, so the startup probe passes in
+ * degraded state), /ready is 200 only when NATS is connected, nothing marked the knight
+ * degraded (missing credential, plan reserve reached) and it is not draining.
  */
-export function startHealthServer(config: KnightConfig): void {
+export function startHealthServer(opts: HealthServerOptions): void {
   const startTime = Date.now();
   server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const json = (code: number, body: unknown) => {
+    const json = (code: number, body: unknown, indent = 0) => {
       res.writeHead(code, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(body, null, url.pathname === "/introspect" ? 2 : 0));
+      res.end(JSON.stringify(body, null, indent));
     };
     try {
+      const route = opts.routes && Object.hasOwn(opts.routes, url.pathname) ? opts.routes[url.pathname] : undefined;
+      if (route) return json(200, await route(url), 2);
       switch (url.pathname) {
         case "/health":
-          return json(200, { status: "ok", uptime: Math.floor((Date.now() - startTime) / 1000), knight: config.knightName });
+          return json(200, { status: "ok", uptime: Math.floor((Date.now() - startTime) / 1000), knight: opts.knightName });
         case "/ready": {
           const nats = getNatsStatus();
           const ready = nats.connected && degradedReason == null && !draining;
@@ -55,19 +69,13 @@ export function startHealthServer(config: KnightConfig): void {
             nats: nats.connected ? "connected" : "disconnected",
             activeTasks: activeTaskCount,
             skillsLoaded: skillCount,
-            model: config.claudeModel ?? "claude-code-default",
-            runtime: "claude-knight",
-            claudeRuntime: config.runtime,
-            billing: config.authMode,
-            knight: config.knightName,
+            ...opts.readyExtras?.(),
+            knight: opts.knightName,
           });
         }
-        case "/introspect": {
-          return json(200, await handleIntrospect(introspectRequestFromQuery(url.searchParams), introspectOptions(config)));
-        }
         case "/metrics":
-          res.writeHead(200, { "Content-Type": registry.contentType });
-          return res.end(await registry.metrics());
+          res.writeHead(200, { "Content-Type": opts.registry.contentType });
+          return res.end(await opts.registry.metrics());
         default:
           res.writeHead(404);
           return res.end("Not found");
@@ -76,7 +84,7 @@ export function startHealthServer(config: KnightConfig): void {
       json(500, { error: err instanceof Error ? err.message : String(err) });
     }
   });
-  server.listen(config.metricsPort);
+  server.listen(opts.port);
 }
 
 export function stopHealthServer(): Promise<void> {
