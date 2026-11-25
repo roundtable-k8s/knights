@@ -46,6 +46,18 @@ and commit the result. `npm test` fails when the committed files are stale.
 `usage_limited: true` is deprecated. claude-knight keeps sending it next to `refused: "quota"` until the
 operator reads `refused` (roundtable-k8s/roundtable#431).
 
+## Transient failures
+
+`transient: true` with a `transientReason` marks a failure caused by the model provider being briefly
+unavailable, after the runtime's own retries were spent. It is never set for a task that failed on its own
+terms (tests, tool errors, its own task timeout) or was refused.
+
+| `transientReason` | Meaning |
+|-------------------|---------|
+| `overloaded` | The provider answered HTTP 529. |
+| `provider_5xx` | The provider answered 500, 502, 503 or 504. |
+| `network` | A connection reset or timeout to the provider. |
+
 ## How roundtable consumes it
 
 The operator (Go, `pkg/nats`) does not import this package. The operator side is

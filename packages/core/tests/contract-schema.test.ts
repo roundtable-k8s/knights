@@ -126,3 +126,15 @@ test("exported activity schema is equivalent to roundtable's hand-written one", 
   assert.deepEqual([...ours.required].sort(), [...theirs.required].sort());
   assert.deepEqual(ours.properties, theirs.properties);
 });
+
+test("transient fields validate and classify provider errors only", async () => {
+  const { transientFailure } = await import("../src/contract/transient.ts");
+  const base = JSON.parse(readFileSync(new URL("../contract/fixtures/result.transient.json", import.meta.url), "utf8"));
+  assert.deepEqual(taskResultErrors(base), []);
+  assert.notDeepEqual(taskResultErrors({ ...base, transientReason: "bogus" }), []);
+  assert.equal(transientFailure("API Error: 529 Overloaded")?.transientReason, "overloaded");
+  for (const c of ["500", "502", "503", "504"]) assert.equal(transientFailure(`HTTP ${c} Bad`)?.transientReason, "provider_5xx");
+  assert.equal(transientFailure("connect ETIMEDOUT 1.2.3.4:443")?.transientReason, "network");
+  assert.equal(transientFailure("Task timed out after 600s"), undefined);
+  assert.equal(transientFailure("3 tests failed"), undefined);
+});

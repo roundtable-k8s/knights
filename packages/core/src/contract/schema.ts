@@ -93,6 +93,12 @@ export const Refusal = Type.Enum(["credits", "quota"], {
 });
 export type Refusal = Static<typeof Refusal>;
 
+export const TransientReason = Type.Enum(["overloaded", "provider_5xx", "network"], {
+  description:
+    "Why a transient failure happened. `overloaded`: the provider answered HTTP 529. `provider_5xx`: it answered 500, 502, 503 or 504. `network`: a connection reset or timeout to the provider.",
+});
+export type TransientReason = Static<typeof TransientReason>;
+
 const count = (description: string) => Type.Number({ minimum: 0, description });
 
 export const TaskResult = Type.Object(
@@ -122,6 +128,13 @@ export const TaskResult = Type.Object(
       Type.Enum(["ship_it", "needs_changes"], { description: "Review verdict from a final `Verdict:` line (omitted when none)." }),
     ),
     refused: Type.Optional(Refusal),
+    transient: Type.Optional(
+      Type.Boolean({
+        description:
+          "The task failed because the model provider was briefly unavailable, after the runtime's own retries. Safe to retry later. Never set for a task that failed on its own terms or was refused.",
+      }),
+    ),
+    transientReason: Type.Optional(TransientReason),
     usage_limited: Type.Optional(
       Type.Boolean({
         deprecated: true,

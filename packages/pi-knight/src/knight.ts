@@ -16,7 +16,7 @@ import { browserTools } from "./tools/browser.js";
 import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
-import type { PRRef, Verdict } from "@roundtable/knight-core";
+import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
 import { describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
 
 
@@ -39,6 +39,9 @@ export interface TaskResult {
    *  task for affordability, e.g. OpenRouter 402 "more credits, or fewer
    *  max_tokens") so the pipeline can defer instead of escalating. (#79) */
   refused?: "credits";
+  /** Set when the final failure was a transient provider error (HTTP 529/5xx,
+   *  connection reset or timeout), so the dispatcher can retry later. */
+  transient?: TransientFailure;
 }
 
 /**
@@ -500,6 +503,8 @@ export async function executeTask(
     : undefined;
   const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
   const refused = success ? undefined : refusalCode(error);
+  // Only an LLM call failure is a provider error; never the agent's own output or a task timeout.
+  const transient = !success && !refused && failureReason?.startsWith("LLM call failed") ? transientFailure(failureReason) : undefined;
   if (!success) {
     log.warn("Task produced no deliverable", {
       error,
@@ -546,6 +551,7 @@ export async function executeTask(
     ...(structured.prs.length > 0 ? { prs: structured.prs } : {}),
     ...(structured.verdict ? { verdict: structured.verdict } : {}),
     ...(refused ? { refused } : {}),
+    ...(transient ? { transient } : {}),
   };
 }
 

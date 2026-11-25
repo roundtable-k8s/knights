@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseVerdict, resolvePrs, taskResultFields, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -20,6 +20,8 @@ export interface TaskResult {
   turns: number;
   /** True when the failure was a plan/credit limit, so callers can back off. Published as `refused: "quota"`. */
   usageLimited?: boolean;
+  /** Set when the final failure was a transient provider error (HTTP 529/5xx, connection reset or timeout). */
+  transient?: TransientFailure;
   /** Pull requests the task opened or updated (omitted when none). */
   prs?: PRRef[];
   /** Review outcome from a final `Verdict:` line (omitted when none). */
@@ -117,6 +119,10 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       ? fail(`Task timed out after ${Math.round(input.durationMs / 1000)}s. Partial output:\n\n${lastAssistantText}`)
       : fail("Task aborted before producing output (task timeout)");
   }
+  // Provider-side failure after Claude Code's own retries. Only provider/API error text is
+  // inspected, never the agent's own output, so a task that failed on its own terms is not marked.
+  const providerText = [resultText, errors, thrown].filter(Boolean).join("\n");
+  const transient = transientFailure(providerText) ?? (assistantError === "server_error" ? transientFailure("API Error: 500") : undefined);
   if (result) {
     switch (result.subtype) {
       case "error_max_turns":
@@ -124,10 +130,10 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       case "error_max_budget_usd":
         return fail(`Stopped at the per-task budget ($${config.maxBudgetUsd})${lastAssistantText ? `. Last output:\n\n${lastAssistantText}` : ""}`);
       default:
-        return fail(`Claude Code error (${result.subtype}${result.is_error ? ", is_error" : ""}): ${errors || resultText || assistantError || "no detail"}`);
+        return fail(`Claude Code error (${result.subtype}${result.is_error ? ", is_error" : ""}): ${errors || resultText || assistantError || "no detail"}`, transient ? { transient } : {});
     }
   }
-  return fail(`Claude Code failed: ${thrown ?? assistantError ?? "no result message"}`);
+  return fail(`Claude Code failed: ${thrown ?? assistantError ?? "no result message"}`, transient ? { transient } : {});
 }
 
 
@@ -149,7 +155,9 @@ export function reserveRefusedOutcome(reason: string | undefined, config: Knight
 
 /** Outcome for a task that threw out of executeTask. */
 export function failedOutcome(errMsg: string, config: KnightConfig): TaskResult {
+  const transient = transientFailure(errMsg);
   return {
+    ...(transient ? { transient } : {}),
     result: `Task failed: ${errMsg}`,
     success: false,
     error: errMsg,
@@ -183,6 +191,7 @@ export function buildResultPayload(
     result: outcome.result,
     ...(outcome.error ? { error: outcome.error } : {}),
     ...(outcome.usageLimited ? { refused: "quota" as const, usage_limited: true } : {}),
+    ...(outcome.transient ? outcome.transient : {}),
     ...(outcome.prs?.length ? { prs: outcome.prs } : {}),
     ...(outcome.verdict ? { verdict: outcome.verdict } : {}),
     duration_ms: meta.durationMs,
