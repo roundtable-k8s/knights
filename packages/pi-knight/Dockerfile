@@ -30,17 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     jq \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# ── Cache Nix installer tarball (avoids download on every fresh PVC) ──
-# We DON'T install Nix into the image — it lives entirely on the PVC.
-# This just caches the ~20MB tarball so first boot is faster.
-ARG NIX_VERSION=2.28.3
-RUN curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/nix-${NIX_VERSION}-x86_64-linux.tar.xz" \
-      -o /tmp/nix-installer.tar.xz \
-    && mkdir -p /opt/nix-cache \
-    && mv /tmp/nix-installer.tar.xz /opt/nix-cache/
 
 # ── Mise (baseline tools) ────────────────────────────────────────
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh

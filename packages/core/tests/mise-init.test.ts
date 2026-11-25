@@ -51,7 +51,7 @@ test("mise-init: unreachable host gives up within the timeout, names the host, e
   assert.match(r.stdout, /WARNING: mise install gave up .*could not reach mise-versions\.jdx\.dev/);
 });
 
-/** Runs mise-init.sh with stubbed apt-get/pip that hang, and an apt.txt/pip.txt present. */
+/** Runs mise-init.sh with stubbed apt-get that hangs, and an apt.txt present. */
 function runPkgs(files: Record<string, string>, env: Record<string, string>) {
   const dir = mkdtempSync(join(tmpdir(), "mise-init-pkg-"));
   try {
@@ -60,7 +60,7 @@ function runPkgs(files: Record<string, string>, env: Record<string, string>) {
     mkdirSync(config);
     mkdirSync(bin);
     for (const [name, body] of Object.entries(files)) writeFileSync(join(config, name), body);
-    for (const cmd of ["apt-get", "pip"]) {
+    for (const cmd of ["apt-get"]) {
       writeFileSync(join(bin, cmd), "#!/bin/sh\nexec sleep 30\n");
       chmodSync(join(bin, cmd), 0o755);
     }
@@ -82,20 +82,4 @@ test("mise-init: hanging apt-get gives up within the timeout, warns, exits 0", (
   assert.match(r.stdout, /WARNING: apt gave up .*could not reach .*egress allowlist/);
   assert.match(r.stdout, /apt took \d+s/);
   assert.doesNotMatch(r.stdout, /System packages installed/);
-});
-
-test("mise-init: hanging pip install warns naming PIP_INDEX_URL host, exits 0", () => {
-  const r = runPkgs(
-    { "pip.txt": "requests\n" },
-    { STARTUP_PIP_TIMEOUT: "1", PIP_INDEX_URL: "https://user:pw@pypi.internal.example:8443/simple" },
-  );
-  assert.equal(r.status, 0, r.stderr);
-  assert.ok(r.elapsed < 10000, `took ${r.elapsed}ms`);
-  assert.match(r.stdout, /WARNING: pip install gave up .*could not reach pypi\.internal\.example /);
-  assert.match(r.stdout, /pip took \d+s/);
-});
-
-test("mise-init: pip defaults the hint to pypi.org", () => {
-  const r = runPkgs({ "pip.txt": "requests\n" }, { STARTUP_PIP_TIMEOUT: "1", PIP_INDEX_URL: "" });
-  assert.match(r.stdout, /could not reach pypi\.org /);
 });

@@ -2,10 +2,9 @@
 # mise-init.sh — Install knight-specific tools at pod startup.
 # Shared by claude-knight and pi-knight; runs before the main knight process.
 #
-# Three sources of knight-specific tools:
+# Sources of knight-specific tools:
 #   1. /config/apt.txt    — system packages (apt-get install)
-#   2. /config/pip.txt    — Python packages (pip install)
-#   3. /config/mise.toml  — declarative CLI tools (mise install)
+#   2. /config/mise.toml  — declarative CLI tools (mise install)
 #
 # All are optional. If none exist, the knight runs on baseline tools only.
 #
@@ -21,7 +20,6 @@ CONFIG_DIR="${CONFIG_DIR:-/config}"
 PERSIST_BIN="/data/bin"
 PERSIST_LIB="/data/lib"
 STARTUP_APT_TIMEOUT="${STARTUP_APT_TIMEOUT:-180}"
-STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-180}"
 
 # phase_done NAME START — one log line with the seconds a start-up phase took.
 phase_done() {
@@ -156,21 +154,6 @@ if [ -f "$BINS_FILE" ]; then
   done < "$BINS_FILE"
 fi
 
-# --- pip packages ---
-PIP_FILE="$CONFIG_DIR/pip.txt"
-if [ -f "$PIP_FILE" ]; then
-  echo "Installing Python packages from $PIP_FILE..."
-  PIP_START=$(date +%s)
-  if timeout "$STARTUP_PIP_TIMEOUT" pip install --no-cache-dir -r "$PIP_FILE"; then
-    echo "Python packages installed."
-  else
-    rc=$?
-    PIP_HOST=$(echo "${PIP_INDEX_URL:-https://pypi.org/simple}" | sed 's|^[a-z]*://||; s|^[^@/]*@||; s|[/:].*||')
-    echo "WARNING: pip install gave up (exit $rc, timeout ${STARTUP_PIP_TIMEOUT}s); could not reach $PIP_HOST (and files.pythonhosted.org) — check the egress allowlist. Continuing without pip packages."
-  fi
-  phase_done pip "$PIP_START"
-fi
-
 # --- mise tools ---
 # Only runs when the config lists at least one tool: an empty or comment-only
 # file must not trigger any network access (and must not fall back to the
@@ -216,6 +199,6 @@ if [ -f "$MISE_TOML" ]; then
   fi
 fi
 
-if [ ! -f "$APT_FILE" ] && [ ! -f "$PIP_FILE" ] && [ ! -f "$MISE_TOML" ]; then
-  echo "No mise/apt/pip tools configured — using image baseline only."
+if [ ! -f "$APT_FILE" ] && [ ! -f "$MISE_TOML" ]; then
+  echo "No mise/apt tools configured — using image baseline only."
 fi

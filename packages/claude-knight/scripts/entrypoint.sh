@@ -2,16 +2,14 @@
 # entrypoint.sh — Claude-Knight startup (same phases as pi-knight, minus Pi model config)
 #
 # Architecture:
-#   - /nix is a PVC mount (empty on first boot, persistent after)
-#   - Nix installer tarball is cached in the image at /opt/nix-cache/
-#   - First boot: install Nix to PVC (~30s), build flake tools (~1-3min)
-#   - Subsequent boots: everything cached on PVC (~2s)
-#   - NO init containers needed for Nix
+#   - Nix tools come from the operator's tools image, mounted read-only at /nix
+#     (profile at $KNIGHT_NIX_PROFILE, normally /nix/profile). Nothing is
+#     installed or built at start-up.
 #
 # Mount requirements:
-#   /nix   → PVC (the entire Nix store + profiles)
-#   /data  → PVC (workspace, memory, mise tools)
-#   /config → ConfigMap (SOUL.md, flake.nix, etc.)
+#   /nix    → tools image (read-only image volume, optional)
+#   /data   → PVC (workspace, memory, mise tools)
+#   /config → ConfigMap (SOUL.md, mise.toml, etc.)
 
 # First statement: trap SIGTERM/SIGINT so a pod deleted during start-up exits
 # at once instead of starting the knight (see startup-signals.sh).
@@ -76,109 +74,24 @@ log "Phase 1.5: Claude config dir $CLAUDE_CONFIG_DIR ✓"
 rt_phase_mark "Phase 1.5"
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 2: Nix bootstrap (first boot only)
+# Phase 2: Nix tools profile (read-only, from the tools image)
 # ──────────────────────────────────────────────────────────────────
-# Three modes:
-#   - /nix read-only  → shared store; tools prebuilt by the operator's build
-#     Job. Skip bootstrap/build, just source the per-knight profile.
-#   - /nix writable   → per-pod PVC store (legacy). Bootstrap + build locally.
-#   - no /nix         → skip Nix entirely.
-NIX_PROFILE="$HOME/.nix-profile"
-NIX_SHARED_STORE="false"
-
-# shellcheck source=scripts/nix-lib.sh
-. /app/scripts/nix-lib.sh
-
-if [ -d /nix ] && [ ! -w /nix ]; then
-  # Shared read-only store — tools come from the operator-published profile.
-  NIX_SHARED_STORE="true"
-  KNIGHT_NIX_PROFILE="${KNIGHT_NIX_PROFILE:-/nix/var/nix/profiles/knights/$(echo "${KNIGHT_NAME:-}" | tr '[:upper:]' '[:lower:]')}"
+# /nix is the operator's tools image mounted read-only; put its profile on
+# PATH. Without a /nix mount there is nothing to do.
+if [ -d /nix ]; then
+  KNIGHT_NIX_PROFILE="${KNIGHT_NIX_PROFILE:-/nix/profile}"
   if [ -d "$KNIGHT_NIX_PROFILE/bin" ]; then
     export PATH="$KNIGHT_NIX_PROFILE/bin:$PATH"
     export NIX_CONF_DIR="/nix/etc/nix"
     log "Phase 2: Shared Nix store (read-only) — profile $KNIGHT_NIX_PROFILE ✓"
   else
-    log "Phase 2: Shared Nix store mounted but no profile at $KNIGHT_NIX_PROFILE yet (build pending)"
-  fi
-elif [ -d /nix ] && [ -w /nix ]; then
-  nix_rc=0
-  rt_run rt_bootstrap_nix_bounded || nix_rc=$?
-  if [ "$nix_rc" -eq 124 ]; then
-    rt_nix_timeout_warning "Nix bootstrap"
-  elif [ "$nix_rc" -ne 0 ]; then
-    exit "$nix_rc"
-  fi
-  if rt_source_nix; then
-    log "Phase 2: Nix ready — $(nix --version 2>/dev/null || echo 'binary found')"
+    log "Phase 2: /nix mounted but no profile at $KNIGHT_NIX_PROFILE"
   fi
 else
-  log "Phase 2: No /nix mount — skipping Nix bootstrap"
+  log "Phase 2: No /nix mount — skipping Nix"
 fi
 
 rt_phase_mark "Phase 2"
-
-# ──────────────────────────────────────────────────────────────────
-# Phase 3: Flake tool installation (content-addressed, cached)
-# ──────────────────────────────────────────────────────────────────
-FLAKE_FILE="/config/flake.nix"
-NIX_ENV="/data/nix-env"
-HASH_FILE="/data/.nix-flake-hash"
-
-if [ "$NIX_SHARED_STORE" = "true" ]; then
-  log "Phase 3: Shared store — flake tools prebuilt by operator, skipping local build"
-elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
-  NEW_HASH=$(sha256sum "$FLAKE_FILE" | cut -d' ' -f1)
-
-  if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$NEW_HASH" ] \
-     && [ -d "$NIX_ENV/bin" ] && [ "$(ls "$NIX_ENV/bin/" 2>/dev/null | wc -l)" -gt 0 ]; then
-    # Verify a symlink actually resolves
-    FIRST_BIN=$(ls "$NIX_ENV/bin/" | head -1)
-    if [ -x "$NIX_ENV/bin/$FIRST_BIN" ] 2>/dev/null; then
-      log "Phase 3: Flake tools cached ($(ls "$NIX_ENV/bin/" | wc -l) tools) ✓"
-    else
-      log "Phase 3: Flake cache broken — rebuilding"
-      rm -f "$HASH_FILE"
-    fi
-  fi
-
-  # Build if not cached
-  if [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$NEW_HASH" ]; then
-    log "Phase 3: Building flake tools..."
-
-    BUILD_DIR=$(mktemp -d)
-    cp "$FLAKE_FILE" "$BUILD_DIR/flake.nix"
-    cd "$BUILD_DIR"
-
-    BUILD_OUT="$BUILD_DIR.out"
-    build_rc=0
-    rt_run timeout "$STARTUP_NIX_TIMEOUT" nix build ".#default" --no-link --print-out-paths >"$BUILD_OUT" 2>&1 || build_rc=$?
-    if [ "$build_rc" -eq 0 ]; then
-      STORE_PATH=$(tail -1 "$BUILD_OUT")
-      if [ -d "$STORE_PATH" ]; then
-        chmod -R u+w "$NIX_ENV" 2>/dev/null || true
-        rm -rf "$NIX_ENV" 2>/dev/null || true
-        cp -a "$STORE_PATH" "$NIX_ENV"
-        echo "$NEW_HASH" > "$HASH_FILE"
-        log "  Flake tools ready: $(ls "$NIX_ENV/bin/" | wc -l) tools"
-      else
-        log "  WARNING: Nix build produced invalid path: $STORE_PATH"
-      fi
-    elif [ "$build_rc" -eq 124 ]; then
-      tail -5 "$BUILD_OUT"
-      rt_nix_timeout_warning "Nix flake build"
-    else
-      log "  WARNING: Nix flake build failed (non-fatal):"
-      tail -5 "$BUILD_OUT"
-    fi
-
-    rm -rf "$BUILD_DIR" "$BUILD_OUT"
-    cd /app
-  fi
-else
-  log "Phase 3: No flake.nix or no Nix — skipping"
-fi
-
-rt_phase_mark "Phase 3"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 4: Mise tools (if any per-knight config)
@@ -233,7 +146,7 @@ rt_phase_mark "Phase 4.9"
 # installs its own handlers first thing (a signal before it is ready means it
 # exits without taking a task). exec resets the start-up traps to the default.
 # Set PATH with tool priority
-export PATH="/data/nix-env/bin:/data/bin:/data/.mise/shims:/app/.mise/shims:$PATH"
+export PATH="/data/bin:/data/.mise/shims:/app/.mise/shims:$PATH"
 # The gh shim goes first so every gh call, including Claude Code's Bash tool
 # (it inherits this PATH), picks up the current token from GITHUB_TOKEN_FILE.
 if [ -n "${GITHUB_TOKEN_FILE:-}" ]; then
