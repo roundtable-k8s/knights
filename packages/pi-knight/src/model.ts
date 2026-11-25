@@ -8,11 +8,12 @@
 import { InMemoryCredentialStore, InMemoryModelsStore, type Api, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { log } from "@roundtable/knight-core";
+import { dataPaths } from "./config.js";
 
-// Custom-model catalog read by the SDK ModelRuntime. Defaults to the workspace PVC;
-// override (e.g. to a read-only ConfigMap mount like /config/models.json) via env so a
+// Custom-model catalog read by the SDK ModelRuntime. Defaults to <KNIGHT_DATA_DIR>/models.json;
+// override (e.g. to a read-only ConfigMap mount like /config/models.json) via MODELS_JSON_PATH so a
 // fleet can ship a declarative local-model catalog instead of the per-knight env triplet.
-const MODELS_JSON = process.env.MODELS_JSON_PATH || "/data/models.json";
+const MODELS_JSON = (): string => dataPaths().modelsJson;
 
 /**
  * Default max output tokens (max_tokens per request) for any model.
@@ -155,7 +156,7 @@ export async function resolveModel(
 
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
-    modelsPath: MODELS_JSON,
+    modelsPath: MODELS_JSON(),
     modelsStore: new InMemoryModelsStore(),
   });
   const runtimeError = modelRuntime.getError();

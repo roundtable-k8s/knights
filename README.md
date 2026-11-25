@@ -95,6 +95,8 @@ No cluster needed: Node 22 and a [`nats-server`](https://docs.nats.io/running-a-
 
 The images do not set `NODE_ENV=production`, and both runtimes strip `NODE_ENV=production` and `npm_config_omit` / `npm_config_production` (see `agentShellEnv` in `packages/core`) from the environment of agent shells: pi-knight scrubs its own process env at startup, claude-knight scrubs the Claude Code child env. So `npm ci` in a repo a knight works on installs its dev dependencies.
 
+pi-knight keeps its state under one data root, `KNIGHT_DATA_DIR` (default `/data`, the PVC). It is the pi SDK `cwd` and `agentDir` (settings, session notes, scratch, long-term memory without a memory volume) and the default root for per-task workspaces (`<root>/work`, override `KNIGHT_WORK_ROOT`), persisted sessions (`<root>/sessions`, override `KNIGHT_SESSIONS_ROOT`) and the custom-model catalog (`<root>/models.json`, override `MODELS_JSON_PATH`). The overrides win over the data root. To run pi-knight outside a pod without touching `/data`, set `KNIGHT_DATA_DIR=$(mktemp -d)`.
+
 The real-NATS tests in `packages/core` (pull loop, rollouts, micro service, roster) need a `nats-server` binary on `PATH` or in `NATS_SERVER_BIN`; without one they are skipped.
 
 ## What happens to tasks during a rollout

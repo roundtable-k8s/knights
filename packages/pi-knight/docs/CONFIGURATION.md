@@ -40,6 +40,14 @@ Knights can evolve their own files over time — ConfigMap seeds the initial sta
 | `KNIGHT_NAME` | Knight identifier | `galahad` |
 | `SUBSCRIBE_TOPICS` | NATS subject filter (comma-separated) | `fleet-a.tasks.security.>` |
 
+### Data paths
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KNIGHT_DATA_DIR` | Data root: SDK `cwd`/`agentDir`, session notes, scratch, default root of the paths below | `/data` |
+| `KNIGHT_WORK_ROOT` | Per-task workspaces | `$KNIGHT_DATA_DIR/work` |
+| `KNIGHT_SESSIONS_ROOT` | Persisted session JSONL files | `$KNIGHT_DATA_DIR/sessions` |
+| `MODELS_JSON_PATH` | Custom-model catalog | `$KNIGHT_DATA_DIR/models.json` |
+
 ### LLM Configuration
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -68,7 +76,7 @@ new `runId` — or no `runId` at all (ad-hoc NATS tasks) — starts a fresh sess
 context never bleeds between tasks. A pristine pre-warmed session is adopted rather
 than recreated. Prior session history is never resumed at startup; long-term memory
 lives in files on the PVC (`MEMORY.md`, `memory/*.md`). Every session is persisted as a JSONL
-file under `/data/sessions`; old files are pruned at startup and on each run change.
+file under `$KNIGHT_DATA_DIR/sessions` (default `/data/sessions`); old files are pruned at startup and on each run change.
 
 | Variable | Description | Default |
 |----------|-------------|---------|

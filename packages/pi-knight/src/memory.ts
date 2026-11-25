@@ -11,13 +11,13 @@
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { KnightConfig } from "./config.js";
+import { dataPaths, type KnightConfig } from "./config.js";
 import { log } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
 
-// Overridable (tests must not touch /data); read lazily so env set after import applies.
-const DATA_DIR = () => process.env.KNIGHT_DATA_DIR ?? "/data";
+// KNIGHT_DATA_DIR (default /data); read lazily so env set after import applies.
+const DATA_DIR = () => dataPaths().dataDir;
 const SESSION_NOTES_DIR = () => `${DATA_DIR()}/session-notes`;
 const SESSION_NOTES_FILE = () => `${SESSION_NOTES_DIR()}/current.md`;
 const SCRATCH_DIR = () => `${DATA_DIR()}/scratch`;

@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
-import type { KnightConfig } from "./config.js";
+import { dataPaths, type KnightConfig } from "./config.js";
 import { log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
@@ -65,8 +65,8 @@ interface SessionSlot {
 const slots = new Map<string, SessionSlot>();
 let lastActive: SessionSlot | null = null;
 
-/** Where per-task workspaces live: <root>/<runId|taskId>. Overridable for tests. */
-const WORK_ROOT = () => process.env.KNIGHT_WORK_ROOT ?? "/data/work";
+/** Where per-task workspaces live: <root>/<runId|taskId> (KNIGHT_WORK_ROOT, else <KNIGHT_DATA_DIR>/work). */
+const WORK_ROOT = () => dataPaths().workRoot;
 const MIN_SESSIONS = 8;
 
 /** Get the most recently used session (or null). Used by introspect. */
@@ -212,8 +212,9 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
 
   // createAgentSession does not reload a caller-supplied loader: reload() is what discovers
   // skills and loads the inline tool-hook extension.
-  const settingsManager = createTrustedSettingsManager("/data", "/data");
-  // In-memory overrides (never written to /data): env-driven retry cap and thinking budgets.
+  const { dataDir } = dataPaths();
+  const settingsManager = createTrustedSettingsManager(dataDir, dataDir);
+  // In-memory overrides (never written to the data dir): env-driven retry cap and thinking budgets.
   settingsManager.applyOverrides({
     retry: { provider: { maxRetryDelayMs: config.maxRetryDelayMs } },
     ...(thinkingLevel !== "off" && {
@@ -226,8 +227,8 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
   });
   log.info("Retry delay cap configured", { maxRetryDelayMs: config.maxRetryDelayMs });
   const resourceLoader = new DefaultResourceLoader({
-    cwd: "/data",
-    agentDir: "/data",
+    cwd: dataDir,
+    agentDir: dataDir,
     settingsManager,
     additionalSkillPaths: ["/skills"],
     noExtensions: true,
@@ -243,7 +244,7 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
     model,
     thinkingLevel,
     cwd,
-    agentDir: "/data",
+    agentDir: dataDir,
     modelRuntime,
     // Explicitly trust the project dir; see model.ts.
     settingsManager,
@@ -578,7 +579,7 @@ The current model is ${config.knightModel}.
 <runtime_context>
 Knight: ${config.knightName}
 Model: ${config.knightModel}
-Workspace: /data (persistent PVC — survives restarts)
+Workspace: ${dataPaths().dataDir} (persistent PVC — survives restarts)
 Skills: /skills (read-only, operator-managed)
 Vault: /vault (Derek's Obsidian vault — write only to Briefings/ and Roundtable/)
 </runtime_context>
@@ -614,6 +615,6 @@ parameters in tool calls.
 }
 
 function memorySection(config: KnightConfig): string {
-  const text = memoryPromptSection(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
+  const text = memoryPromptSection(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: dataPaths().dataDir }));
   return text ? `\n\n${text}` : "";
 }

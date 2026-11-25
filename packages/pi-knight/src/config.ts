@@ -1,4 +1,5 @@
 import os from "node:os";
+import { join } from "node:path";
 import { loadBaseConfig, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
 
 export interface KnightConfig extends BaseKnightConfig {
@@ -19,6 +20,33 @@ export interface KnightConfig extends BaseKnightConfig {
   sessionRetentionDays: number;
   /** Task activity event content: `preview` (default) or `none` (no previews / argument summaries). */
   activityContent: "none" | "preview";
+}
+
+/** On-disk locations of a pi-knight, all under one data root unless overridden. */
+export interface DataPaths {
+  /** KNIGHT_DATA_DIR (default /data): SDK cwd and agentDir, session notes, scratch, memory. */
+  dataDir: string;
+  /** Per-task workspaces: KNIGHT_WORK_ROOT, else <dataDir>/work. */
+  workRoot: string;
+  /** Persisted session JSONL files: KNIGHT_SESSIONS_ROOT, else <dataDir>/sessions. */
+  sessionsRoot: string;
+  /** Custom-model catalog: MODELS_JSON_PATH, else <dataDir>/models.json. */
+  modelsJson: string;
+}
+
+/**
+ * Resolve the data paths from the environment. Read on each call (not at import) so env set
+ * after import still applies. With KNIGHT_DATA_DIR unset every path is the historical /data one;
+ * the specific overrides always take precedence over the data root.
+ */
+export function dataPaths(env: Env = process.env): DataPaths {
+  const dataDir = env["KNIGHT_DATA_DIR"] || "/data";
+  return {
+    dataDir,
+    workRoot: env["KNIGHT_WORK_ROOT"] ?? join(dataDir, "work"),
+    sessionsRoot: env["KNIGHT_SESSIONS_ROOT"] ?? join(dataDir, "sessions"),
+    modelsJson: env["MODELS_JSON_PATH"] || join(dataDir, "models.json"),
+  };
 }
 
 export function loadConfig(env: Env = process.env): KnightConfig {

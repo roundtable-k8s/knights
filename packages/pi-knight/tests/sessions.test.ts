@@ -7,6 +7,7 @@ import {
   decideRunSession,
   pruneSessionFiles,
   selectSessionsToPrune,
+  sessionsRoot,
   type SessionFile,
 } from "../src/sessions.ts";
 
@@ -142,4 +143,20 @@ test("pruneSessionFiles is a no-op when the sessions root does not exist", async
     join(tmpdir(), "pk-sessions-does-not-exist"),
   );
   assert.deepEqual(removed, []);
+});
+
+test("sessionsRoot follows KNIGHT_DATA_DIR at call time, KNIGHT_SESSIONS_ROOT wins", () => {
+  const saved = { data: process.env.KNIGHT_DATA_DIR, sessions: process.env.KNIGHT_SESSIONS_ROOT };
+  try {
+    delete process.env.KNIGHT_SESSIONS_ROOT;
+    process.env.KNIGHT_DATA_DIR = "/tmp/pk-data";
+    assert.equal(sessionsRoot(), "/tmp/pk-data/sessions");
+    process.env.KNIGHT_SESSIONS_ROOT = "/tmp/pk-sessions";
+    assert.equal(sessionsRoot(), "/tmp/pk-sessions");
+  } finally {
+    for (const [k, v] of [["KNIGHT_DATA_DIR", saved.data], ["KNIGHT_SESSIONS_ROOT", saved.sessions]] as const) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
 });

@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { dataPaths, loadConfig } from "./config.js";
 import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
@@ -28,8 +28,8 @@ async function main(): Promise<void> {
     exit: (code) => process.exit(code),
   });
   telemetry = await startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
-  migrateMemory({ memoryDir: config.memoryDir });
-  ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
+  migrateMemory({ memoryDir: config.memoryDir, dataDir: dataPaths().dataDir });
+  ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: dataPaths().dataDir }));
 
   log.info("Pi-Knight starting", {
     model: config.knightModel,
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
     info: (msg, data) => log.info(msg, data),
     load: () => {
       const { skills, diagnostics } = loadSkills({
-        cwd: "/data",
+        cwd: dataPaths().dataDir,
         agentDir: "/config",
         skillPaths: ["/skills"],
         includeDefaults: true,
