@@ -36,6 +36,10 @@ npm test --workspace packages/pi-knight
 
 Each package keeps its own `flake.nix` and `mise.toml` for now.
 
+## Fleet discovery
+
+Each knight pod registers as the NATS micro service `roundtable-knight`: see the fleet with `nats micro ls roundtable-knight` and load with `nats micro stats roundtable-knight`. Details in [pi-knight CONFIGURATION](packages/pi-knight/docs/CONFIGURATION.md#fleet-discovery-nats-micro-service).
+
 ## Images
 
 Build from the repo root:
