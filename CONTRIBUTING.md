@@ -16,6 +16,8 @@ npm run build
 
 To work on one package, add `--workspace`, for example `npm test --workspace packages/pi-knight`.
 
+To run a knight on your machine against a local NATS server and send it a task (no cluster), see [Run a knight locally](README.md#run-a-knight-locally) in the README.
+
 Images build from the repo root:
 
 ```bash

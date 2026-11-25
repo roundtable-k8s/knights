@@ -36,6 +36,61 @@ npm test --workspace packages/pi-knight
 
 Each package keeps its own `flake.nix` and `mise.toml` for now.
 
+## Run a knight locally
+
+No cluster needed: Node 22 and a [`nats-server`](https://docs.nats.io/running-a-nats-service/introduction/installation) binary on `PATH` (or in `NATS_SERVER_BIN`). The [`nats` CLI](https://github.com/nats-io/natscli) is optional. Use three terminals at the repo root.
+
+1. Install and build (the runtimes import the built `packages/core`):
+
+   ```bash
+   npm ci && npm run build
+   ```
+
+2. Start NATS with what the operator would create: the `fleet_a_tasks` (`fleet-a.tasks.>`) and `fleet_a_results` (`fleet-a.results.>`) streams and the durable pull consumer `<KNIGHT_NAME>-consumer` (explicit ack, `max_deliver` 1, 30 s ack wait). It runs until Ctrl-C and keeps its store in a temp dir:
+
+   ```bash
+   npm run dev:nats                       # KNIGHT_NAME=dev, port 4222
+   KNIGHT_NAME=dev NATS_PORT=4222 npm run dev:nats
+   ```
+
+   It uses the `nats` CLI if it is on `PATH`, otherwise `scripts/dev/nats-setup.ts` (`NATS_SETUP=cli|tsx` forces one). The consumer filters on `SUBSCRIBE_TOPICS`, by default `fleet-a.tasks.<knight name, lowercased>.>`.
+
+3. Start a knight with the same `KNIGHT_NAME` and `SUBSCRIBE_TOPICS`.
+
+   **claude-knight**, with the fake Claude binary the tests use (no credentials, nothing written outside the temp dir):
+
+   ```bash
+   export KNIGHT_TMP=$(mktemp -d)
+   KNIGHT_NAME=dev SUBSCRIBE_TOPICS='fleet-a.tasks.dev.>' NATS_URL=nats://127.0.0.1:4222 \
+   KNIGHT_WORKDIR=$KNIGHT_TMP KNIGHT_CONFIG_DIR=$KNIGHT_TMP/config KNIGHT_SKILLS_DIR=$PWD/scripts/dev/skills \
+   CLAUDE_AUTH_MODE=api ANTHROPIC_API_KEY=fake CLAUDE_RUNTIME=cli \
+   CLAUDE_BIN=$PWD/packages/claude-knight/tests/helpers/fake-claude.mjs \
+   FAKE_CLAUDE_FIXTURE=$PWD/packages/claude-knight/tests/fixtures/stream/success.jsonl \
+     npm run dev -w claude-knight
+   ```
+
+   The fake binary replays `FAKE_CLAUDE_FIXTURE` (that one answers `pong`). For a real Claude Code run, drop `CLAUDE_BIN` and the `FAKE_CLAUDE_*` and `ANTHROPIC_API_KEY=fake` variables and set a real `ANTHROPIC_API_KEY`, or `CLAUDE_AUTH_MODE=subscription` with `CLAUDE_CODE_OAUTH_TOKEN`. `KNIGHT_SKILLS_DIR` points at a one-skill placeholder so the knight does not wait a minute for git-sync. Unset any knight env your shell already has (`CLAUDE_CONFIG_DIR`, `NATS_TASKS_STREAM`, ...): it overrides these defaults.
+
+   **pi-knight** needs a model key (for example `OPENROUTER_API_KEY`, see [CONFIGURATION](packages/pi-knight/docs/CONFIGURATION.md)). The overrides below move sessions, models and task work dirs off `/data`. The Pi SDK's `cwd` and agent dir are still `/data` (and skills `/skills`, config `/config`), so it needs a writable `/data` for now:
+
+   ```bash
+   export KNIGHT_TMP=$(mktemp -d)
+   KNIGHT_NAME=dev SUBSCRIBE_TOPICS='fleet-a.tasks.dev.>' NATS_URL=nats://127.0.0.1:4222 \
+   KNIGHT_MODEL=openrouter/deepseek/deepseek-v3.2 OPENROUTER_API_KEY=... \
+   KNIGHT_WORK_ROOT=$KNIGHT_TMP/work KNIGHT_SESSIONS_ROOT=$KNIGHT_TMP/sessions MODELS_JSON_PATH=$KNIGHT_TMP/models.json \
+     npm run dev -w pi-knight
+   ```
+
+4. Send a task and wait for its result:
+
+   ```bash
+   npm run dev:send -- "Say hello." --knight dev --timeout 120
+   ```
+
+   `scripts/dev/send-task.ts` publishes a task payload on `fleet-a.tasks.<domain>.<id>` (`--domain` defaults to the knight name, lowercased) and prints the result from `fleet-a.results.<id>`. It exits 0 on a success result, 1 on a failure result and 2 when no result came within `--timeout` seconds. `--url` (default `NATS_URL` or `nats://127.0.0.1:4222`) points it at another server.
+
+`packages/claude-knight/tests/local-dev.test.ts` runs this flow (steps 2 to 4 with claude-knight); it is skipped without `nats-server`.
+
 ## Knight environment
 
 The images do not set `NODE_ENV=production`, and both runtimes strip `NODE_ENV=production` and `npm_config_omit` / `npm_config_production` (see `agentShellEnv` in `packages/core`) from the environment of agent shells: pi-knight scrubs its own process env at startup, claude-knight scrubs the Claude Code child env. So `npm ci` in a repo a knight works on installs its dev dependencies.

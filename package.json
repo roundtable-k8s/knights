@@ -8,10 +8,12 @@
   ],
   "scripts": {
     "build": "npm run build -w @roundtable/knight-core && npm run build --workspaces --if-present",
-    "typecheck": "npm run build -w @roundtable/knight-core && npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run build -w @roundtable/knight-core && npm run typecheck --workspaces --if-present && tsc -p scripts/dev",
     "test": "npm run build -w @roundtable/knight-core && npm run test --workspaces --if-present",
     "lint": "eslint .",
-    "contract:export": "npm run contract:export -w @roundtable/knight-core"
+    "contract:export": "npm run contract:export -w @roundtable/knight-core",
+    "dev:nats": "scripts/dev/nats-up.sh",
+    "dev:send": "tsx scripts/dev/send-task.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
