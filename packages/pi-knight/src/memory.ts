@@ -121,8 +121,9 @@ async function updateSessionNotesLocked(
   await ensureDir(SCRATCH_DIR());
 
   const now = new Date().toISOString();
-  const taskPreview = task.length > 200 ? task.slice(0, 200) + "…" : task;
-  const resultPreview = result.length > 500 ? result.slice(0, 500) + "…" : result;
+  // Free text may contain lines that look like headings; escape them so they are never read back as sections.
+  const taskPreview = escapeHeadingLines(task.length > 200 ? task.slice(0, 200) + "…" : task);
+  const resultPreview = escapeHeadingLines(result.length > 500 ? result.slice(0, 500) + "…" : result);
 
   // Read existing notes if any
   let existing = "";
@@ -185,15 +186,51 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
+/** Top-level sections of the session-notes template, in the order they are written. */
+const SESSION_NOTES_SECTIONS = [
+  "Current State",
+  "Task Specification",
+  "Files and Functions",
+  "Errors & Corrections",
+  "Learnings",
+  "Key Results",
+  "Worklog",
+];
+
+/** Escape lines starting with `#` so free text cannot be read back as a top-level heading. */
+function escapeHeadingLines(text: string): string {
+  return text.replace(/^#/gm, "\\#");
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * Extract a section from markdown by header name.
- * Returns the content between the header and the next header of same or higher level.
+ * Returns the content between the header and the next top-level header.
+ *
+ * The template's headings are located in order, so text inside an earlier section that
+ * happens to contain a lookalike heading (e.g. a task spec with a "# Learnings" line) is skipped.
  */
 function extractSection(markdown: string, sectionName: string): string {
-  const pattern = new RegExp(
-    `^#\\s+${sectionName}\\s*\\n([\\s\\S]*?)(?=^#\\s+|(?![\\s\\S]))`,
-    "m"
-  );
-  const match = markdown.match(pattern);
-  return match ? match[1].trim() : "";
+  const order = SESSION_NOTES_SECTIONS.indexOf(sectionName);
+  const walk = order >= 0 ? SESSION_NOTES_SECTIONS.slice(0, order + 1) : [sectionName];
+  let cursor = 0;
+  let start = -1;
+  for (const name of walk) {
+    const heading = new RegExp(`^#[ \\t]+${escapeRegExp(name)}[ \\t]*$`, "gm");
+    heading.lastIndex = cursor;
+    const match = heading.exec(markdown);
+    if (!match) {
+      if (name === sectionName) return "";
+      continue; // a template section missing from older notes does not stop the walk
+    }
+    cursor = match.index + match[0].length;
+    if (name === sectionName) start = cursor;
+  }
+  const nextTop = /^#[ \t]+/gm;
+  nextTop.lastIndex = start;
+  const next = nextTop.exec(markdown);
+  return markdown.slice(start, next ? next.index : markdown.length).trim();
 }
