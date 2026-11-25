@@ -1,5 +1,6 @@
 import { agentShellEnv, traceparentEnv } from "@roundtable/knight-core";
 import type { AuthMode, Runtime } from "./config.js";
+import { claudeCodeTelemetryEnv } from "./telemetry-env.js";
 
 /**
  * Credential handling for the Claude Code child process.
@@ -145,6 +146,7 @@ export function buildChildEnv(
   // injection the token is a placeholder, so a gateway URL is allowed.
   if (mode === "subscription" && !egress) delete child["ANTHROPIC_BASE_URL"];
   if (runtime === "cli") for (const name of SDK_HOST_VARS) delete child[name];
-  // Parent for the child's own telemetry: the active knight.task span (empty when tracing is off).
-  return { ...child, ...traceparentEnv(), ...extra };
+  // Claude Code's own OTel export (empty without an OTLP endpoint), then the parent for its spans:
+  // the active knight.task span (empty when tracing is off).
+  return { ...child, ...claudeCodeTelemetryEnv(env), ...traceparentEnv(), ...extra };
 }

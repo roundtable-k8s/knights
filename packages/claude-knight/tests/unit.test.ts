@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import { loadConfig, resolveClaudeModel } from "../src/config.js";
 import { buildChildEnv, checkAuth } from "../src/auth.js";
+import { claudeCodeTelemetryEnv } from "../src/telemetry-env.js";
 import { checkBashCommand } from "../src/hooks.js";
 import { discoverSkills, linkSkills } from "../src/skills.js";
 import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, resetPlanLimits } from "../src/plan-limits.js";
@@ -99,6 +100,62 @@ test("the Claude Code child env carries no production-mode switches", () => {
     assert.equal(child.npm_config_omit, undefined);
     assert.equal(child.PATH, "/bin");
   }
+});
+
+test("no OTLP endpoint: the child gets no Claude Code telemetry switches", () => {
+  assert.deepEqual(claudeCodeTelemetryEnv({ PATH: "/bin" }), {});
+  const child = buildChildEnv("api", {}, { ANTHROPIC_API_KEY: "k", PATH: "/bin" });
+  assert.equal(child["CLAUDE_CODE_ENABLE_TELEMETRY"], undefined);
+  assert.equal(child["OTEL_LOG_USER_PROMPTS"], undefined);
+});
+
+test("OTLP endpoint switches on Claude Code's export with content on", () => {
+  const env = { OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318" };
+  const t = claudeCodeTelemetryEnv(env);
+  assert.deepEqual(t, {
+    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+    CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1",
+    OTEL_TRACES_EXPORTER: "otlp",
+    OTEL_METRICS_EXPORTER: "otlp",
+    OTEL_LOGS_EXPORTER: "otlp",
+    OTEL_SERVICE_NAME: "claude-knight",
+    OTEL_LOG_USER_PROMPTS: "1",
+    OTEL_LOG_ASSISTANT_RESPONSES: "1",
+    OTEL_LOG_TOOL_DETAILS: "1",
+    OTEL_LOG_TOOL_CONTENT: "1",
+  });
+  assert.equal(claudeCodeTelemetryEnv({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }).OTEL_TRACES_EXPORTER, "otlp");
+  assert.deepEqual(claudeCodeTelemetryEnv({ ...env, OTEL_SDK_DISABLED: "true" }), {});
+  assert.ok(!("OTEL_LOG_RAW_API_BODIES" in t));
+  const child = buildChildEnv("api", {}, { ...env, ANTHROPIC_API_KEY: "k" });
+  assert.equal(child["CLAUDE_CODE_ENABLE_TELEMETRY"], "1");
+  assert.equal(child["OTEL_LOG_TOOL_CONTENT"], "1");
+});
+
+test("ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false turns the content flags off", () => {
+  const t = claudeCodeTelemetryEnv({ OTEL_EXPORTER_OTLP_ENDPOINT: "http://c", ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT: "false" });
+  assert.equal(t.CLAUDE_CODE_ENABLE_TELEMETRY, "1");
+  assert.equal(t.OTEL_LOG_USER_PROMPTS, "0");
+  assert.equal(t.OTEL_LOG_ASSISTANT_RESPONSES, "0");
+  assert.equal(t.OTEL_LOG_TOOL_DETAILS, "0");
+  assert.equal(t.OTEL_LOG_TOOL_CONTENT, "0");
+});
+
+test("explicit pod values win over the Claude Code telemetry defaults", () => {
+  const env = {
+    OTEL_EXPORTER_OTLP_ENDPOINT: "http://c",
+    OTEL_LOG_USER_PROMPTS: "0",
+    OTEL_SERVICE_NAME: "custom",
+    OTEL_METRICS_EXPORTER: "prometheus",
+  };
+  const t = claudeCodeTelemetryEnv(env);
+  assert.equal(t.OTEL_LOG_USER_PROMPTS, undefined);
+  assert.equal(t.OTEL_SERVICE_NAME, undefined);
+  assert.equal(t.OTEL_METRICS_EXPORTER, undefined);
+  assert.equal(t.OTEL_LOG_ASSISTANT_RESPONSES, "1");
+  const child = buildChildEnv("api", {}, { ...env, ANTHROPIC_API_KEY: "k" });
+  assert.equal(child["OTEL_LOG_USER_PROMPTS"], "0");
+  assert.equal(child["OTEL_METRICS_EXPORTER"], "prometheus");
 });
 
 // ── hooks ──────────────────────────────────────────────────────────
