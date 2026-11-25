@@ -10,8 +10,7 @@
  */
 import os from "node:os";
 import type { KnightConfig } from "./config.js";
-import { log } from "@roundtable/knight-core";
-import { getConnection, StringCodec } from "./nats.js";
+import { log, getConnection, StringCodec } from "@roundtable/knight-core";
 import { redactSecrets } from "./hooks.js";
 
 const sc = StringCodec();

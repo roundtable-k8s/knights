@@ -1,3 +1,4 @@
+import type { TaskResult as ResultPayload } from "@roundtable/knight-core";
 import type { TaskResult } from "./knight.js";
 import { refusalCode } from "./result-extraction.js";
 
@@ -24,7 +25,7 @@ export function failedTaskResult(errMsg: string, model: string): TaskResult {
 export function buildResultPayload(
   result: TaskResult,
   meta: { taskId: string; knight: string; durationMs: number; timestamp?: string },
-): Record<string, unknown> {
+): ResultPayload {
   return {
     task_id: meta.taskId,
     knight: meta.knight,

@@ -7,72 +7,25 @@ import {
   AckPolicy,
   DeliverPolicy,
 } from "nats";
-import { log } from "@roundtable/knight-core";
-import type { KnightConfig } from "./config.js";
+import { log } from "../logger.js";
+import { encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 const sc = NatsStringCodec();
 
-// Re-export StringCodec for tools
+// Re-export StringCodec for the runtimes' tools
 export { NatsStringCodec as StringCodec };
 
-export interface ParsedTask {
-  task: string;
-  taskId: string;
-  domain?: string;
-  from?: string;
-  dispatchedBy?: string;
-  timestamp?: string;
-  timeoutMs?: number;
-  /** Chain run identity (operator-assigned UUID). Used to start a fresh agent session
-   *  per run and avoid cross-run context bleed. Optional — absent for ad-hoc tasks. (#31) */
-  runId?: string;
-  /** Optional per-task model override (TaskPayload.model); replaces CLAUDE_MODEL for this task only. */
-  model?: string;
-  /** Chain/step identity when the dispatcher supplies it; used only for activity events. */
-  chainName?: string;
-  stepName?: string;
-  /** Epoch ms the task was published, when known (queuedFor in task.started). */
-  publishedAtMs?: number;
+/** What connectNats needs from the knight's config. */
+export interface NatsConnectConfig {
+  natsUrl: string;
+  knightName: string;
 }
 
-/**
- * Normalize a task-metadata timeout to a positive, finite millisecond value, or undefined.
- *
- * A non-positive timeout (e.g. a dispatcher that marshals an omitted int field as 0) must not
- * be honored — `setTimeout(abort, 0)` cancels the task before any work happens, looking like a
- * model failure. Returning undefined lets the caller's `?? config.taskTimeoutMs` fallback win. (#30)
- */
-export function normalizeTimeoutMs(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-/**
- * Parse a task message. Accepts the operator's TaskPayload (taskId/runId, camelCase),
- * pi-knight/nats_request payloads (task_id, metadata.timeout_ms), or plain text.
- */
-export function parseTaskMessage(raw: string, subjectTaskId: string): ParsedTask {
-  try {
-    const json = JSON.parse(raw);
-    if (json && typeof json === "object" && !Array.isArray(json)) {
-      return {
-        task: json.task ?? json.description ?? json.message ?? raw,
-        taskId: json.task_id ?? json.taskId ?? subjectTaskId,
-        domain: json.domain,
-        from: json.from ?? json.payload?.from,
-        dispatchedBy: json.dispatched_by ?? json.dispatchedBy,
-        timestamp: json.timestamp,
-        timeoutMs: normalizeTimeoutMs(json.metadata?.timeout_ms ?? json.metadata?.timeoutMs),
-        runId: json.runId ?? json.run_id,
-        model: typeof json.model === "string" && json.model.trim() ? json.model.trim() : undefined,
-        chainName: typeof (json.chainName ?? json.chain) === "string" ? (json.chainName ?? json.chain) : undefined,
-        stepName: typeof (json.stepName ?? json.step) === "string" ? (json.stepName ?? json.step) : undefined,
-        publishedAtMs: Number.isFinite(Date.parse(json.timestamp)) ? Date.parse(json.timestamp) : undefined,
-      };
-    }
-  } catch {
-    // not JSON — fall through to plain text
-  }
-  return { task: raw, taskId: subjectTaskId };
+/** What subscribe needs: the durable consumer is `<knightName>-consumer` on natsTasksStream. */
+export interface NatsSubscribeConfig extends NatsConnectConfig {
+  natsTasksStream: string;
+  subscribeTopics: string[];
+  natsResultsPrefix: string;
 }
 
 let nc: NatsConnection | null = null;
@@ -87,7 +40,11 @@ export function getStatus(): { connected: boolean } {
   return { connected };
 }
 
-export async function connectNats(config: Pick<KnightConfig, "natsUrl" | "knightName">, clientName = `claude-knight-${config.knightName}`): Promise<void> {
+/**
+ * Connect to NATS. `clientName` is the connection name shown in the server's monitoring
+ * (e.g. `pi-knight-<name>`, `claude-knight-<name>-mcp`).
+ */
+export async function connectNats(config: NatsConnectConfig, clientName: string): Promise<void> {
   log.info("Connecting to NATS", { url: config.natsUrl });
 
   nc = await natsConnect({
@@ -132,6 +89,8 @@ export interface PulledMsg {
   ack(): void;
   working(): void;
   term(reason?: string): void;
+  /** Hand the message back for redelivery without running it. */
+  nak(): void;
 }
 
 /** A task taken from the stream. It stays un-acked until `ack()`; call `working()` to extend its ack window. */
@@ -188,8 +147,9 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
       try {
         const msgs = await opts.fetch(free, opts.fetchExpiresMs ?? FETCH_EXPIRES_MS);
         for await (const msg of msgs) {
+          // A fetch already in flight when we began draining must not start new work.
+          if (stopped) { msg.nak(); continue; }
           handleMsg(msg);
-          if (stopped) break;
         }
       } catch (err) {
         if (stopped) break;
@@ -203,7 +163,7 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
     const raw = sc.decode(msg.data);
     const subject = msg.subject;
     const subjectTaskId = subject.split(".").pop() || "unknown";
-    const parsed = parseTaskMessage(raw, subjectTaskId);
+    const parsed = parseTask(raw, subjectTaskId);
 
     // Reject empty/missing task text — don't waste an LLM call on nothing
     if (!parsed.task || parsed.task.trim().length === 0) {
@@ -243,7 +203,7 @@ export interface SubscribeOptions {
 }
 
 /** Reconcile the durable pull consumer, start the pull loop and the lost-task watcher. */
-export async function subscribe(config: KnightConfig, opts: SubscribeOptions): Promise<TaskPuller> {
+export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOptions): Promise<TaskPuller> {
   if (!nc || !js) throw new Error("NATS not connected");
   _config = config;
 
@@ -345,7 +305,7 @@ function watchLostTasks(
         if (typeof adv.stream_seq !== "number") continue;
         const stored = await jsm.streams.getMessage(stream, { seq: adv.stream_seq });
         const subjectTaskId = stored.subject.split(".").pop() || "unknown";
-        const parsed = parseTaskMessage(sc.decode(stored.data), subjectTaskId);
+        const parsed = parseTask(sc.decode(stored.data), subjectTaskId);
         log.warn("Task delivered but never acked — reporting failure", { taskId: parsed.taskId, seq: adv.stream_seq });
         await onLost(parsed);
       } catch (err) {
@@ -357,17 +317,17 @@ function watchLostTasks(
 }
 
 // Module-level config ref for publishResult (set during subscribe)
-let _config: KnightConfig | null = null;
+let _config: NatsSubscribeConfig | null = null;
 
 export async function publishResult(
   taskId: string,
-  result: Record<string, unknown>,
+  result: TaskResult,
 ): Promise<void> {
   if (!js) throw new Error("NATS not connected — cannot publish result");
 
   const prefix = _config?.natsResultsPrefix ?? "fleet-a.results";
   const subject = `${prefix}.${taskId}`;
-  const data = sc.encode(JSON.stringify(result));
+  const data = sc.encode(encodeResult(result));
   await js.publish(subject, data);
   log.info("Result published", { taskId, subject });
 }

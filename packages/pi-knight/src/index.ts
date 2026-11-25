@@ -1,6 +1,5 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log } from "@roundtable/knight-core";
-import { connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, type TaskDelivery } from "./nats.js";
+import { initLogger, log, connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, type TaskDelivery } from "@roundtable/knight-core";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "./health.js";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
@@ -76,7 +75,7 @@ async function main(): Promise<void> {
   pruneOldSessions(config);
 
   // Connect to NATS
-  await connectNats(config);
+  await connectNats(config, `pi-knight-${config.knightName}`);
   metrics.natsConnected.labels(config.knightName).set(1);
 
   // Start introspection responder (zero-cost session queries)

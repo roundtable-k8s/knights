@@ -1,0 +1,145 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { encodeResult, normalizeTimeoutMs, parseTask, type TaskResult } from "../src/contract/index.ts";
+
+test("normalizeTimeoutMs keeps positive finite timeouts", () => {
+  assert.equal(normalizeTimeoutMs(1800000), 1800000);
+  assert.equal(normalizeTimeoutMs(1), 1);
+});
+
+test("normalizeTimeoutMs treats 0 and negatives as unset (the #30 instant-abort bug)", () => {
+  assert.equal(normalizeTimeoutMs(0), undefined);
+  assert.equal(normalizeTimeoutMs(-5), undefined);
+});
+
+test("normalizeTimeoutMs rejects non-finite and non-number inputs", () => {
+  assert.equal(normalizeTimeoutMs(NaN), undefined);
+  assert.equal(normalizeTimeoutMs(Infinity), undefined);
+  assert.equal(normalizeTimeoutMs(undefined), undefined);
+  assert.equal(normalizeTimeoutMs(null), undefined);
+  assert.equal(normalizeTimeoutMs("1000"), undefined);
+});
+
+test("parseTask reads the operator's TaskPayload runId (#31)", () => {
+  const raw = JSON.stringify({
+    taskId: "chain-dev-plan.3f2a-1732280000000",
+    chainName: "dev",
+    stepName: "plan",
+    runId: "3f2a9c1e-0000-4000-8000-000000000001",
+    task: "Plan the change",
+  });
+  const parsed = parseTask(raw, "subject-id");
+  assert.equal(parsed.runId, "3f2a9c1e-0000-4000-8000-000000000001");
+  assert.equal(parsed.taskId, "chain-dev-plan.3f2a-1732280000000");
+  assert.equal(parsed.task, "Plan the change");
+});
+
+test("parseTask accepts snake_case run_id and ignores empty/non-string run ids", () => {
+  assert.equal(parseTask(JSON.stringify({ task: "x", run_id: "r1" }), "s").runId, "r1");
+  assert.equal(parseTask(JSON.stringify({ task: "x", runId: "" }), "s").runId, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x", runId: "   " }), "s").runId, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x", runId: 42 }), "s").runId, undefined);
+});
+
+test("parseTask without runId (ad-hoc task) leaves it undefined", () => {
+  const parsed = parseTask(JSON.stringify({ task_id: "t1", task: "hi" }), "s");
+  assert.equal(parsed.runId, undefined);
+  assert.equal(parsed.taskId, "t1");
+});
+
+test("parseTask treats non-JSON and non-object JSON as plain task text", () => {
+  assert.deepEqual(parseTask("just do it", "sub"), { task: "just do it", taskId: "sub" });
+  assert.deepEqual(parseTask("null", "sub"), { task: "null", taskId: "sub" });
+  assert.deepEqual(parseTask('"quoted"', "sub"), { task: '"quoted"', taskId: "sub" });
+});
+
+test("parseTask reads an optional per-task model", () => {
+  assert.equal(parseTask(JSON.stringify({ task: "x", model: " openrouter/anthropic/claude-sonnet-4.5:floor " }), "s").model, "openrouter/anthropic/claude-sonnet-4.5:floor");
+  assert.equal(parseTask(JSON.stringify({ task: "x", model: "" }), "s").model, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x", model: 5 }), "s").model, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x" }), "s").model, undefined);
+});
+
+test("parseTask treats a JSON array as plain task text", () => {
+  assert.deepEqual(parseTask("[1,2]", "id"), { task: "[1,2]", taskId: "id" });
+});
+
+test("parseTask accepts every chain/step spelling the dispatchers use", () => {
+  for (const [c, s] of [["chainName", "stepName"], ["chain_name", "step_name"], ["chain", "step"]]) {
+    const p = parseTask(JSON.stringify({ task: "x", [c]: "c1", [s]: "s1" }), "id");
+    assert.deepEqual([p.chainName, p.stepName], ["c1", "s1"], c);
+  }
+  const bad = parseTask(JSON.stringify({ task: "x", chainName: 3, stepName: null, step: "s" }), "id");
+  assert.equal(bad.chainName, undefined);
+  assert.equal(bad.stepName, "s");
+});
+
+test("parseTask sets publishedAtMs only for a parseable timestamp", () => {
+  assert.equal(parseTask(JSON.stringify({ task: "x", timestamp: "2026-11-24T10:00:00Z" }), "s").publishedAtMs, Date.parse("2026-11-24T10:00:00Z"));
+  assert.equal(parseTask(JSON.stringify({ task: "x", timestamp: "soon" }), "s").publishedAtMs, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x" }), "s").publishedAtMs, undefined);
+});
+
+// ── Recorded wire fixtures ──────────────────────────────────────────
+// Payloads as each runtime (and the operator) send them today. The expected parse is
+// what the runtimes' former parsers (pi-knight parseTaskPayload, claude-knight
+// parseTaskMessage) produced; parseTask is their union.
+
+const fixture = (name: string) => readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8").trim();
+const defined = (o: object) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+test("fixture: pi-knight nats_request task payload", () => {
+  assert.deepEqual(defined(parseTask(fixture("pi-knight-task"), "subj")), {
+    task: "Review PR #12 in roundtable-k8s/knights and reply with a verdict.",
+    taskId: "lancelot-1764000000000-a1b2c3",
+    domain: "code",
+    from: "galahad",
+    dispatchedBy: "Galahad",
+    timestamp: "2026-11-24T10:00:00.000Z",
+    timeoutMs: 600000,
+    publishedAtMs: Date.parse("2026-11-24T10:00:00.000Z"),
+  });
+});
+
+test("fixture: claude-knight nats_request task payload (timeout_ms 0 is unset, #30)", () => {
+  assert.deepEqual(defined(parseTask(fixture("claude-knight-task"), "subj")), {
+    task: "Summarise the open issues labelled groomed.",
+    taskId: "rt-ui-1764000000000-d4e5f6",
+    domain: "ui",
+    from: "rt-dev",
+    dispatchedBy: "rt-dev",
+    timestamp: "2026-11-24T10:05:00.000Z",
+    publishedAtMs: Date.parse("2026-11-24T10:05:00.000Z"),
+  });
+});
+
+test("fixture: operator TaskPayload", () => {
+  assert.deepEqual(defined(parseTask(fixture("operator-task"), "subj")), {
+    task: "Implement sub-issue #49.",
+    taskId: "chain-run-7-step-implement",
+    timestamp: "2026-11-24T09:59:30Z",
+    runId: "5f0c2a8e-1d3b-4c55-9a77-0b6d2a9e4f11",
+    chainName: "issue-to-pr",
+    stepName: "implement",
+    model: "claude-opus-5-5",
+    publishedAtMs: Date.parse("2026-11-24T09:59:30Z"),
+  });
+});
+
+for (const name of ["pi-knight-result", "claude-knight-result"]) {
+  test(`fixture: ${name} serialises byte-identically`, () => {
+    const raw = fixture(name);
+    const result: TaskResult = JSON.parse(raw);
+    assert.equal(encodeResult(result), raw);
+  });
+}
+
+test("fixtures keep each runtime's refusal field (unifying them is #6)", () => {
+  const pi: TaskResult = JSON.parse(fixture("pi-knight-result"));
+  const claude: TaskResult = JSON.parse(fixture("claude-knight-result"));
+  assert.equal(pi.refused, "credits");
+  assert.ok(!("usage_limited" in pi));
+  assert.equal(claude.usage_limited, true);
+  assert.ok(!("refused" in claude));
+});

@@ -6,9 +6,8 @@ import { createShutdown, installSignalHandlers } from "./drain.js";
 import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { initLogger, log } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, drain, getConnection, HEARTBEAT_MS, StringCodec, publishResult, subscribe, type TaskDelivery } from "@roundtable/knight-core";
 import * as metrics from "./metrics.js";
-import { connectNats, drain, getConnection, HEARTBEAT_MS, StringCodec, publishResult, subscribe, type TaskDelivery } from "./nats.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -79,7 +78,7 @@ export async function main(): Promise<void> {
   configureTools(config.knightName, config.natsResultsPrefix);
   setSkillCount(await waitForSkills(config));
 
-  await connectNats(config);
+  await connectNats(config, `claude-knight-${config.knightName}`);
   metrics.natsConnected.labels(config.knightName).set(1);
   startIntrospect(config);
 

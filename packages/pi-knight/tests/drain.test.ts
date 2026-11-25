@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { describe, it } from "node:test";
 import { createShutdown, installSignalHandlers, waitForInflight } from "../src/drain.ts";
 import { startHealthServer, stopHealthServer, setDraining } from "../src/health.ts";
-import { startPullLoop, type PulledMsg } from "../src/nats.ts";
+import { startPullLoop, type PulledMsg } from "@roundtable/knight-core";
 import type { KnightConfig } from "../src/config.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
