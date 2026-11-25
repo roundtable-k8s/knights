@@ -9,9 +9,8 @@
 import { getSessionMessages, listSessions, type SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { Subscription } from "nats";
 import type { KnightConfig } from "./config.js";
-import { inflightTasks } from "./activity.js";
 import { getRecentTasks } from "./knight.js";
-import { log, getConnection, StringCodec } from "@roundtable/knight-core";
+import { log, getConnection, listInflight, StringCodec } from "@roundtable/knight-core";
 import { snapshot as planSnapshot } from "./plan-limits.js";
 import { listTranscripts, readTranscript } from "./sessions.js";
 
@@ -148,7 +147,7 @@ export async function handleIntrospect(req: IntrospectRequest, config: KnightCon
           cost: totals.cost,
         },
         tasks: tasks.slice(-10),
-        inflight: inflightTasks(),
+        inflight: listInflight(),
         runtime: runtime(config),
       };
     }

@@ -9,11 +9,10 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import type { KnightConfig } from "./config.js";
-import { log } from "@roundtable/knight-core";
+import { log, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel, setParentKnight } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
-import type { TaskActivity } from "./activity.js";
 import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
@@ -297,6 +296,34 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
   return newSession;
 }
 
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) => (b && typeof b === "object" && (b as any).type === "text" ? String((b as any).text ?? "") : ""))
+    .join("");
+}
+
+/** Map a pi session event to the task's activity events. Exported for tests. */
+export function onSessionEvent(activity: TaskActivity, e: any): void {
+  switch (e?.type) {
+    case "tool_execution_start":
+      activity.toolStarted(String(e.toolCallId), String(e.toolName), e.args);
+      break;
+    case "tool_execution_end":
+      activity.toolFinished(String(e.toolCallId), String(e.toolName), !!e.isError, contentText(e.result?.content), e.durationMs);
+      break;
+    case "message_end": {
+      const m = e.message;
+      if (m?.role !== "assistant") break;
+      const u = m.usage;
+      if (u) activity.addUsage({ input: u.input, output: u.output, cacheRead: u.cacheRead, cost: u.cost?.total });
+      activity.assistantMessage(contentText(m.content));
+      break;
+    }
+  }
+}
+
 /**
  * Execute a task on its run's session (see SessionSlot).
  *
@@ -395,7 +422,7 @@ export async function executeTask(
         throw new Error(`Cannot use model "${taskModel}": ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    opts.activity?.attach(sess);
+    opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
     await sess.prompt(task);
     promptFailed = false;
   } finally {

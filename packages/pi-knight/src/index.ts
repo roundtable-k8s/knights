@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log, connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, type TaskDelivery } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
+import { hostname } from "node:os";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "./health.js";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
@@ -9,7 +10,6 @@ import { startIntrospect } from "./introspect.js";
 import { resolveModel } from "./model.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
-import { TaskActivity } from "./activity.js";
 import * as metrics from "./metrics.js";
 
 async function main(): Promise<void> {
@@ -98,25 +98,27 @@ async function main(): Promise<void> {
     while (usedSlots.has(slot)) slot++;
     usedSlots.add(slot);
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
-    const activity = new TaskActivity(
-      config,
-      {
-        taskId,
-        runId,
-        chainName,
-        stepName,
-        model: model ?? config.knightModel,
-        ...(Number.isFinite(sentAt) ? { queuedFor: Math.max(0, Date.now() - sentAt) } : {}),
-      },
-      { content: config.activityContent },
-    );
+    const activity = new TaskActivity({
+      knight: config.knightName,
+      prefix: natsPrefix(config),
+      taskId,
+      identity: podIdentity(process.env, hostname()),
+      runId,
+      chainName,
+      stepName,
+      model: model ?? config.knightModel,
+      slot,
+      concurrency: config.maxConcurrentTasks,
+      ...(Number.isFinite(sentAt) ? { queuedFor: Math.max(0, Date.now() - sentAt) } : {}),
+      content: config.activityContent,
+    });
     // Keep the message un-acked but alive while the task runs; ack only when it finishes.
     const heartbeat = setInterval(() => {
       delivery.working();
       activity.heartbeat();
     }, HEARTBEAT_MS);
     activeCount++;
-    activity.started(slot, config.maxConcurrentTasks);
+    activity.started();
     setActiveTaskCount(activeCount);
     metrics.activeTasks.labels(config.knightName).set(activeCount);
 
@@ -155,7 +157,7 @@ async function main(): Promise<void> {
     } finally {
       clearTimeout(timeout);
       clearInterval(heartbeat);
-      activity.detach();
+      activity.close();
       usedSlots.delete(slot);
       delivery.ack();
       activeCount--;

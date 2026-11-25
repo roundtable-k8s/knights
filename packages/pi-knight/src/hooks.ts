@@ -7,7 +7,7 @@
  * runner, so extensions are the supported way to intercept tool execution.
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { log } from "@roundtable/knight-core";
+import { containsSecret, log, redactSecrets } from "@roundtable/knight-core";
 import { toolCallsTotal, toolCallDuration, toolCallErrors, toolCallsBlocked } from "./metrics.js";
 
 // ─── Dangerous operation patterns ───────────────────────────────────
@@ -25,17 +25,6 @@ const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\bmkfs(\.\w+)?\b/, reason: "Filesystem format" },
 ];
 
-/** Patterns that indicate secrets in tool output */
-const SECRET_PATTERNS: RegExp[] = [
-  /(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token|bearer)\s*[:=]\s*['"]?[A-Za-z0-9_\-/.+=]{20,}/gi,
-  /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/gi,
-  /ghp_[A-Za-z0-9_]{36,}/g,     // GitHub PATs
-  /ghs_[A-Za-z0-9_]{36,}/g,     // GitHub app tokens
-  /sk-[A-Za-z0-9]{40,}/g,       // OpenAI keys
-  /xoxb-[A-Za-z0-9\-]+/g,       // Slack bot tokens
-  /AKIA[A-Z0-9]{16}/g,          // AWS access keys
-];
-
 // ─── Pure helpers ──────────────────────────────────────────────────
 
 /** Reason a bash command must be blocked, or undefined when it is allowed. */
@@ -43,23 +32,11 @@ export function findBlockedBashReason(command: string): string | undefined {
   return BLOCKED_BASH_PATTERNS.find(({ pattern }) => pattern.test(command))?.reason;
 }
 
-/** True when text matches any known secret pattern. */
-export function containsSecret(text: string): boolean {
-  return SECRET_PATTERNS.some((pattern) => {
-    pattern.lastIndex = 0; // global patterns are stateful across test() calls
-    return pattern.test(text);
-  });
-}
-
-/** Replace every known secret pattern in text with [REDACTED]. */
-export function redactSecrets(text: string): string {
-  let out = text;
-  for (const pattern of SECRET_PATTERNS) {
-    pattern.lastIndex = 0;
-    out = out.replace(pattern, "[REDACTED]");
-  }
-  return out;
-}
+/**
+ * Token-shaped secrets only (keys, PATs, JWTs, PEM blocks): this text goes to and from the
+ * model, where redacting `password=...` context would corrupt code it reads or edits.
+ */
+const isSecret = (text: string): boolean => containsSecret(text, "tokens");
 
 function truncateArgs(args: unknown): string {
   const str = JSON.stringify(args);
@@ -98,7 +75,7 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
       }
     }
 
-    if (isToolCallEventType("write", event) && containsSecret(event.input.content ?? "")) {
+    if (isToolCallEventType("write", event) && isSecret(event.input.content ?? "")) {
       log.warn("Blocked secret write", { tool: event.toolName, toolCallId: event.toolCallId });
       toolCallsBlocked.inc({ tool: event.toolName, reason: "secret_in_content" });
       return {
@@ -114,9 +91,9 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
   pi.on("tool_result", (event) => {
     let changed = false;
     const content = event.content.map((block) => {
-      if (block.type === "text" && containsSecret(block.text)) {
+      if (block.type === "text" && isSecret(block.text)) {
         changed = true;
-        return { ...block, text: redactSecrets(block.text) };
+        return { ...block, text: redactSecrets(block.text, "tokens") };
       }
       return block;
     });

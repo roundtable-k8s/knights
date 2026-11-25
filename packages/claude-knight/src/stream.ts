@@ -9,10 +9,9 @@
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
 import { BLOCK_REASON_PREFIX } from "./guardrails.js";
-import { getActivity } from "./activity.js";
 import { toolCallsBlocked, toolCallsTotal } from "./metrics.js";
 import { recordRateLimit } from "./plan-limits.js";
-import { isPrCommand, log, mergePrs, prsFromBash, type PRRef } from "@roundtable/knight-core";
+import { getActivity, isPrCommand, log, mergePrs, prsFromBash, type PRRef } from "@roundtable/knight-core";
 
 export interface StreamState {
   result?: SDKResultMessage;
