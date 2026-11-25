@@ -96,8 +96,7 @@ RUN set -eu; \
     fi; \
     claude --version | grep -q "^${CLAUDE_CODE_VERSION} "
 
-ENV NODE_ENV=production \
-    MISE_DATA_DIR=/data/.mise \
+ENV MISE_DATA_DIR=/data/.mise \
     MISE_YES=1 \
     CLAUDE_CONFIG_DIR=/data/.claude-home \
     DISABLE_AUTOUPDATER=1

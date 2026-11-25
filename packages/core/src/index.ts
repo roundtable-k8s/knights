@@ -14,3 +14,4 @@ export * from "./health.js";
 export * from "./metrics.js";
 export * from "./memory.js";
 export * from "./service.js";
+export * from "./agent-env.js";

@@ -1,3 +1,4 @@
+import { agentShellEnv } from "@roundtable/knight-core";
 import type { AuthMode, Runtime } from "./config.js";
 
 /**
@@ -132,7 +133,7 @@ export function buildChildEnv(
   env: NodeJS.ProcessEnv = process.env,
   runtime: Runtime = "sdk",
 ): Record<string, string | undefined> {
-  const child: Record<string, string | undefined> = { ...env };
+  const child: Record<string, string | undefined> = agentShellEnv(env);
   const egress = mode === "subscription" && egressInjection(env);
   let strip: readonly string[] = mode === "subscription" ? API_CREDENTIAL_VARS : SUBSCRIPTION_CREDENTIAL_VARS;
   // With egress injection the placeholder bearer is the credential, and the

@@ -36,6 +36,10 @@ npm test --workspace packages/pi-knight
 
 Each package keeps its own `flake.nix` and `mise.toml` for now.
 
+## Knight environment
+
+The images do not set `NODE_ENV=production`, and both runtimes strip `NODE_ENV=production` and `npm_config_omit` / `npm_config_production` (see `agentShellEnv` in `packages/core`) from the environment of agent shells: pi-knight scrubs its own process env at startup, claude-knight scrubs the Claude Code child env. So `npm ci` in a repo a knight works on installs its dev dependencies.
+
 ## Fleet discovery
 
 Each knight pod registers as the NATS micro service `roundtable-knight`: see the fleet with `nats micro ls roundtable-knight` and load with `nats micro stats roundtable-knight`. Details in [pi-knight CONFIGURATION](packages/pi-knight/docs/CONFIGURATION.md#fleet-discovery-nats-micro-service).
