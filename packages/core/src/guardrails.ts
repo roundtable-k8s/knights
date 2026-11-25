@@ -18,7 +18,7 @@ export const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> =
   { pattern: /\bmkfs(\.\w+)?\b/, reason: "Filesystem format" },
 ];
 
-/** Prefix of every claude-knight denial reason; the CLI runtime counts blocked calls by it. */
+/** Shared prefix of every guardrail denial reason (both runtimes); the claude-knight CLI runtime counts blocked calls by it. */
 export const BLOCK_REASON_PREFIX = "Blocked by knight safety policy: ";
 
 /** Reason `secret_in_content` for writes that carry a token-shaped secret. */

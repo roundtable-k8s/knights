@@ -17,8 +17,6 @@ export function findBlockedBashReason(command: string): string | undefined {
   return checkBashCommand(command);
 }
 
-const isSecret = isTokenSecret;
-
 function truncateArgs(args: unknown): string {
   const str = JSON.stringify(args);
   return str.length > 200 ? str.slice(0, 200) + "…" : str;
@@ -56,7 +54,7 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
       }
     }
 
-    if (isToolCallEventType("write", event) && isSecret(event.input.content ?? "")) {
+    if (isToolCallEventType("write", event) && isTokenSecret(event.input.content ?? "")) {
       log.warn("Blocked secret write", { tool: event.toolName, toolCallId: event.toolCallId });
       toolCallsBlocked.inc({ tool: event.toolName, reason: "secret_in_content" });
       return {
@@ -72,7 +70,7 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
   pi.on("tool_result", (event) => {
     let changed = false;
     const content = event.content.map((block) => {
-      if (block.type === "text" && isSecret(block.text)) {
+      if (block.type === "text" && isTokenSecret(block.text)) {
         changed = true;
         return { ...block, text: redactSecrets(block.text, "tokens") };
       }
