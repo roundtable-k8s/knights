@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const SCRIPT = resolve(import.meta.dirname, "..", "scripts", "mise-init.sh");
-const PI_SCRIPT = resolve(import.meta.dirname, "..", "..", "pi-knight", "scripts", "mise-init.sh");
 
 /** Runs mise-init.sh with a fake `mise` that records its invocations, then hangs like a blocked network. */
 function run(miseToml: string | undefined, timeout = "1", script = SCRIPT) {
@@ -34,7 +33,8 @@ function run(miseToml: string | undefined, timeout = "1", script = SCRIPT) {
   }
 }
 
-for (const [name, script] of [["claude-knight", SCRIPT], ["pi-knight", PI_SCRIPT]] as const) {
+{
+  const [name, script] = ["shared", SCRIPT] as const;
   test(`mise-init (${name}): empty mise.toml makes no mise call`, () => {
     for (const toml of ["", "# nothing\n\n", "[tools]\n# none\n", '[env]\nFOO = "bar"\n']) {
       const r = run(toml, "1", script);

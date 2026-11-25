@@ -69,6 +69,8 @@ COPY --from=builder /out/node_modules ./node_modules
 COPY --from=builder /app/packages/claude-knight/package.json ./
 COPY packages/claude-knight/defaults/ ./defaults/
 COPY packages/claude-knight/scripts/ ./scripts/
+# Shared start-up script (identical for both runtimes).
+COPY packages/core/scripts/mise-init.sh ./scripts/mise-init.sh
 
 # ── Claude Code CLI (`claude` on PATH, for CLAUDE_RUNTIME=cli) ──
 # Pinned. The Agent SDK's platform package ships the official Claude Code
@@ -96,10 +98,16 @@ RUN set -eu; \
     fi; \
     claude --version | grep -q "^${CLAUDE_CODE_VERSION} "
 
+# Baseline tools live in /app/.mise; the writable data dir is /data/.mise.
+# Shared install dirs let mise find the baked tools without any network.
 ENV MISE_DATA_DIR=/data/.mise \
+    MISE_SHARED_INSTALL_DIRS=/app/.mise/installs \
     MISE_YES=1 \
     CLAUDE_CONFIG_DIR=/data/.claude-home \
     DISABLE_AUTOUPDATER=1
+
+# Smoke check: baseline tools resolve offline from an empty data dir.
+RUN MISE_OFFLINE=1 MISE_DATA_DIR=/tmp/empty-mise MISE_CONFIG_FILE=/app/mise.toml sh -c 'mise exec -- rg --version && mise exec -- python --version && mise exec -- yq --version'
 
 # Non-root: Claude Code refuses bypassPermissions as root.
 USER node

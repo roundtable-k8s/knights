@@ -1,6 +1,6 @@
 #!/bin/sh
 # mise-init.sh — Install knight-specific tools at pod startup.
-# Runs as an init container before the main pi-knight process.
+# Shared by claude-knight and pi-knight; runs before the main knight process.
 #
 # Three sources of knight-specific tools:
 #   1. /config/apt.txt    — system packages (apt-get install)
@@ -148,6 +148,8 @@ fi
 MISE_TOML="$CONFIG_DIR/mise.toml"
 MISE_INSTALL_TIMEOUT="${MISE_INSTALL_TIMEOUT:-120}"
 
+# Assumes the `[tools]` table form (what the operator renders into mise.toml);
+# inline or dotted forms like `tools.ripgrep = ...` are not detected.
 mise_has_tools() {
   awk '
     /^[[:space:]]*\[/ { s = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*(#.*)?$/); next }

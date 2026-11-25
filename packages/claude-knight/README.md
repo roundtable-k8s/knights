@@ -169,12 +169,12 @@ entrypoint runs `mise install` only when `/config/mise.toml` (`spec.tools.mise`)
 `MISE_INSTALL_TIMEOUT` (seconds, default `120`); on timeout or failure it logs one `WARNING: mise install gave up …
 could not reach <host>` line and the runtime starts anyway.
 
-A knight with `spec.tools.mise` needs these hosts on its egress allowlist (plus the host of each tool's own
-download, for example `github.com` and `objects.githubusercontent.com` for `github:` tools):
+A knight with `spec.tools.mise` needs these hosts on its egress allowlist, plus the host of each tool's own
+download:
 
 - `mise-versions.jdx.dev` — version lists
 - `api.github.com` — release metadata
-- `github.com`, `objects.githubusercontent.com` — release downloads
+- `github.com`, `objects.githubusercontent.com` — release downloads (for `github:` tools)
 
 See `examples/knight-galahad-claude.yaml` for a complete Knight.
 
