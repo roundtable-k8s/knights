@@ -41,3 +41,15 @@ test("thrown non-credit error has no refused field", () => {
   assert.equal("refused" in p, false);
   assert.equal(p.success, false);
 });
+
+test("buildResultPayload matches the recorded pi-knight result fixture byte for byte", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { encodeResult } = await import("@roundtable/knight-core");
+  const raw = readFileSync(new URL("../../core/tests/fixtures/pi-knight-result.json", import.meta.url), "utf8").trim();
+  const msg = "402 This request requires more credits, or fewer max_tokens";
+  const p = buildResultPayload(
+    { ...failedTaskResult(msg, "openrouter/anthropic/claude-sonnet-4.5"), tokens: { input: 0, output: 0, cacheRead: 0 } },
+    { taskId: "lancelot-1764000000000-a1b2c3", knight: "lancelot", durationMs: 1234, timestamp: "2026-11-24T10:00:01.234Z" },
+  );
+  assert.equal(encodeResult(p), raw);
+});

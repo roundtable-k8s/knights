@@ -8,7 +8,6 @@ import { loadConfig, resolveClaudeModel } from "../src/config.js";
 import { buildChildEnv, checkAuth } from "../src/auth.js";
 import { checkBashCommand } from "../src/hooks.js";
 import { discoverSkills, linkSkills } from "../src/skills.js";
-import { parseTaskMessage } from "../src/nats.js";
 import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, resetPlanLimits } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
 import { formatRequestResponse } from "../src/tools.js";
@@ -178,31 +177,6 @@ test("linkSkills links, is idempotent, removes stale links, keeps the knight's o
 
 test("missing skills dir is not an error", () => {
   assert.deepEqual(discoverSkills("/nonexistent/skills"), []);
-});
-
-// ── NATS payloads ──────────────────────────────────────────────────
-
-test("parses operator, pi-knight and plain-text task payloads", () => {
-  const op = parseTaskMessage(JSON.stringify({ taskId: "t1", runId: "r1", chainName: "c", task: "do it" }), "subj");
-  assert.deepEqual([op.taskId, op.runId, op.task], ["t1", "r1", "do it"]);
-
-  const pk = parseTaskMessage(
-    JSON.stringify({ task_id: "t2", task: "x", from: "galahad", metadata: { timeout_ms: 0 } }),
-    "subj",
-  );
-  assert.equal(pk.taskId, "t2");
-  assert.equal(pk.from, "galahad");
-  assert.equal(pk.timeoutMs, undefined); // 0 must not become an instant abort (#30)
-
-  assert.equal(parseTaskMessage(JSON.stringify({ task: "x", model: " opus " }), "s").model, "opus");
-  assert.equal(parseTaskMessage(JSON.stringify({ task: "x", model: "" }), "s").model, undefined);
-  assert.equal(op.model, undefined);
-
-  const plain = parseTaskMessage("just text", "abc123");
-  assert.deepEqual([plain.task, plain.taskId], ["just text", "abc123"]);
-
-  const arr = parseTaskMessage("[1,2]", "id");
-  assert.equal(arr.task, "[1,2]");
 });
 
 test("nats_request formats knight responses", () => {

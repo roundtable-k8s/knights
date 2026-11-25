@@ -4,6 +4,7 @@
 ^\.github/
 # Shared knight core: lifecycle (drain), NATS contract and health.
 ^packages/core/src/(nats|drain|health)\.ts$
+^packages/core/src/(nats|contract)/
 # pi-knight: knight lifecycle, task/result contract, safety guardrails and auth.
 ^packages/pi-knight/src/drain\.ts$
 ^packages/pi-knight/src/nats\.ts$

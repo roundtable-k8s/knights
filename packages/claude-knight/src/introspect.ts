@@ -11,8 +11,7 @@ import type { Subscription } from "nats";
 import type { KnightConfig } from "./config.js";
 import { inflightTasks } from "./activity.js";
 import { getRecentTasks } from "./knight.js";
-import { log } from "@roundtable/knight-core";
-import { getConnection, StringCodec } from "./nats.js";
+import { log, getConnection, StringCodec } from "@roundtable/knight-core";
 import { snapshot as planSnapshot } from "./plan-limits.js";
 import { listTranscripts, readTranscript } from "./sessions.js";
 

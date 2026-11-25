@@ -2,7 +2,7 @@ import http from "node:http";
 import type { KnightConfig } from "./config.js";
 import { handleIntrospect, type IntrospectRequest } from "./introspect.js";
 import { registry } from "./metrics.js";
-import { getStatus as getNatsStatus } from "./nats.js";
+import { getStatus as getNatsStatus } from "@roundtable/knight-core";
 
 let server: http.Server | null = null;
 let skillCount = 0;

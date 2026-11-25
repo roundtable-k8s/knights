@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { KnightConfig } from "./config.js";
 import { registry } from "./metrics.js";
-import { getStatus as getNatsStatus } from "./nats.js";
+import { getStatus as getNatsStatus } from "@roundtable/knight-core";
 import { handleIntrospect } from "./introspect.js";
 
 let server: http.Server | null = null;

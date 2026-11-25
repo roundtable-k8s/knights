@@ -14,8 +14,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { roundtableTools, configureTools } from "./tools.js";
-import { connectNats, drain } from "./nats.js";
-import { initLogger, log, setLogStream } from "@roundtable/knight-core";
+import { connectNats, drain, initLogger, log, setLogStream } from "@roundtable/knight-core";
 
 // dist/mcp-stdio.js and src/mcp-stdio.ts both sit one level below package.json.
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };

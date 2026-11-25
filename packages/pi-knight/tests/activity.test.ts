@@ -15,7 +15,6 @@ const {
 } = await import("../src/activity.ts");
 const { executeTask, __setSessionFactoryForTests } = await import("../src/knight.ts");
 const { handleIntrospect } = await import("../src/introspect.ts");
-const { parseTaskPayload } = await import("../src/nats.ts");
 
 const config = {
   knightName: "k", knightModel: "x/y", natsResultsPrefix: "rt.results",
@@ -120,12 +119,6 @@ test("publish failures never throw", () => {
   a.started(0, 1);
   a.heartbeat();
   a.finished({ success: true });
-});
-
-test("parseTaskPayload carries chainName/stepName", () => {
-  const p = parseTaskPayload(JSON.stringify({ task: "x", taskId: "a", chainName: "c", stepName: "s" }), "a");
-  assert.equal(p.chainName, "c");
-  assert.equal(p.stepName, "s");
 });
 
 // ─── Concurrent runs ────────────────────────────────────────────────

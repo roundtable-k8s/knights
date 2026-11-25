@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { log } from "@roundtable/knight-core";
-import { getConnection } from "./nats.js";
+import { log, getConnection, StringCodec } from "@roundtable/knight-core";
 import { findSession, getActiveSession } from "./knight.js";
 import { listInflight, natsPrefix, podIdentity } from "./activity.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -13,7 +12,6 @@ import {
 } from "./introspect-format.js";
 import type { KnightConfig } from "./config.js";
 import type { Subscription } from "nats";
-import { StringCodec } from "./nats.js";
 
 const sc = StringCodec();
 
