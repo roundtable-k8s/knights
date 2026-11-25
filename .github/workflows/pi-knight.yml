@@ -9,6 +9,8 @@ name: pi-knight
 # cache write) to catch Dockerfile breakage. merge_group is deliberately not
 # triggered: ci.yml covers the queue, and nothing is pushed from it.
 on:
+  # Manual run: rebuild and push the image for the current main commit.
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -55,9 +57,9 @@ jobs:
         with:
           context: .
           file: packages/pi-knight/Dockerfile
-          push: ${{ github.event_name == 'push' }}
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}
