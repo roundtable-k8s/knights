@@ -33,23 +33,20 @@ function run(miseToml: string | undefined, timeout = "1", script = SCRIPT) {
   }
 }
 
-{
-  const [name, script] = ["shared", SCRIPT] as const;
-  test(`mise-init (${name}): empty mise.toml makes no mise call`, () => {
-    for (const toml of ["", "# nothing\n\n", "[tools]\n# none\n", '[env]\nFOO = "bar"\n']) {
-      const r = run(toml, "1", script);
-      assert.equal(r.status, 0);
-      assert.equal(r.miseCalled, false, JSON.stringify(toml));
-      assert.ok(r.elapsed < 5000);
-      assert.match(r.stdout, /skipping mise install/);
-    }
-  });
-
-  test(`mise-init (${name}): unreachable host gives up within the timeout, names the host, exits 0`, () => {
-    const r = run('[tools]\nripgrep = "latest"\n', "1", script);
+test("mise-init: empty mise.toml makes no mise call", () => {
+  for (const toml of ["", "# nothing\n\n", "[tools]\n# none\n", '[env]\nFOO = "bar"\n']) {
+    const r = run(toml, "1");
     assert.equal(r.status, 0);
-    assert.equal(r.miseCalled, true);
-    assert.ok(r.elapsed < 10000, `took ${r.elapsed}ms`);
-    assert.match(r.stdout, /WARNING: mise install gave up .*could not reach mise-versions\.jdx\.dev/);
-  });
-}
+    assert.equal(r.miseCalled, false, JSON.stringify(toml));
+    assert.ok(r.elapsed < 5000);
+    assert.match(r.stdout, /skipping mise install/);
+  }
+});
+
+test("mise-init: unreachable host gives up within the timeout, names the host, exits 0", () => {
+  const r = run('[tools]\nripgrep = "latest"\n', "1");
+  assert.equal(r.status, 0);
+  assert.equal(r.miseCalled, true);
+  assert.ok(r.elapsed < 10000, `took ${r.elapsed}ms`);
+  assert.match(r.stdout, /WARNING: mise install gave up .*could not reach mise-versions\.jdx\.dev/);
+});

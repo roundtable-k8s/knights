@@ -74,8 +74,9 @@ ENV MISE_DATA_DIR=/data/.mise \
     MISE_SHARED_INSTALL_DIRS=/app/.mise/installs \
     MISE_YES=1
 
-# Smoke check: baseline tools resolve offline from an empty data dir.
-RUN MISE_OFFLINE=1 MISE_DATA_DIR=/tmp/empty-mise MISE_CONFIG_FILE=/app/mise.toml sh -c 'mise exec -- rg --version && mise exec -- python --version && mise exec -- yq --version'
+# Smoke check: baseline shims resolve offline from an empty data dir (shims, not
+# `mise exec`, which falls back to same-named binaries on the system PATH).
+RUN MISE_OFFLINE=1 MISE_DATA_DIR=/tmp/empty-mise MISE_CONFIG_FILE=/app/mise.toml sh -c 'for t in rg python yq; do /app/.mise/shims/$t --version || exit 1; done'
 
 # Non-root
 USER node
