@@ -6,7 +6,7 @@
  */
 import type { HookCallbackMatcher, HookEvent, HookInput } from "@anthropic-ai/claude-agent-sdk";
 import { decidePreToolUse } from "./guardrails.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { toolCallsBlocked, toolCallsTotal } from "./metrics.js";
 
 export { BLOCKED_BASH_PATTERNS, checkBashCommand } from "./guardrails.js";

@@ -1,4 +1,4 @@
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 export interface DrainOptions {
   /** Tasks currently executing. */

@@ -21,7 +21,7 @@
  * connect too — we stay on the SDK's path rather than inventing a parallel one.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 const PROBE_TIMEOUT_MS = 5000;
 

@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log } from "./logger.js";
+import { initLogger, log } from "@roundtable/knight-core";
 import { connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, type TaskDelivery } from "./nats.js";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "./health.js";

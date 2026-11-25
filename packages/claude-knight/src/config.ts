@@ -1,4 +1,5 @@
 import os from "node:os";
+import { intEnv, loadBaseConfig, requireEnv, type BaseKnightConfig } from "@roundtable/knight-core";
 
 /**
  * Runtime configuration. The first block is the env contract the Roundtable
@@ -7,21 +8,13 @@ import os from "node:os";
  * needs no changes. The second block is claude-knight specific and comes from
  * the Knight CR's spec.env / spec.envFrom.
  */
-export interface KnightConfig {
+export interface KnightConfig extends BaseKnightConfig {
   // ── Operator contract (same as pi-knight) ──
-  knightName: string;
   knightModel: string;
   subscribeTopics: string[];
-  natsUrl: string;
   natsTasksStream: string;
   natsResultsStream: string;
-  natsResultsPrefix: string;
-  taskTimeoutMs: number;
-  /** Max wait for in-flight tasks after SIGTERM. Default taskTimeoutMs + 60s, matching the operator's terminationGracePeriodSeconds. */
-  drainTimeoutMs: number;
   maxConcurrentTasks: number;
-  metricsPort: number;
-  logLevel: string;
   hostname: string;
   /** Downward-API pod name / node name (fall back to the hostname). */
   podName: string;
@@ -72,19 +65,6 @@ export type Runtime = "sdk" | "cli";
 
 type Env = NodeJS.ProcessEnv;
 
-function requireEnv(env: Env, name: string): string {
-  const val = env[name];
-  if (!val) throw new Error(`Required environment variable ${name} is not set`);
-  return val;
-}
-
-function intEnv(env: Env, name: string, fallback: number): number {
-  const raw = env[name];
-  if (raw == null || raw === "") return fallback;
-  const n = parseInt(raw, 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
 /** CLAUDE_PLAN_RESERVE clamped to 0-1; re-read on every reserve check so changes apply without a restart. */
 export function planReserveFromEnv(env: Env = process.env): number {
   return Math.min(1, Math.max(0, floatEnv(env, "CLAUDE_PLAN_RESERVE", 0.8)));
@@ -131,23 +111,16 @@ export function loadConfig(env: Env = process.env): KnightConfig {
   }
   const knightModel = env["KNIGHT_MODEL"] ?? "";
   const workDir = env["KNIGHT_WORKDIR"] ?? "/data";
-  const taskTimeoutMs = intEnv(env, "TASK_TIMEOUT_MS", 1_800_000);
 
   return {
-    knightName: requireEnv(env, "KNIGHT_NAME"),
+    ...loadBaseConfig(env),
     knightModel,
     subscribeTopics: requireEnv(env, "SUBSCRIBE_TOPICS").split(",").map((s) => s.trim()).filter(Boolean),
-    natsUrl: env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
     natsTasksStream: env["NATS_TASKS_STREAM"] ?? "fleet_a_tasks",
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
-    natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
-    taskTimeoutMs,
-    drainTimeoutMs: intEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
     // The operator always sets this from spec.concurrency (CRD default 2). Set
     // concurrency: 1 on claude-knights unless the plan has headroom to spare.
     maxConcurrentTasks: Math.max(1, intEnv(env, "MAX_CONCURRENT_TASKS", 1)),
-    metricsPort: intEnv(env, "METRICS_PORT", 3000),
-    logLevel: env["LOG_LEVEL"] ?? "info",
     hostname: os.hostname(),
     podName: env["POD_NAME"] || os.hostname(),
     nodeName: env["NODE_NAME"] || os.hostname(),

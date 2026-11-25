@@ -196,7 +196,7 @@ test("egress injection satisfies subscription mode without a token in the pod", 
 
 test("cli stream logs the blocked command (truncated to 200 chars)", async () => {
   const { applyMessage, newStreamState } = await import("../src/stream.js");
-  const { setLogStream } = await import("../src/logger.js");
+  const { setLogStream } = await import("@roundtable/knight-core");
   const lines: string[] = [];
   const sink = new PassThrough();
   sink.on("data", (d) => lines.push(String(d)));

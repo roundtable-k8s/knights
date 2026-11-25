@@ -7,7 +7,7 @@
  */
 import { InMemoryCredentialStore, InMemoryModelsStore, type Api, type Model } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 // Custom-model catalog read by the SDK ModelRuntime. Defaults to the workspace PVC;
 // override (e.g. to a read-only ConfigMap mount like /config/models.json) via env so a

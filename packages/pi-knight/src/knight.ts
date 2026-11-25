@@ -9,7 +9,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import type { KnightConfig } from "./config.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel, setParentKnight } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";

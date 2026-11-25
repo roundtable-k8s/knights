@@ -12,7 +12,7 @@ import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { KnightConfig } from "./config.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
 
