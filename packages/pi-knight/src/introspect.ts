@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { log, getConnection, StringCodec } from "@roundtable/knight-core";
+import { log, getConnection, StringCodec, listInflight, natsPrefix, podIdentity } from "@roundtable/knight-core";
+import { hostname } from "node:os";
 import { findSession, getActiveSession } from "./knight.js";
-import { listInflight, natsPrefix, podIdentity } from "./activity.js";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { listSessionFiles } from "./sessions.js";
 import {
@@ -45,7 +45,7 @@ export function startIntrospect(config: KnightConfig): void {
   // Derive prefix from natsResultsPrefix (e.g. "rt-dev.results" → "rt-dev")
   const prefix = natsPrefix(config);
   const base = `${prefix}.introspect.${config.knightName}`;
-  const { pod } = podIdentity();
+  const { pod } = podIdentity(process.env, hostname());
   // Knight-wide subject: queue group so exactly one replica answers. Per-pod subject:
   // reach a specific replica (the one running the task you are looking at).
   subs = [
@@ -76,7 +76,7 @@ export function startIntrospect(config: KnightConfig): void {
 }
 
 export async function handleIntrospect(req: IntrospectRequest, config: KnightConfig): Promise<unknown> {
-  const { pod, node } = podIdentity();
+  const { pod, node } = podIdentity(process.env, hostname());
   const reply = await route(req, config);
   // Every reply says which pod answered, so a dashboard can tell replicas apart.
   return reply && typeof reply === "object" ? { pod, ...(node ? { node } : {}), ...reply } : reply;

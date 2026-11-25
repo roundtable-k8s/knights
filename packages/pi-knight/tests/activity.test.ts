@@ -9,11 +9,9 @@ process.env.KNIGHT_DATA_DIR = mkdtempSync(join(tmpdir(), "pk-data-"));
 process.env.POD_NAME = "pod-a";
 process.env.NODE_NAME = "node-1";
 
-const {
-  TaskActivity, __setActivityPublishForTests, listInflight, boundText, summarizeArgs,
-  encodeEvent, MAX_EVENT_BYTES, MAX_PREVIEW_CHARS, MAX_ARGS_CHARS,
-} = await import("../src/activity.ts");
-const { executeTask, __setSessionFactoryForTests } = await import("../src/knight.ts");
+// Generic activity behaviour (bounds, redaction, rate limit, schema) is tested in packages/core.
+const { TaskActivity, listInflight, MAX_EVENT_BYTES, MAX_ARGS_CHARS, MAX_PREVIEW_CHARS } = await import("@roundtable/knight-core");
+const { executeTask, onSessionEvent, __setSessionFactoryForTests } = await import("../src/knight.ts");
 const { handleIntrospect } = await import("../src/introspect.ts");
 
 const config = {
@@ -22,103 +20,58 @@ const config = {
 } as any;
 
 type Pub = { subject: string; ev: any };
+const pubs: Pub[] = [];
+const publish = (subject: string, data: string) => {
+  assert.ok(Buffer.byteLength(data) <= MAX_EVENT_BYTES, "event over 8 KiB");
+  pubs.push({ subject, ev: JSON.parse(data) });
+};
 function capture(): Pub[] {
-  const out: Pub[] = [];
-  __setActivityPublishForTests((subject, data) => {
-    assert.ok(Buffer.byteLength(data) <= MAX_EVENT_BYTES, "event over 8 KiB");
-    out.push({ subject, ev: JSON.parse(data) });
+  pubs.length = 0;
+  return pubs;
+}
+function activity(meta: { taskId: string; runId?: string; chainName?: string; stepName?: string; slot?: number }) {
+  return new TaskActivity({
+    knight: config.knightName, prefix: "rt", identity: { pod: "pod-a", node: "node-1" },
+    model: "x/y", concurrency: 2, publish, ...meta,
   });
-  return out;
 }
 
 const GHP = "ghp_" + "a".repeat(40);
 
-test("tool + assistant events map with redaction and bounds", () => {
+test("pi session events map to activity events with redaction and bounds", () => {
   const pubs = capture();
-  const a = new TaskActivity(config, { taskId: "t1", runId: "r1", chainName: "c", stepName: "s", model: "m" });
-  a.started(0, 2);
-  a.onSessionEvent({ type: "tool_execution_start", toolCallId: "1", toolName: "bash",
+  const a = activity({ taskId: "t1", runId: "r1", chainName: "c", stepName: "s", slot: 0 });
+  a.started();
+  onSessionEvent(a, { type: "tool_execution_start", toolCallId: "1", toolName: "bash",
     args: { command: `echo ${GHP} ${"x".repeat(500)}`, content: "FILE CONTENTS" } });
-  a.onSessionEvent({ type: "tool_execution_end", toolCallId: "1", toolName: "bash", isError: false, durationMs: 12,
+  onSessionEvent(a, { type: "tool_execution_end", toolCallId: "1", toolName: "bash", isError: false, durationMs: 12,
     result: { content: [{ type: "text", text: `token ${GHP} ` + "y".repeat(2000) }] } });
-  a.onSessionEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "hello" }],
+  onSessionEvent(a, { type: "message_end", message: { role: "user", content: [{ type: "text", text: "ignored" }] } });
+  onSessionEvent(a, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "hello" }, { type: "toolCall", id: "x" }],
     usage: { input: 10, output: 5, cacheRead: 2, cost: { total: 0.5 } } } });
   a.heartbeat();
   a.finished({ success: true });
 
   assert.deepEqual(pubs.map((p) => p.ev.type),
     ["task.started", "tool.started", "tool.finished", "assistant.message", "task.heartbeat", "task.finished"]);
-  assert.deepEqual(pubs.map((p) => p.ev.seq), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(pubs.map((p) => p.ev.seq), [1, 2, 3, 4, 5, 6]);
   assert.equal(pubs[0].subject, "rt.activity.k.t1");
-  assert.equal(pubs[0].ev.pod, "pod-a");
   assert.equal(pubs[0].ev.node, "node-1");
-  assert.equal(pubs[0].ev.runId, "r1");
+  assert.equal(pubs[0].ev.slot, 0);
   const all = JSON.stringify(pubs.map((p) => p.ev));
   assert.ok(!all.includes(GHP), "secret leaked");
   assert.ok(!all.includes("FILE CONTENTS"), "file content leaked");
-  assert.ok(pubs[1].ev.argsSummary.length <= MAX_ARGS_CHARS + 1);
+  assert.equal(pubs[1].ev.toolCallId, "1");
+  assert.ok(pubs[1].ev.argsSummary.length <= MAX_ARGS_CHARS);
   assert.equal(pubs[1].ev.truncated, true);
-  assert.ok(pubs[2].ev.preview.length <= MAX_PREVIEW_CHARS);
+  assert.ok(pubs[2].ev.outputPreview.length <= MAX_PREVIEW_CHARS);
   assert.equal(pubs[2].ev.durationMs, 12);
-  assert.deepEqual(pubs[4].ev.tokens, { input: 10, output: 5, cacheRead: 2 });
-  assert.equal(pubs[4].ev.cost, 0.5);
+  assert.equal(pubs[3].ev.preview, "hello");
+  assert.equal(pubs[4].ev.inputTokens, 10);
+  assert.equal(pubs[4].ev.outputTokens, 5);
+  assert.equal(pubs[4].ev.costUsd, 0.5);
   assert.equal(pubs[4].ev.turns, 1);
   assert.equal(listInflight().length, 0);
-});
-
-test("a secret straddling the preview limit is not half-leaked", () => {
-  const text = "a".repeat(MAX_PREVIEW_CHARS - 10) + ` api_key=${"Z".repeat(40)}`;
-  const { text: out } = boundText(text, MAX_PREVIEW_CHARS);
-  assert.ok(!out.includes("ZZZZ"));
-});
-
-test("content=none omits previews and argument summaries", () => {
-  const pubs = capture();
-  const a = new TaskActivity(config, { taskId: "t2", model: "m" }, { content: "none" });
-  a.onSessionEvent({ type: "tool_execution_start", toolCallId: "1", toolName: "read", args: { path: "/x" } });
-  a.onSessionEvent({ type: "tool_execution_end", toolCallId: "1", toolName: "read", isError: true,
-    result: { content: [{ type: "text", text: "secret stuff" }] } });
-  assert.equal(pubs[0].ev.argsSummary, undefined);
-  assert.equal(pubs[1].ev.preview, undefined);
-  assert.equal(pubs[1].ev.isError, true);
-});
-
-test("rate limit drops tool events but never lifecycle events; seq shows the gap", () => {
-  const pubs = capture();
-  const now = () => 1_000_000;
-  const a = new TaskActivity(config, { taskId: "t3", model: "m" }, { now });
-  a.started(0, 1);
-  for (let i = 0; i < 200; i++) a.onSessionEvent({ type: "tool_execution_start", toolCallId: String(i), toolName: "bash", args: {} });
-  a.heartbeat();
-  a.finished({ success: false, error: "timed out" });
-  const tools = pubs.filter((p) => p.ev.type === "tool.started").length;
-  assert.ok(tools <= 21 && tools >= 15, `tools=${tools}`);
-  assert.equal(pubs.at(-2)!.ev.type, "task.heartbeat");
-  const fin = pubs.at(-1)!.ev;
-  assert.equal(fin.type, "task.finished");
-  assert.equal(fin.errorClass, "timeout");
-  assert.ok(fin.seq > pubs.length - 1);
-});
-
-test("oversized events are shed below 8 KiB", () => {
-  const json = encodeEvent({ v: 1, type: "tool.finished", ts: "t", knight: "k", pod: "p", taskId: "t", model: "m", seq: 1,
-    preview: "x".repeat(20_000) } as any);
-  assert.ok(Buffer.byteLength(json) <= MAX_EVENT_BYTES);
-  assert.equal(JSON.parse(json).truncated, true);
-});
-
-test("summarizeArgs never includes file content or credentials", () => {
-  const s = summarizeArgs({ path: "/a", content: "SECRET BODY", headers: { Authorization: "x" } }).text;
-  assert.ok(s.includes("path=/a"));
-  assert.ok(!s.includes("SECRET BODY") && !s.includes("Authorization"));
-});
-
-test("publish failures never throw", () => {
-  __setActivityPublishForTests(() => { throw new Error("boom"); });
-  const a = new TaskActivity(config, { taskId: "t4", model: "m" });
-  a.started(0, 1);
-  a.heartbeat();
-  a.finished({ success: true });
 });
 
 // ─── Concurrent runs ────────────────────────────────────────────────
@@ -154,8 +107,8 @@ test("two concurrent runs produce separate event streams; introspect reports inf
   __setSessionFactoryForTests(async () => fakeSession(++n, gate) as any);
 
   const run = (taskId: string, runId: string) => {
-    const act = new TaskActivity(config, { taskId, runId, model: "x/y" });
-    act.started(taskId === "ta" ? 0 : 1, 2);
+    const act = activity({ taskId, runId, slot: taskId === "ta" ? 0 : 1 });
+    act.started();
     return executeTask(taskId, config, undefined, runId, taskId, { activity: act })
       .then(() => act.finished({ success: true }));
   };
@@ -182,7 +135,7 @@ test("two concurrent runs produce separate event streams; introspect reports inf
     assert.deepEqual(mine.map((p) => p.ev.type), ["task.started", "tool.started", "tool.finished", "task.finished"]);
     assert.ok(mine.every((p) => p.ev.runId === runId && p.subject === `rt.activity.k.${taskId}`));
     assert.ok(mine[1].ev.argsSummary.includes(`run-${taskId}`));
-    assert.ok(mine[2].ev.preview.includes(`out-${taskId}`));
+    assert.ok(mine[2].ev.outputPreview.includes(`out-${taskId}`));
   }
   assert.equal(((await handleIntrospect({ type: "stats" }, config)) as any).runtime.activeTasks, 0);
 });

@@ -11,7 +11,8 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { containsSecret, findBlockedBashReason, redactSecrets, toolHooksExtension } from "../src/hooks.ts";
+import { containsSecret, redactSecrets } from "@roundtable/knight-core";
+import { findBlockedBashReason, toolHooksExtension } from "../src/hooks.ts";
 
 test("findBlockedBashReason blocks dangerous commands and allows safe ones", () => {
   assert.match(findBlockedBashReason("rm -rf /") ?? "", /root/i);
@@ -38,13 +39,19 @@ test("findBlockedBashReason blocks the rm, chmod and mkfs spellings claude-knigh
 
 test("containsSecret is stable across repeated calls (global regex lastIndex)", () => {
   const text = `token ghp_${"a".repeat(36)}`;
-  for (let i = 0; i < 4; i++) assert.equal(containsSecret(text), true, `call ${i}`);
-  assert.equal(containsSecret("nothing to see"), false);
+  for (let i = 0; i < 4; i++) assert.equal(containsSecret(text, "tokens"), true, `call ${i}`);
+  assert.equal(containsSecret("nothing to see", "tokens"), false);
 });
 
 test("redactSecrets replaces every secret", () => {
-  const out = redactSecrets(`a ghp_${"b".repeat(36)} b AKIAABCDEFGHIJKLMNOP`);
+  const out = redactSecrets(`a ghp_${"b".repeat(36)} b AKIAABCDEFGHIJKLMNOP`, "tokens");
   assert.equal(out, "a [REDACTED] b [REDACTED]");
+});
+
+test("the hooks' token scope leaves code context alone", () => {
+  const code = 'const password = process.env.PASSWORD;\n"author": "Round Table"';
+  assert.equal(containsSecret(code, "tokens"), false);
+  assert.equal(redactSecrets(code, "tokens"), code);
 });
 
 /** Drive a real pi 1.x AgentSession (faux model) with the knight's tool-hook extension. */

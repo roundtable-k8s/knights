@@ -11,7 +11,7 @@ runs them, and publishes results.
 
 ```
 packages/
-  core/          @roundtable/knight-core, shared runtime code (empty for now)
+  core/          @roundtable/knight-core, shared runtime code
   pi-knight/     pi-knight runtime and image
   claude-knight/ claude-knight runtime and image
 ```

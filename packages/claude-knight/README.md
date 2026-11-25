@@ -72,7 +72,8 @@ While a task runs the pod publishes core-NATS events (never JetStream) on
 `knight`, `pod`, `node`, `taskId`, `runId`, a per-task `seq` and is at most 8 KiB. Previews are cut
 (500 chars output/text, 200 chars tool arguments) and redacted; tool events are limited to 20/s per task.
 Set `ACTIVITY_CONTENT=none` to drop all previews. `POD_NAME` and `NODE_NAME` (downward API) identify the
-pod, falling back to the hostname.
+pod; the pod falls back to the hostname and `node` is omitted when unset. Both runtimes share this
+implementation (`packages/core/src/activity.ts`, contract v1).
 
 Introspection also answers per pod on `<prefix>.introspect.<Knight>.<pod>`; every reply carries `pod` and
 `node`, and `stats` has an `inflight` array (taskId, runId, chain/step, model, startedAt, lastHeartbeatAt).
