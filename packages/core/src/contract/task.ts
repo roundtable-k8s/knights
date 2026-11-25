@@ -1,7 +1,10 @@
+import { taskPayloadErrors } from "./validate.js";
+
 /**
  * The task contract: what a knight reads off its task stream. Dispatchers differ in
  * shape (the operator's camelCase TaskPayload, snake_case nats_request payloads from
- * other knights, plain text), so the parser accepts all of them.
+ * other knights, plain text), so the parser accepts all of them. The wire shape is the
+ * `TaskPayload` schema in ./schema.ts.
  */
 export interface ParsedTask {
   task: string;
@@ -22,6 +25,16 @@ export interface ParsedTask {
   model?: string;
   /** Epoch ms the task was published, from `timestamp` when it parses (queuedFor in task.started). */
   publishedAtMs?: number;
+  /** 1-based attempt number from a manual retry (absent means 1). */
+  attempt?: number;
+  /** The task ID a manual retry re-runs. */
+  retryOf?: string;
+  /**
+   * Set when a JSON payload does not match the TaskPayload schema: one `<field>: <problem>`
+   * line per error, joined with "; ". The task must not run; answer it with a failure
+   * result naming the field. `taskId` is still resolved so the result can be addressed.
+   */
+  invalid?: string;
 }
 
 /**
@@ -50,6 +63,10 @@ const str = (...values: unknown[]): string | undefined => {
  * `chainName`, `stepName`, `task`), knight nats_request payloads (`task_id`,
  * `dispatched_by`, `metadata.timeout_ms`) and other snake_case variants. Non-JSON
  * payloads, and JSON that is not an object, are treated as plain task text.
+ *
+ * A JSON object is checked against the TaskPayload schema first; when it does not match,
+ * the result carries `invalid` (and only the fields that could be read safely), so the
+ * caller answers with a failure result instead of running, or crashing on, a bad task.
  */
 export function parseTask(raw: string, subjectTaskId: string): ParsedTask {
   let json: any;
@@ -61,10 +78,15 @@ export function parseTask(raw: string, subjectTaskId: string): ParsedTask {
   if (!json || typeof json !== "object" || Array.isArray(json)) {
     return { task: raw, taskId: subjectTaskId };
   }
+  const taskId = str(json.task_id, json.taskId) || subjectTaskId;
+  const errors = taskPayloadErrors(json);
+  if (errors.length) {
+    return { task: "", taskId, invalid: errors.join("; "), from: str(json.from, json.payload?.from) };
+  }
   const publishedAtMs = Date.parse(json.timestamp);
   return {
-    task: json.task ?? json.description ?? json.message ?? raw,
-    taskId: json.task_id ?? json.taskId ?? subjectTaskId,
+    task: json.task ?? json.description ?? json.message,
+    taskId,
     domain: json.domain,
     from: json.from ?? json.payload?.from,
     dispatchedBy: json.dispatched_by ?? json.dispatchedBy,
@@ -75,5 +97,7 @@ export function parseTask(raw: string, subjectTaskId: string): ParsedTask {
     stepName: str(json.stepName, json.step_name, json.step),
     model: typeof json.model === "string" && json.model.trim() ? json.model.trim() : undefined,
     publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : undefined,
+    attempt: json.attempt,
+    retryOf: json.retryOf || undefined,
   };
 }

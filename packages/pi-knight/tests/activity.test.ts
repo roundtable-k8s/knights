@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { activityEventErrors } from "@roundtable/knight-core";
 
 process.env.KNIGHT_WORK_ROOT = mkdtempSync(join(tmpdir(), "pk-work-"));
 process.env.KNIGHT_DATA_DIR = mkdtempSync(join(tmpdir(), "pk-data-"));
@@ -56,6 +57,7 @@ test("pi session events map to activity events with redaction and bounds", () =>
   assert.deepEqual(pubs.map((p) => p.ev.type),
     ["task.started", "tool.started", "tool.finished", "assistant.message", "task.heartbeat", "task.finished"]);
   assert.deepEqual(pubs.map((p) => p.ev.seq), [1, 2, 3, 4, 5, 6]);
+  for (const p of pubs) assert.deepEqual(activityEventErrors(p.ev), [], `${p.ev.type} matches the activity v1 schema`);
   assert.equal(pubs[0].subject, "rt.activity.k.t1");
   assert.equal(pubs[0].ev.node, "node-1");
   assert.equal(pubs[0].ev.slot, 0);

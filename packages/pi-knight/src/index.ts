@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -184,21 +184,18 @@ async function main(): Promise<void> {
       void processTask(delivery);
     },
     onLost: async (parsed) => {
-      const msg = "Task was delivered to a knight that stopped before finishing it (not re-run: max_deliver=1)";
       metrics.recordLostTask(config.knightName);
-      await publishResult(parsed.taskId, {
-        task_id: parsed.taskId,
+      await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel }));
+    },
+    // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
+    onInvalid: async (parsed) => {
+      metrics.tasksTotal.labels(config.knightName, "error").inc();
+      await publishResult(parsed.taskId, invalidTaskResult({
+        taskId: parsed.taskId,
         knight: config.knightName,
-        success: false,
-        result: `Task failed: ${msg}`,
-        error: msg,
-        lost: true,
-        duration_ms: 0,
-        cost: 0,
-        tokens: { input: 0, output: 0 },
         model: config.knightModel,
-        timestamp: new Date().toISOString(),
-      });
+        invalid: parsed.invalid ?? "invalid",
+      }));
     },
   });
 

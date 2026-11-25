@@ -4,7 +4,8 @@ import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
+import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
+import { initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -147,44 +148,20 @@ export async function main(): Promise<void> {
         activity.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
         metrics.usageLimitHits.labels(config.knightName).inc();
         metrics.tasksTotal.labels(config.knightName, "refused").inc();
-        await publishResult(parsed.taskId, {
-          task_id: parsed.taskId,
-          knight: config.knightName,
-          success: false,
-          result: `Task refused: ${reserve.reason}`,
-          error: `Task refused: ${reserve.reason}`,
-          usage_limited: true,
-          duration_ms: Date.now() - started,
-          cost: 0,
-          tokens: { input: 0, output: 0 },
-          model: config.claudeModel ?? "claude-code-default",
-          runtime: "claude-knight",
-          billing: config.authMode,
-          timestamp: new Date().toISOString(),
-        });
+        await publishResult(
+          parsed.taskId,
+          buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
+            taskId: parsed.taskId,
+            knight: config.knightName,
+            durationMs: Date.now() - started,
+          }),
+        );
         return;
       }
 
       const durationMs = Date.now() - started;
       activity.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
-      await publishResult(parsed.taskId, {
-        task_id: parsed.taskId,
-        knight: config.knightName,
-        success: outcome.success,
-        result: outcome.result,
-        ...(outcome.error ? { error: outcome.error } : {}),
-        ...(outcome.usageLimited ? { usage_limited: true } : {}),
-        ...(outcome.prs?.length ? { prs: outcome.prs } : {}),
-        ...(outcome.verdict ? { verdict: outcome.verdict } : {}),
-        duration_ms: durationMs,
-        cost: outcome.cost,
-        tokens: outcome.tokens,
-        model: outcome.model,
-        turns: outcome.turns,
-        runtime: "claude-knight",
-        billing: outcome.billing,
-        timestamp: new Date().toISOString(),
-      });
+      await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs }));
 
       metrics.tasksTotal.labels(config.knightName, outcome.success ? "success" : "error").inc();
       metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
@@ -198,20 +175,11 @@ export async function main(): Promise<void> {
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error("Task failed", { taskId: parsed.taskId, error: errMsg });
       activity.finished({ success: false, error: errMsg, errorClass: "internal", cost: 0 });
-      await publishResult(parsed.taskId, {
-        task_id: parsed.taskId,
-        knight: config.knightName,
-        success: false,
-        result: `Task failed: ${errMsg}`,
-        error: errMsg,
-        duration_ms: durationMs,
-        cost: 0,
-        tokens: { input: 0, output: 0 },
-        model: config.claudeModel ?? "claude-code-default",
-        runtime: "claude-knight",
-        billing: config.authMode,
-        timestamp: new Date().toISOString(),
-      }).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
+      await publishResult(
+        parsed.taskId,
+        buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs }),
+      ).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
+
       metrics.tasksTotal.labels(config.knightName, "error").inc();
       metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
     } finally {
@@ -237,22 +205,20 @@ export async function main(): Promise<void> {
       void processTask(delivery);
     },
     onLost: async (parsed) => {
-      const msg = "Task was delivered to a knight that stopped before finishing it (not re-run: max_deliver=1)";
       metrics.recordLostTask(config.knightName);
+      const model = config.claudeModel ?? "claude-code-default";
       await publishResult(parsed.taskId, {
-        task_id: parsed.taskId,
-        knight: config.knightName,
-        success: false,
-        result: `Task failed: ${msg}`,
-        error: msg,
-        lost: true,
-        duration_ms: 0,
-        cost: 0,
-        tokens: { input: 0, output: 0 },
-        model: config.claudeModel ?? "claude-code-default",
-        runtime: "claude-knight",
-        billing: config.authMode,
-        timestamp: new Date().toISOString(),
+        ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model }),
+        ...runtimeFields(config),
+      });
+    },
+    // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
+    onInvalid: async (parsed) => {
+      metrics.tasksTotal.labels(config.knightName, "error").inc();
+      const model = config.claudeModel ?? "claude-code-default";
+      await publishResult(parsed.taskId, {
+        ...invalidTaskResult({ taskId: parsed.taskId, knight: config.knightName, model, invalid: parsed.invalid ?? "invalid" }),
+        ...runtimeFields(config),
       });
     },
   });

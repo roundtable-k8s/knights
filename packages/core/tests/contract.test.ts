@@ -35,11 +35,29 @@ test("parseTask reads the operator's TaskPayload runId (#31)", () => {
   assert.equal(parsed.task, "Plan the change");
 });
 
-test("parseTask accepts snake_case run_id and ignores empty/non-string run ids", () => {
+test("parseTask accepts snake_case run_id and ignores empty run ids", () => {
   assert.equal(parseTask(JSON.stringify({ task: "x", run_id: "r1" }), "s").runId, "r1");
   assert.equal(parseTask(JSON.stringify({ task: "x", runId: "" }), "s").runId, undefined);
   assert.equal(parseTask(JSON.stringify({ task: "x", runId: "   " }), "s").runId, undefined);
-  assert.equal(parseTask(JSON.stringify({ task: "x", runId: 42 }), "s").runId, undefined);
+});
+
+test("parseTask marks a payload that breaks the schema invalid, naming the field (#6)", () => {
+  const p = parseTask(JSON.stringify({ task_id: "t9", task: "x", runId: 42, from: "galahad" }), "s");
+  assert.equal(p.invalid, "runId: must be string");
+  assert.equal(p.taskId, "t9", "the result can still be addressed");
+  assert.equal(p.from, "galahad", "self-echo filtering still works");
+  assert.equal(p.task, "", "an invalid task never runs");
+  assert.equal(parseTask(JSON.stringify({ task: 5 }), "s").invalid, "task: must be string");
+  assert.equal(parseTask(JSON.stringify({ taskId: "t", metadata: { timeout_ms: "1000" } }), "s").invalid,
+    "task: required; metadata.timeout_ms: must be number");
+  assert.equal(parseTask(JSON.stringify({ task: "x", attempt: 0 }), "s").invalid, "attempt: must be >= 1");
+  assert.equal(parseTask(JSON.stringify({ taskId: 7, task: "x" }), "subj").taskId, "subj");
+});
+
+test("parseTask accepts the legacy description/message aliases for task", () => {
+  assert.equal(parseTask(JSON.stringify({ description: "d" }), "s").task, "d");
+  assert.equal(parseTask(JSON.stringify({ message: "m" }), "s").task, "m");
+  assert.equal(parseTask(JSON.stringify({ message: "m" }), "s").invalid, undefined);
 });
 
 test("parseTask without runId (ad-hoc task) leaves it undefined", () => {
@@ -71,8 +89,7 @@ test("parseTask accepts every chain/step spelling the dispatchers use", () => {
     assert.deepEqual([p.chainName, p.stepName], ["c1", "s1"], c);
   }
   const bad = parseTask(JSON.stringify({ task: "x", chainName: 3, stepName: null, step: "s" }), "id");
-  assert.equal(bad.chainName, undefined);
-  assert.equal(bad.stepName, "s");
+  assert.equal(bad.invalid, "chainName: must be string; stepName: must be string");
 });
 
 test("parseTask sets publishedAtMs only for a parseable timestamp", () => {
@@ -135,11 +152,11 @@ for (const name of ["pi-knight-result", "claude-knight-result"]) {
   });
 }
 
-test("fixtures keep each runtime's refusal field (unifying them is #6)", () => {
+test("refusals: pi-knight sends refused credits, claude-knight refused quota plus deprecated usage_limited (#6)", () => {
   const pi: TaskResult = JSON.parse(fixture("pi-knight-result"));
   const claude: TaskResult = JSON.parse(fixture("claude-knight-result"));
   assert.equal(pi.refused, "credits");
   assert.ok(!("usage_limited" in pi));
+  assert.equal(claude.refused, "quota");
   assert.equal(claude.usage_limited, true);
-  assert.ok(!("refused" in claude));
 });
