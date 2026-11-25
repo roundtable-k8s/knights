@@ -1,7 +1,7 @@
 {
   "name": "claude-knight",
   "version": "0.1.0",
-  "description": "Claude Code knight runtime for the Round Table \u2014 runs tasks through the official Claude Code CLI (headless) on a Claude plan, or the Agent SDK with an API key",
+  "description": "Claude Code knight runtime for the Round Table — runs tasks through the official Claude Code CLI (headless) on a Claude plan, or the Agent SDK with an API key",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -13,6 +13,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.329",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@roundtable/knight-core": "*",
     "nats": "^2.29.3",
     "prom-client": "^15.1.3",
