@@ -4,15 +4,19 @@
  */
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { handlePreToolUseHook, HookInputError } from "../src/hook-cli.js";
-import { createMcpHandler, serveLines, toolListing, type ToolDef } from "../src/mcp-stdio.js";
+import { createMcpServer, type ToolDef } from "../src/mcp-stdio.js";
 import { roundtableTools } from "../src/tools.js";
 import { setBrowserExec } from "../src/browser.js";
 import { listTranscripts, projectDirName, readTranscript } from "../src/sessions.js";
@@ -79,71 +83,94 @@ test("`index.js hook pretooluse` speaks the command-hook protocol (stdout JSON, 
 // ── stdio MCP server ───────────────────────────────────────────────
 
 const tools = () => roundtableTools() as unknown as ToolDef[];
+const index = fileURLToPath(new URL("../src/index.ts", import.meta.url));
+const tsx = import.meta.resolve("tsx");
 
-test("MCP initialize negotiates the protocol version", async () => {
-  const handle = createMcpHandler(tools);
-  const r: any = await handle({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "claude-code", version: "2" } } });
-  assert.equal(r.result.protocolVersion, "2025-03-26");
-  assert.deepEqual(r.result.capabilities, { tools: { listChanged: false } });
-  assert.equal(r.result.serverInfo.name, "roundtable");
-  const future: any = await handle({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2099-01-01" } });
-  assert.equal(future.result.protocolVersion, "2025-06-18");
-  assert.equal(await handle({ jsonrpc: "2.0", method: "notifications/initialized" }), undefined);
-  assert.deepEqual(((await handle({ jsonrpc: "2.0", id: 3, method: "ping" })) as any).result, {});
-});
+/** An SDK Client wired to an in-process server over linked in-memory transports. */
+async function connectInProcess(defs: ToolDef[], beforeCall?: () => Promise<void>) {
+  const server = createMcpServer(defs, beforeCall);
+  const client = new Client({ name: "test", version: "0" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(a), client.connect(b)]);
+  return { client, server };
+}
 
-test("MCP tools/list serves the Round Table tools with JSON schemas, always loaded", async () => {
-  const r: any = await createMcpHandler(tools)({ jsonrpc: "2.0", id: 1, method: "tools/list" });
-  const names = r.result.tools.map((t: any) => t.name);
-  assert.deepEqual(names, ["nats_publish", "nats_request"]);
-  const req = r.result.tools.find((t: any) => t.name === "nats_request");
+const stub: ToolDef = {
+  name: "stub_echo",
+  description: "echo",
+  inputSchema: { text: z.string() },
+  handler: async ({ text }) => ({ content: [{ type: "text", text: `echo ${text}` }] }),
+};
+
+test("MCP server negotiates initialize and lists the Round Table tools, always loaded", async () => {
+  const { client } = await connectInProcess(tools());
+  assert.equal(client.getServerVersion()?.name, "roundtable");
+  const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
+  assert.equal(client.getServerVersion()?.version, pkg.version);
+  const { tools: listed } = await client.listTools();
+  assert.deepEqual(listed.map((t) => t.name).sort(), ["nats_publish", "nats_request"]);
+  const req = listed.find((t) => t.name === "nats_request")!;
   assert.equal(req.inputSchema.type, "object");
-  assert.deepEqual([...req.inputSchema.required].sort(), ["domain", "knight", "task"]);
-  assert.equal(req.inputSchema.properties.timeout_ms.type, "integer");
-  assert.equal(req.inputSchema.$schema, undefined);
+  assert.deepEqual([...(req.inputSchema.required ?? [])].sort(), ["domain", "knight", "task"]);
+  assert.equal((req.inputSchema.properties as any).timeout_ms.type, "integer");
   assert.deepEqual(req._meta, { "anthropic/alwaysLoad": true });
 
   process.env.BROWSER_ENABLED = "true";
-  assert.equal(toolListing(tools()).length, 10);
+  const { client: withBrowser } = await connectInProcess(tools());
+  assert.equal((await withBrowser.listTools()).tools.length, 10);
 });
 
-test("MCP tools/call validates arguments and runs the tool", async () => {
-  let waited = false;
-  const handle = createMcpHandler(tools, async () => {
-    waited = true;
+test("MCP tools/call runs the tool, validates arguments and reports errors as results", async () => {
+  let waited = 0;
+  const { client } = await connectInProcess([...tools(), stub], async () => {
+    waited++;
   });
-  const bad: any = await handle({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "nats_publish", arguments: { subject: "a" } } });
-  assert.equal(bad.result.isError, true);
-  assert.match(bad.result.content[0].text, /Invalid arguments for nats_publish/);
-  assert.equal(waited, false);
 
-  const noNats: any = await handle({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "nats_publish", arguments: { subject: "a.b", message: "hi" } } });
-  assert.equal(waited, true, "waits for the NATS connection first");
-  assert.deepEqual(noNats.result, { content: [{ type: "text", text: "Error: NATS not connected" }], isError: true });
+  const ok: any = await client.callTool({ name: "stub_echo", arguments: { text: "hi" } });
+  assert.deepEqual(ok.content, [{ type: "text", text: "echo hi" }]);
+  assert.equal(waited, 1, "waits for the NATS connection first");
+
+  const bad: any = await client.callTool({ name: "nats_publish", arguments: { subject: "a" } });
+  assert.equal(bad.isError, true);
+  assert.match(bad.content[0].text, /nats_publish/);
+  assert.equal(waited, 1);
+
+  const noNats: any = await client.callTool({ name: "nats_publish", arguments: { subject: "a.b", message: "hi" } });
+  assert.deepEqual(noNats, { content: [{ type: "text", text: "Error: NATS not connected" }], isError: true });
 
   process.env.BROWSER_ENABLED = "true";
   setBrowserExec(async (_bin, args) => (args[0] === "snapshot" ? '- button "Go" [ref=e1]' : ""));
-  const snap: any = await handle({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "browser_snapshot", arguments: {} } });
-  assert.match(snap.result.content[0].text, /button "Go"/);
+  const { client: withBrowser } = await connectInProcess(tools());
+  const snap: any = await withBrowser.callTool({ name: "browser_snapshot", arguments: {} });
+  assert.match(snap.content[0].text, /button "Go"/);
 
-  const unknown: any = await handle({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "nope", arguments: {} } });
-  assert.equal(unknown.error.code, -32602);
-  const method: any = await handle({ jsonrpc: "2.0", id: 5, method: "resources/list" });
-  assert.equal(method.error.code, -32601);
+  // An unknown tool is an error (protocol error or error result, depending on SDK version).
+  const unknown = await client.callTool({ name: "nope", arguments: {} }).then(
+    (r: any) => r.isError === true,
+    () => true,
+  );
+  assert.equal(unknown, true);
 });
 
-test("MCP stdio framing: newline-delimited JSON-RPC in and out, parse errors answered", async () => {
-  const input = new PassThrough();
-  const out: any[] = [];
-  const done = serveLines(createMcpHandler(tools), input, (line) => out.push(JSON.parse(line)));
-  input.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}\n');
-  input.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n\n');
-  input.write('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n');
-  input.write("not json\n");
-  input.end();
-  await done;
-  assert.deepEqual(out.map((m) => m.id).sort(), [1, 2, null].sort());
-  assert.equal(out.find((m) => m.id === null).error.code, -32700);
+test("`index.js mcp` serves over stdio to an SDK Client and exits cleanly when stdin closes", async () => {
+  const env = { ...(process.env as Record<string, string>), KNIGHT_NAME: "t", NATS_URL: "nats://127.0.0.1:1", LOG_LEVEL: "error" };
+  const client = new Client({ name: "test", version: "0" });
+  const transport = new StdioClientTransport({ command: process.execPath, args: ["--import", tsx, index, "mcp"], env, stderr: "ignore" });
+  await client.connect(transport);
+  assert.equal(client.getServerVersion()?.name, "roundtable");
+  assert.deepEqual((await client.listTools()).tools.map((t) => t.name).sort(), ["nats_publish", "nats_request"]);
+  const res: any = await client.callTool({ name: "nats_publish", arguments: { subject: "a.b", message: "hi" } });
+  assert.equal(res.isError, true);
+  assert.match(res.content[0].text, /NATS not connected/);
+  await client.close();
+
+  // Shutdown, observed directly: closing stdin ends the process with status 0.
+  const child = spawn(process.execPath, ["--import", tsx, index, "mcp"], { env, stdio: ["pipe", "ignore", "ignore"] });
+  const exit = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+  child.stdin.end();
+  const timer = setTimeout(() => child.kill(), 20_000);
+  assert.equal(await exit, 0);
+  clearTimeout(timer);
 });
 
 // ── transcripts for introspect ─────────────────────────────────────
