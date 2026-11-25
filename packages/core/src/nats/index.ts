@@ -6,6 +6,9 @@ import {
   type JetStreamManager,
   AckPolicy,
   DeliverPolicy,
+  JetStreamApiCodes,
+  JetStreamApiError,
+  type ConsumerConfig,
 } from "@nats-io/jetstream";
 import { log } from "../logger.js";
 import { assertTaskResult, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
@@ -225,7 +228,10 @@ export interface SubscribeOptions {
   onLost(task: ParsedTask): void | Promise<void>;
   /** A payload that does not match the TaskPayload schema; publish a failure result naming the field. */
   onInvalid?(task: ParsedTask): void | Promise<void>;
-  /** Override the ack_wait heartbeat window (tests only). */
+  /**
+   * Override the ack_wait heartbeat window (tests only). Only affects a consumer created by the
+   * bindConsumer fallback; an operator-owned consumer keeps its own ack_wait.
+   */
   ackWaitMs?: number;
 }
 
@@ -233,7 +239,7 @@ export interface SubscribeOptions {
 export interface ConsumerManager {
   consumers: {
     info(stream: string, durable: string): Promise<unknown>;
-    add(stream: string, cfg: any): Promise<unknown>;
+    add(stream: string, cfg: Partial<ConsumerConfig>): Promise<unknown>;
   };
 }
 
@@ -257,7 +263,7 @@ const BIND_WAIT_MS = 120_000;
 export async function bindConsumer(
   jsm: ConsumerManager,
   stream: string,
-  desired: { durable_name: string; [k: string]: unknown },
+  desired: Partial<ConsumerConfig> & { durable_name: string },
   opts: BindConsumerOptions = {},
 ): Promise<"bound" | "created"> {
   const durable = desired.durable_name;
@@ -274,9 +280,9 @@ export async function bindConsumer(
       log.info("Bound to operator-owned consumer", { durable, stream, attempt });
       return "bound";
     } catch (err) {
-      const code = (err as { code?: string | number; message?: string }) ?? {};
-      const notFound = /not found|10014|404/i.test(`${code.code ?? ""} ${code.message ?? ""}`) || code.code === undefined;
-      if (!notFound) throw err;
+      // Only a typed "consumer not found" (ConsumerNotFoundError, err_code 10014) means the operator hasn't created it yet;
+      // timeouts, closed connections, permission errors etc. must fail start-up with the real cause.
+      if (!(err instanceof JetStreamApiError && err.code === JetStreamApiCodes.ConsumerNotFound)) throw err;
       const remaining = deadline - now();
       log.info("Consumer not found yet — waiting for the operator", { durable, stream, attempt, remainingMs: Math.max(0, remaining) });
       if (remaining <= 0) break;

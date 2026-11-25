@@ -1,9 +1,10 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { JetStreamApiError } from "@nats-io/jetstream";
 import { bindConsumer } from "../src/nats/index.ts";
 
 const desired = { durable_name: "k-consumer", max_deliver: 1 };
-const notFound = () => Object.assign(new Error("consumer not found"), { code: "404" });
+const notFound = () => new JetStreamApiError({ code: 404, err_code: 10014, description: "consumer not found" });
 
 function fake(infoImpl: (n: number) => Promise<unknown>) {
   const calls = { info: 0, add: 0, del: 0, update: 0 };
@@ -50,6 +51,18 @@ describe("bindConsumer", () => {
   it("rethrows non-not-found errors", async () => {
     const f = fake(async () => { throw Object.assign(new Error("permissions violation"), { code: "403" }); });
     await assert.rejects(bindConsumer(f.jsm, "S", desired, { sleep: async () => {} }), /permissions/);
+    assert.equal(f.calls.add, 0);
+  });
+
+  it("rethrows an error without a code instead of treating it as not-found", async () => {
+    const f = fake(async () => { throw new Error("boom"); });
+    await assert.rejects(bindConsumer(f.jsm, "S", desired, { sleep: async () => { throw new Error("must not wait"); } }), /boom/);
+    assert.deepEqual(f.calls, { info: 1, add: 0, del: 0, update: 0 });
+  });
+
+  it("rethrows other JetStream API errors (e.g. stream not found)", async () => {
+    const f = fake(async () => { throw new JetStreamApiError({ code: 404, err_code: 10059, description: "stream not found" }); });
+    await assert.rejects(bindConsumer(f.jsm, "S", desired, { sleep: async () => {} }), /stream not found/);
     assert.equal(f.calls.add, 0);
   });
 });
