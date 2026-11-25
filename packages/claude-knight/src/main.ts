@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -40,6 +40,7 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
 export async function main(): Promise<void> {
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
+  const telemetry = startTelemetry({ service: "claude-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir, dataDir: config.workDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
   // Introspect in this process reads the same config dir the Claude Code child
@@ -173,7 +174,11 @@ export async function main(): Promise<void> {
           : { blocked: false };
       const outcome = reserve.blocked
         ? null
-        : await executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
+        : await withTaskSpan(
+            { taskId: parsed.taskId, runId: parsed.runId, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel },
+            () => executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model }),
+            (o) => ({ success: o.success, cost: o.cost, model: o.model, error: o.error }),
+          );
 
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
@@ -268,6 +273,7 @@ export async function main(): Promise<void> {
     cleanup: async () => {
       metrics.natsConnected.labels().set(0);
       await stopHealthServer();
+      await telemetry.shutdown();
     },
     exit: (code) => process.exit(code),
   });

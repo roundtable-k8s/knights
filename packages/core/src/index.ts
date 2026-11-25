@@ -16,3 +16,4 @@ export * from "./memory.js";
 export * from "./service.js";
 export * from "./agent-env.js";
 export * from "./roster.js";
+export * from "./telemetry.js";

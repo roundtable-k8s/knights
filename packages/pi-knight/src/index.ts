@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -15,6 +15,7 @@ async function main(): Promise<void> {
   scrubAgentEnv();
   const config = loadConfig();
   initLogger(config.knightName, config.logLevel, config.table);
+  const telemetry = startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
   migrateMemory({ memoryDir: config.memoryDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
 
@@ -168,7 +169,11 @@ async function main(): Promise<void> {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const result = await executeTask(taskText, config, controller.signal, runId, taskId, { model, activity });
+      const result = await withTaskSpan(
+        { taskId, runId, knight: config.knightName, table: config.table, model: model ?? config.knightModel },
+        () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
+        (r) => ({ success: r.success, cost: r.cost, model: r.model, error: r.error }),
+      );
       const durationMs = Date.now() - startTime;
 
       activity.finished({ success: result.success, error: result.error, cost: result.cost, tokens: result.tokens });
@@ -259,6 +264,7 @@ async function main(): Promise<void> {
     cleanup: async () => {
       metrics.natsConnected.labels().set(0);
       await stopHealthServer();
+      await telemetry.shutdown();
     },
     exit: (code) => process.exit(code),
   });

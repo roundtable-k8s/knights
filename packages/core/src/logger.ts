@@ -1,4 +1,5 @@
 import os from "node:os";
+import { activeTraceIds } from "./telemetry.js";
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 } as const;
 type Level = keyof typeof LEVELS;
@@ -28,6 +29,7 @@ function emit(level: Level, msg: string, extra?: Record<string, unknown>): void 
     hostname: os.hostname(),
     knight: knightName,
     table: tableName,
+    ...activeTraceIds(),
     msg,
     ...extra,
   };
