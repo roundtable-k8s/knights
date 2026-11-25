@@ -13,6 +13,24 @@ NIX_CONF="/nix/etc/nix/nix.conf"
 # rt_log — namespaced logger; callers may override.
 rt_log() { echo "[nix-lib] $(date '+%H:%M:%S') $*"; }
 
+# STARTUP_NIX_TIMEOUT — seconds a start-up Nix step (bootstrap, flake build)
+# may run before it is given up on. 124 is the exit status of `timeout`.
+STARTUP_NIX_TIMEOUT="${STARTUP_NIX_TIMEOUT:-600}"
+
+# rt_nix_timeout_warning WHAT — the one WARNING line for a Nix step that hit the
+# bound, naming the hosts a default-deny egress policy most likely blocks.
+rt_nix_timeout_warning() {
+  rt_log "  WARNING: $1 gave up after ${STARTUP_NIX_TIMEOUT}s; could not reach cache.nixos.org, releases.nixos.org or github.com (flake inputs) — check the egress allowlist. Continuing without it."
+}
+
+# rt_bootstrap_nix_bounded — bootstrap + profile repair under STARTUP_NIX_TIMEOUT.
+# Exits 124 on timeout. Runs in a child bash, so the functions are exported.
+rt_bootstrap_nix_bounded() {
+  export NIX_PROFILE
+  export -f rt_log rt_write_nix_conf rt_bootstrap_nix rt_restore_profile
+  timeout "$STARTUP_NIX_TIMEOUT" bash -c 'rt_bootstrap_nix && rt_restore_profile'
+}
+
 # rt_write_nix_conf — single-user nix.conf with the public binary cache so
 # tools substitute from cache.nixos.org instead of building from source.
 rt_write_nix_conf() {

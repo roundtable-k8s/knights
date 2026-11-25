@@ -57,6 +57,8 @@ for f in SOUL.md IDENTITY.md TOOLS.md; do
   fi
 done
 
+rt_phase_mark "Phase 1"
+
 # ──────────────────────────────────────────────────────────────────
 # Phase 1.5: Optional Pi model provider bootstrap
 # ──────────────────────────────────────────────────────────────────
@@ -75,6 +77,8 @@ if [ -n "${PI_MODELS_JSON_B64:-}" ] || [ -n "${PI_MODELS_JSON:-}" ]; then
 else
   log "Phase 1.5: No custom Pi model config — skipping"
 fi
+
+rt_phase_mark "Phase 1.5"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 2: Nix bootstrap (first boot only)
@@ -102,14 +106,21 @@ if [ -d /nix ] && [ ! -w /nix ]; then
     log "Phase 2: Shared Nix store mounted but no profile at $KNIGHT_NIX_PROFILE yet (build pending)"
   fi
 elif [ -d /nix ] && [ -w /nix ]; then
-  rt_run rt_bootstrap_nix
-  rt_run rt_restore_profile
+  nix_rc=0
+  rt_run rt_bootstrap_nix_bounded || nix_rc=$?
+  if [ "$nix_rc" -eq 124 ]; then
+    rt_nix_timeout_warning "Nix bootstrap"
+  elif [ "$nix_rc" -ne 0 ]; then
+    exit "$nix_rc"
+  fi
   if rt_source_nix; then
     log "Phase 2: Nix ready — $(nix --version 2>/dev/null || echo 'binary found')"
   fi
 else
   log "Phase 2: No /nix mount — skipping Nix bootstrap"
 fi
+
+rt_phase_mark "Phase 2"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 3: Flake tool installation (content-addressed, cached)
@@ -144,7 +155,9 @@ elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
     cd "$BUILD_DIR"
 
     BUILD_OUT="$BUILD_DIR.out"
-    if rt_run nix build ".#default" --no-link --print-out-paths >"$BUILD_OUT" 2>&1; then
+    build_rc=0
+    rt_run timeout "$STARTUP_NIX_TIMEOUT" nix build ".#default" --no-link --print-out-paths >"$BUILD_OUT" 2>&1 || build_rc=$?
+    if [ "$build_rc" -eq 0 ]; then
       STORE_PATH=$(tail -1 "$BUILD_OUT")
       if [ -d "$STORE_PATH" ]; then
         chmod -R u+w "$NIX_ENV" 2>/dev/null || true
@@ -155,6 +168,9 @@ elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
       else
         log "  WARNING: Nix build produced invalid path: $STORE_PATH"
       fi
+    elif [ "$build_rc" -eq 124 ]; then
+      tail -5 "$BUILD_OUT"
+      rt_nix_timeout_warning "Nix flake build"
     else
       log "  WARNING: Nix flake build failed (non-fatal):"
       tail -5 "$BUILD_OUT"
@@ -167,6 +183,8 @@ else
   log "Phase 3: No flake.nix or no Nix — skipping"
 fi
 
+rt_phase_mark "Phase 3"
+
 # ──────────────────────────────────────────────────────────────────
 # Phase 4: Mise tools (if any per-knight config)
 # ──────────────────────────────────────────────────────────────────
@@ -177,6 +195,8 @@ if [ -f /config/mise.toml ] && command -v mise >/dev/null 2>&1; then
 else
   log "Phase 4: No mise config — skipping"
 fi
+
+rt_phase_mark "Phase 4"
 
 # ──────────────────────────────────────────────────────────────────
 # Phase 4.5: Vault write check
@@ -201,6 +221,7 @@ if [ -d "/vault" ]; then
 else
   log "Phase 4.5: No vault mount — skipping"
 fi
+rt_phase_mark "Phase 4.5"
 
 # Phase 4.9: Git credential setup
 # ──────────────────────────────────────────────────────────────────
@@ -209,6 +230,7 @@ fi
 # gh / GH_TOKEN env as before. See scripts/github/configure-git.sh.
 # shellcheck source=github/configure-git.sh
 . "$(dirname "$0")/github/configure-git.sh"
+rt_phase_mark "Phase 4.9"
 
 # Phase 5: Start the knight
 # ──────────────────────────────────────────────────────────────────
