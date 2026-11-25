@@ -10,7 +10,8 @@
     "build": "npm run build -w @roundtable/knight-core && npm run build --workspaces --if-present",
     "typecheck": "npm run build -w @roundtable/knight-core && npm run typecheck --workspaces --if-present",
     "test": "npm run build -w @roundtable/knight-core && npm run test --workspaces --if-present",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "contract:export": "npm run contract:export -w @roundtable/knight-core"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

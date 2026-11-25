@@ -8,7 +8,7 @@ import {
   DeliverPolicy,
 } from "nats";
 import { log } from "../logger.js";
-import { encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
+import { assertTaskResult, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 const sc = NatsStringCodec();
 
@@ -111,6 +111,12 @@ export interface PullLoopOptions {
   onTask(delivery: TaskDelivery): void;
   /** Called for self-echo filtering etc. Return false to ack-and-drop the task. */
   accept?(task: ParsedTask): boolean;
+  /**
+   * Called for a payload that does not match the TaskPayload schema (`task.invalid` says
+   * why). Publish a failure result naming the field; the message is acked once this
+   * settles. Without it the message is terminated unanswered.
+   */
+  onInvalid?(task: ParsedTask): void | Promise<void>;
   fetchExpiresMs?: number;
   /** Delay after a fetch error before retrying. */
   retryDelayMs?: number;
@@ -165,6 +171,23 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
     const subjectTaskId = subject.split(".").pop() || "unknown";
     const parsed = parseTask(raw, subjectTaskId);
 
+    if (parsed.invalid) {
+      log.warn("Invalid task payload", { taskId: parsed.taskId, subject, error: parsed.invalid });
+      if (opts.accept && !opts.accept(parsed)) {
+        msg.ack();
+        return;
+      }
+      if (!opts.onInvalid) {
+        msg.term("invalid task payload");
+        return;
+      }
+      Promise.resolve()
+        .then(() => opts.onInvalid!(parsed))
+        .catch((err) => log.error("Failed to answer invalid task", { taskId: parsed.taskId, error: err instanceof Error ? err.message : String(err) }))
+        .finally(() => msg.ack());
+      return;
+    }
+
     // Reject empty/missing task text — don't waste an LLM call on nothing
     if (!parsed.task || parsed.task.trim().length === 0) {
       log.warn("Empty task payload — skipping", { taskId: parsed.taskId, subject, rawLength: raw.length });
@@ -198,6 +221,8 @@ export interface SubscribeOptions {
    * max_deliver=1 forbids re-running it. Publish a failure result so the dispatcher is not left waiting.
    */
   onLost(task: ParsedTask): void | Promise<void>;
+  /** A payload that does not match the TaskPayload schema; publish a failure result naming the field. */
+  onInvalid?(task: ParsedTask): void | Promise<void>;
   /** Override the ack_wait heartbeat window (tests only). */
   ackWaitMs?: number;
 }
@@ -274,6 +299,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
     freeSlots: opts.freeSlots,
     onTask: opts.onTask,
     accept: opts.accept,
+    onInvalid: opts.onInvalid,
   });
   return {
     wake: puller.wake,
@@ -324,6 +350,9 @@ export async function publishResult(
   result: TaskResult,
 ): Promise<void> {
   if (!js) throw new Error("NATS not connected — cannot publish result");
+
+  // Contract check in tests only (node --test sets NODE_TEST_CONTEXT); never at runtime.
+  if (process.env.NODE_TEST_CONTEXT) assertTaskResult(result);
 
   const prefix = _config?.natsResultsPrefix ?? "fleet-a.results";
   const subject = `${prefix}.${taskId}`;

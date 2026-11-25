@@ -93,6 +93,40 @@ describe("pull loop (fake fetch)", () => {
     assert.deepEqual(ran, []);
     await puller.stop();
   });
+
+  it("answers a payload that breaks the schema through onInvalid, then acks it; terms it without onInvalid (#6)", async () => {
+    const calls: string[] = [];
+    const mk = (body: string): PulledMsg => ({
+      data: new TextEncoder().encode(body), subject: "fleet-a.tasks.x.subj",
+      ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"), nak() {},
+    });
+    const run = async (onInvalid?: (t: TaskDelivery["task"]) => Promise<void>) => {
+      let served = false;
+      const ran: string[] = [];
+      const puller = startPullLoop({
+        freeSlots: () => 5,
+        fetch: async () => {
+          const batch = served ? [] : [mk(JSON.stringify({ taskId: "bad1", task: "x", runId: 42 }))];
+          served = true;
+          if (batch.length === 0) await sleep(50);
+          return (async function* () { yield* batch; })();
+        },
+        onTask: (d) => ran.push(d.task.task),
+        onInvalid,
+      });
+      await waitFor(() => calls.length > 0);
+      await puller.stop();
+      assert.deepEqual(ran, [], "an invalid task never runs");
+    };
+    const answered: string[] = [];
+    await run(async (t) => { await sleep(20); answered.push(`${t.taskId}: ${t.invalid}`); calls.push("answered"); });
+    await waitFor(() => calls.length === 2);
+    assert.deepEqual(answered, ["bad1: runId: must be string"]);
+    assert.deepEqual(calls, ["answered", "ack"], "acked only after the answer");
+    calls.length = 0;
+    await run();
+    assert.deepEqual(calls, ["term"]);
+  });
 });
 
 const NATS_BIN = process.env["NATS_SERVER_BIN"] ?? ["/usr/local/bin/nats-server", "/usr/bin/nats-server"].find(existsSync) ?? "nats-server";

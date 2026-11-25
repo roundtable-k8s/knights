@@ -53,3 +53,43 @@ test("buildResultPayload matches the recorded pi-knight result fixture byte for 
   );
   assert.equal(encodeResult(p), raw);
 });
+
+// ── Golden fixtures (packages/core/contract/fixtures, roundtable-k8s/knights#6) ──
+
+import { readFixture, resultFixtureDiff } from "@roundtable/knight-core/contract/fixtures";
+import { lostTaskResult } from "@roundtable/knight-core";
+
+const fx = { taskId: "t-1", knight: "galahad", durationMs: 5000, timestamp: "2026-11-24T10:00:05.000Z" };
+const run: TaskResult = {
+  result: "Done.",
+  success: true,
+  cost: 0.0125,
+  tokens: { input: 1200, output: 340, cacheRead: 800 },
+  model: "claude-opus-5-5",
+  toolCalls: 4,
+};
+
+test("fixture result.success: buildResultPayload matches", () => {
+  assert.deepEqual(resultFixtureDiff(buildResultPayload(run, fx), "result.success"), []);
+});
+
+test("fixture result.failure: buildResultPayload matches", () => {
+  const msg = "Agent produced no deliverable output";
+  assert.deepEqual(resultFixtureDiff(buildResultPayload({ ...run, success: false, result: msg, error: msg }, fx), "result.failure"), []);
+});
+
+test("fixture result.structured: buildResultPayload matches", () => {
+  const f = readFixture<{ result: string; prs: TaskResult["prs"] }>("result.structured");
+  const p = buildResultPayload({ ...run, result: f.result, prs: f.prs, verdict: "ship_it" }, fx);
+  assert.deepEqual(resultFixtureDiff(p, "result.structured"), []);
+});
+
+test("fixture result.refused-credits: a thrown 402 publishes refused credits", () => {
+  const p = buildResultPayload(failedTaskResult("402 This request requires more credits, or fewer max_tokens",
+    "openrouter/anthropic/claude-sonnet-4.5"), fx);
+  assert.deepEqual(resultFixtureDiff(p, "result.refused-credits"), []);
+});
+
+test("fixture result.lost: the lost-task result matches", () => {
+  assert.deepEqual(resultFixtureDiff(lostTaskResult({ taskId: "t-1", knight: "galahad", model: "claude-opus-5-5", timestamp: fx.timestamp }), "result.lost"), []);
+});
