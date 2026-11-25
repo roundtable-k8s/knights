@@ -198,16 +198,16 @@ test("plan reserve blocks at threshold and on rejection, releases after reset", 
   assert.equal(normalizeUtilization(0.4), 0.4);
   assert.equal(normalizeEpochMs(1_800_000_000), 1_800_000_000_000);
 
-  recordRateLimit("Gawain", { status: "allowed", rateLimitType: "seven_day", utilization: 0.5, resetsAt: (now + 3600_000) / 1000 }, now);
+  recordRateLimit({ status: "allowed", rateLimitType: "seven_day", utilization: 0.5, resetsAt: (now + 3600_000) / 1000 }, now);
   assert.equal(checkReserve(0.8, now).blocked, false);
 
-  recordRateLimit("Gawain", { status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.82, resetsAt: (now + 3600_000) / 1000 }, now);
+  recordRateLimit({ status: "allowed_warning", rateLimitType: "seven_day", utilization: 0.82, resetsAt: (now + 3600_000) / 1000 }, now);
   const r = checkReserve(0.8, now);
   assert.equal(r.blocked, true);
   assert.match(r.reason!, /seven_day window 82% used/);
   assert.equal(checkReserve(1, now).blocked, false); // reserve disabled
 
-  recordRateLimit("Gawain", { status: "rejected", rateLimitType: "five_hour", resetsAt: (now + 60_000) / 1000 }, now);
+  recordRateLimit({ status: "rejected", rateLimitType: "five_hour", resetsAt: (now + 60_000) / 1000 }, now);
   assert.match(checkReserve(1, now).reason!, /five_hour limit reached/);
   // after both windows reset, work resumes
   assert.equal(checkReserve(0.8, now + 3600_001).blocked, false);
@@ -322,12 +322,12 @@ test("refusing knight re-checks usage at an interval and recovers when it drops"
   let t = 1_800_000_000_000;
   const now = () => t;
   const resetsAt = (t + 3 * 3600_000) / 1000;
-  recordRateLimit("K", { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt }, t);
+  recordRateLimit({ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt }, t);
   let calls = 0;
   let usage = 0.9; // fake rate-limit source
   const probe = async () => {
     calls++;
-    recordRateLimit("K", { status: "allowed", rateLimitType: "five_hour", utilization: usage, resetsAt }, t);
+    recordRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: usage, resetsAt }, t);
   };
   let cleared = 0;
   const opts = { now, intervalMs: 300_000, onCleared: () => cleared++ };
@@ -352,7 +352,7 @@ test("a failed usage probe keeps the old reading", async () => {
   resetPlanLimits();
   const { checkReserveRefreshing } = await import("../src/plan-limits.js");
   const t = 1_800_000_000_000;
-  recordRateLimit("K", { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt: (t + 3600_000) / 1000 }, t);
+  recordRateLimit({ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt: (t + 3600_000) / 1000 }, t);
   const r = await checkReserveRefreshing(0.8, async () => { throw new Error("boom"); }, { now: () => t });
   assert.equal(r.blocked, true);
   resetPlanLimits();

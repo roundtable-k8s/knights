@@ -29,7 +29,7 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
   let exitCode: number | null = null;
   const aborters: Array<() => void> = [];
   const port = await freePort();
-  startHealthServer({ knightName: "T", port, registry: createKnightMetrics({ prefix: "test_knight" }).registry });
+  startHealthServer({ knightName: "T", port, registry: createKnightMetrics({ runtime: "test", knight: "T" }).registry });
 
   const mkMsg = (id: string): PulledMsg => ({
     data: new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })),

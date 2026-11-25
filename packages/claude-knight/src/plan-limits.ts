@@ -13,9 +13,9 @@ import client from "prom-client";
 import { registry } from "./runtime-metrics.js";
 
 const utilizationGauge = new client.Gauge({
-  name: "claude_knight_plan_utilization",
+  name: "roundtable_knight_plan_utilization",
   help: "Latest reported Claude plan utilization per window (0-1)",
-  labelNames: ["knight", "window"] as const,
+  labelNames: ["window"] as const,
   registers: [registry],
 });
 
@@ -40,7 +40,7 @@ export function normalizeEpochMs(t: number | undefined): number | undefined {
   return t < 1e12 ? t * 1000 : t;
 }
 
-export function recordRateLimit(knight: string, info: SDKRateLimitInfo, now = Date.now()): void {
+export function recordRateLimit(info: SDKRateLimitInfo, now = Date.now()): void {
   const window = info.rateLimitType ?? "unknown";
   const utilization = normalizeUtilization(info.utilization);
   windows.set(window, {
@@ -49,7 +49,7 @@ export function recordRateLimit(knight: string, info: SDKRateLimitInfo, now = Da
     resetsAtMs: normalizeEpochMs(info.resetsAt),
     updatedAtMs: now,
   });
-  if (utilization != null) utilizationGauge.labels(knight, window).set(utilization);
+  if (utilization != null) utilizationGauge.labels(window).set(utilization);
 }
 
 export interface ReserveCheck {

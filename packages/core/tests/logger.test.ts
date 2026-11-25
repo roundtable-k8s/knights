@@ -33,3 +33,13 @@ test("logger filters below the min level and falls back to info on unknown level
   log.info("yes2");
   assert.deepEqual(cap.lines().map((l) => l["msg"]), ["yes", "yes2"]);
 });
+
+test("logger lines carry the table, none when unset", () => {
+  const cap = capture();
+  setLogStream(cap.stream);
+  initLogger("k", "info", "dev");
+  log.info("a");
+  initLogger("k", "info");
+  log.info("b");
+  assert.deepEqual(cap.lines().map((l) => l["table"]), ["dev", "none"]);
+});

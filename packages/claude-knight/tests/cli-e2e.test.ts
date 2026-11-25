@@ -118,8 +118,8 @@ test("real claude -p: Bash runs, and the guardrail hook denies blocked commands"
   const blocked = await run("RUN_BASH: chmod 777 /tmp/ck-e2e-never");
   assert.equal(blocked.success, true, blocked.error);
   assert.match(blocked.result, /TOOL_RESULT \(error\): .*Blocked by knight safety policy: World-writable permissions/);
-  const metrics = await registry.getSingleMetricAsString("claude_knight_tool_calls_blocked_total");
-  assert.match(metrics, /tool="Bash",reason="World-writable permissions"\} 1/);
+  const metrics = await registry.getSingleMetricAsString("roundtable_knight_tool_calls_blocked_total");
+  assert.match(metrics, /tool="Bash",reason="World-writable permissions",table="none",knight="[^"]*",runtime="claude"\} 1/);
 });
 
 test("real claude -p: chain steps resume one session; introspect reads the transcripts", { skip, timeout: 120_000 }, async () => {

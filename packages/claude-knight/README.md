@@ -105,9 +105,9 @@ require `CLAUDE_CODE_OAUTH_TOKEN`, and still strips `ANTHROPIC_API_KEY`. It is n
 **Plan reserve.** In subscription mode the fleet shares plan windows with your own Claude Code and chat use.
 Claude Code reports window utilization; once any window passes `CLAUDE_PLAN_RESERVE` (default `0.8`) or is
 rejected, new tasks fail fast with `refused: "quota"` (plus the deprecated `usage_limited: true`) and the reset time, instead of using up the week. While refused, the knight re-checks real usage with one tiny Haiku call at most every 5 minutes and resumes once usage drops back under the reserve (no restart needed). `CLAUDE_PLAN_RESERVE` is re-read on every check.
-Utilization is exported as `claude_knight_plan_utilization{window=…}`.
+Utilization is exported as `roundtable_knight_plan_utilization{window=…}`.
 
-**Cost.** `cost` in results and `claude_knight_llm_cost_dollars_total` are at API list prices. With
+**Cost.** `cost` in results and `roundtable_knight_llm_cost_usd_total` are at API list prices. With
 `billing: "subscription"` that is the API-equivalent of the work, not money spent.
 
 **Terms.** Anthropic's terms allow a Claude plan's OAuth token (`claude setup-token`) to be used with the

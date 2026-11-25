@@ -8,7 +8,7 @@
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { containsSecret, log, redactSecrets } from "@roundtable/knight-core";
-import { toolCallsTotal, toolCallDuration, toolCallErrors, toolCallsBlocked } from "./runtime-metrics.js";
+import { toolCallsTotal, toolCallDuration, toolCallsBlocked } from "./runtime-metrics.js";
 
 // ─── Dangerous operation patterns ───────────────────────────────────
 
@@ -129,7 +129,6 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
     const tool = event.toolName;
     toolCallsTotal.inc({ tool, status: event.isError ? "error" : "success" });
     toolCallDuration.observe({ tool }, duration / 1000);
-    if (event.isError) toolCallErrors.inc({ tool });
     log.info("Tool call completed", {
       tool,
       toolCallId: event.toolCallId,
