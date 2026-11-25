@@ -22,9 +22,9 @@ export type TokenType = "input" | "output" | "cache_read" | "cache_write";
 export type KnightMetrics = ReturnType<typeof createKnightMetrics>;
 
 /**
- * The shared registry plus the metrics every runtime has. Runtime-only metrics
- * (pi: tool call duration; claude: usage limit hits) are registered by the runtime on
- * `registry`.
+ * The shared registry plus the metrics every runtime has, including tool call
+ * duration. Runtime-only metrics (claude: usage limit hits) are registered by the
+ * runtime on `registry`.
  */
 export function createKnightMetrics(opts: KnightMetricsOptions) {
   const prefix = METRIC_PREFIX;
