@@ -9,7 +9,7 @@
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
 import { BLOCK_REASON_PREFIX } from "./guardrails.js";
-import { toolCallsBlocked, toolCallsTotal } from "./runtime-metrics.js";
+import { toolCallDuration, toolCallsBlocked, toolCallsTotal } from "./runtime-metrics.js";
 import { recordRateLimit } from "./plan-limits.js";
 import { getActivity, isPrCommand, log, mergePrs, prsFromBash, type PRRef } from "@roundtable/knight-core";
 
@@ -21,6 +21,8 @@ export interface StreamState {
   apiKeySource?: string;
   /** tool_use id → tool name, for tool metrics in the cli runtime. */
   toolNames: Map<string, string>;
+  /** tool_use id → start time (ms), to time tool_use → tool_result in the cli runtime. */
+  toolStarts: Map<string, number>;
   /** tool_use id → tool name for activity events (both runtimes). */
   activityTools: Map<string, string>;
   /** tool_use id → Bash command, so a blocked call can be logged with its command. */
@@ -32,7 +34,7 @@ export interface StreamState {
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
+  return { lastAssistantText: "", toolNames: new Map(), toolStarts: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
 }
 
 export interface StreamContext {
@@ -111,6 +113,7 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
         for (const b of content) {
           if (b?.type !== "tool_use" || !b.id || !b.name) continue;
           state.toolNames.set(b.id, b.name);
+          state.toolStarts.set(b.id, Date.now());
           const cmd = (b.input as { command?: unknown } | undefined)?.command;
           if (b.name === "Bash" && typeof cmd === "string") state.bashCommands.set(b.id, cmd);
         }
@@ -149,6 +152,9 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
         const command = (b.tool_use_id && state.bashCommands.get(b.tool_use_id)) || "";
         if (b.tool_use_id) {
           state.toolNames.delete(b.tool_use_id);
+          const started = state.toolStarts.get(b.tool_use_id);
+          state.toolStarts.delete(b.tool_use_id);
+          if (started !== undefined) toolCallDuration.observe({ tool }, (Date.now() - started) / 1000);
           state.bashCommands.delete(b.tool_use_id);
         }
         toolCallsTotal.inc({ tool, status: b.is_error ? "error" : "success" });
@@ -163,7 +169,7 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
       break;
     }
     case "rate_limit_event":
-      recordRateLimit(config.knightName, msg.rate_limit_info);
+      recordRateLimit(msg.rate_limit_info);
       if (msg.rate_limit_info.status !== "allowed") {
         log.warn("Claude plan limit warning", { ...msg.rate_limit_info });
       }

@@ -40,7 +40,7 @@ export function normalizeEpochMs(t: number | undefined): number | undefined {
   return t < 1e12 ? t * 1000 : t;
 }
 
-export function recordRateLimit(_knight: string, info: SDKRateLimitInfo, now = Date.now()): void {
+export function recordRateLimit(info: SDKRateLimitInfo, now = Date.now()): void {
   const window = info.rateLimitType ?? "unknown";
   const utilization = normalizeUtilization(info.utilization);
   windows.set(window, {

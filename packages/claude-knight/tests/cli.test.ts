@@ -231,6 +231,8 @@ test("tool use: final text after the tool round trip, tool calls counted", async
   assert.equal(r.turns, 2);
   const m = await registry.getSingleMetricAsString("roundtable_knight_tool_calls_total");
   assert.match(m, /tool="Bash",status="success",table="none",knight="[^"]*",runtime="claude"\} 1/);
+  const d = await registry.getSingleMetricAsString("roundtable_knight_tool_call_duration_seconds");
+  assert.match(d, /_count\{tool="Bash",table="none",knight="[^"]*",runtime="claude"\} 1/);
 });
 
 test("usage limit: fast-fail with usage_limited and the reset time; plan reserve blocks", async () => {

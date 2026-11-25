@@ -7,7 +7,7 @@
 import type { HookCallbackMatcher, HookEvent, HookInput } from "@anthropic-ai/claude-agent-sdk";
 import { decidePreToolUse } from "./guardrails.js";
 import { log } from "@roundtable/knight-core";
-import { toolCallsBlocked, toolCallsTotal } from "./runtime-metrics.js";
+import { toolCallDuration, toolCallsBlocked, toolCallsTotal } from "./runtime-metrics.js";
 
 export { BLOCKED_BASH_PATTERNS, checkBashCommand } from "./guardrails.js";
 
@@ -19,7 +19,20 @@ async function preToolUse(input: HookInput) {
   return decision.output;
 }
 
+/** tool_use_id → start time (ms); filled by PreToolUse, drained by PostToolUse[Failure]. */
+const toolStarts = new Map<string, number>();
+
+async function startTimer(input: HookInput) {
+  if (input.hook_event_name === "PreToolUse") toolStarts.set(input.tool_use_id, Date.now());
+  return {};
+}
+
 async function postToolUse(input: HookInput) {
+  if (input.hook_event_name === "PostToolUse" || input.hook_event_name === "PostToolUseFailure") {
+    const started = toolStarts.get(input.tool_use_id);
+    toolStarts.delete(input.tool_use_id);
+    if (started !== undefined) toolCallDuration.observe({ tool: input.tool_name }, (Date.now() - started) / 1000);
+  }
   if (input.hook_event_name === "PostToolUse") {
     toolCallsTotal.inc({ tool: input.tool_name, status: "success" });
   } else if (input.hook_event_name === "PostToolUseFailure") {
@@ -30,7 +43,7 @@ async function postToolUse(input: HookInput) {
 
 export function buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   return {
-    PreToolUse: [{ matcher: "Bash", hooks: [preToolUse] }],
+    PreToolUse: [{ hooks: [startTimer] }, { matcher: "Bash", hooks: [preToolUse] }],
     PostToolUse: [{ hooks: [postToolUse] }],
     PostToolUseFailure: [{ hooks: [postToolUse] }],
   };

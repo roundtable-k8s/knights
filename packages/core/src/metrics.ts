@@ -92,7 +92,7 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     tasksTotal.labels("lost").inc();
   }
 
-  /** Count one task's token usage; zero-valued types are skipped. */
+  /** Count one task's token usage; token types the runtime did not report are skipped. */
   function recordTokens(model: string, t: { input: number; output: number; cacheRead?: number; cacheWrite?: number }): void {
     const types: [TokenType, number | undefined][] = [
       ["input", t.input],
