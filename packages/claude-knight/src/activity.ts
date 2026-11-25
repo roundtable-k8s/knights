@@ -4,7 +4,7 @@
  * Never stored in JetStream. Every preview is truncated and redacted here, before
  * anything is published. Publish failures are logged and never fail a task.
  */
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 export const ACTIVITY_VERSION = 1;
 export const MAX_EVENT_BYTES = 8 * 1024;

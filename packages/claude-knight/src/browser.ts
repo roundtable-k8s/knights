@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 export function browserEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env["BROWSER_ENABLED"] === "true";

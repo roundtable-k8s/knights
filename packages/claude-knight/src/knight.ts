@@ -21,7 +21,7 @@ import { buildChildEnv, checkRuntime } from "./auth.js";
 import { buildCliInvocation, makeTaskDir, runClaudeCli, writeInvocationFiles, type CliInvocation } from "./cli-runner.js";
 import { buildHooks } from "./hooks.js";
 import { DISALLOWED_TOOLS, EXTRA_BUILTINS, loadMcpServers } from "./mcp-config.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { buildAppendPrompt } from "./prompt.js";
 import { linkSkills } from "./skills.js";
 import { applyMessage, newStreamState } from "./stream.js";

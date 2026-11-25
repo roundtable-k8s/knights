@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 /**
  * Expose the operator's skill tree to Claude Code.

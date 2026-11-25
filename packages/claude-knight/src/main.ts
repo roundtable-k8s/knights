@@ -6,7 +6,7 @@ import { createShutdown, installSignalHandlers } from "./drain.js";
 import { setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer } from "./health.js";
 import { setIntrospectActiveTasks, startIntrospect } from "./introspect.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { initLogger, log } from "./logger.js";
+import { initLogger, log } from "@roundtable/knight-core";
 import * as metrics from "./metrics.js";
 import { connectNats, drain, getConnection, HEARTBEAT_MS, StringCodec, publishResult, subscribe, type TaskDelivery } from "./nats.js";
 import { checkReserveRefreshing } from "./plan-limits.js";

@@ -7,7 +7,7 @@
  * runner, so extensions are the supported way to intercept tool execution.
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { toolCallsTotal, toolCallDuration, toolCallErrors, toolCallsBlocked } from "./metrics.js";
 
 // ─── Dangerous operation patterns ───────────────────────────────────

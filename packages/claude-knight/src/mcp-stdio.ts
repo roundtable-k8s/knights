@@ -13,7 +13,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import { roundtableTools, configureTools } from "./tools.js";
 import { connectNats, drain } from "./nats.js";
-import { initLogger, log, setLogStream } from "./logger.js";
+import { initLogger, log, setLogStream } from "@roundtable/knight-core";
 
 export const MCP_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "roundtable", version: "0.1.0" };

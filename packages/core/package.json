@@ -15,5 +15,18 @@
     "@types/node": "^22.19.19",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3"
-  }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./logger": {
+      "types": "./dist/logger.d.ts",
+      "default": "./dist/logger.js"
+    }
+  },
+  "files": [
+    "dist"
+  ]
 }

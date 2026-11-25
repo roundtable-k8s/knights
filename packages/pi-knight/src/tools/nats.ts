@@ -13,7 +13,7 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getJetStream, getConnection, StringCodec } from "../nats.js";
-import { log } from "../logger.js";
+import { log } from "@roundtable/knight-core";
 
 const sc = StringCodec();
 

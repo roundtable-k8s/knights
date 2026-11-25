@@ -8,7 +8,7 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { getConnection, getJetStream, StringCodec } from "./nats.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
 const sc = StringCodec();

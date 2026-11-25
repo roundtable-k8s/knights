@@ -1,0 +1,40 @@
+export type Env = NodeJS.ProcessEnv;
+
+/** The config both runtimes share: the env contract the operator sets on every knight pod. */
+export interface BaseKnightConfig {
+  knightName: string;
+  natsUrl: string;
+  natsResultsPrefix: string;
+  /** Port for the health and metrics HTTP server (METRICS_PORT). */
+  metricsPort: number;
+  logLevel: string;
+  taskTimeoutMs: number;
+  /** Max wait for in-flight tasks after SIGTERM. Default taskTimeoutMs + 60s, matching the operator's terminationGracePeriodSeconds. */
+  drainTimeoutMs: number;
+}
+
+export function requireEnv(env: Env, name: string): string {
+  const val = env[name];
+  if (!val) throw new Error(`Required environment variable ${name} is not set`);
+  return val;
+}
+
+export function intEnv(env: Env, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw == null || raw === "") return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
+  const taskTimeoutMs = intEnv(env, "TASK_TIMEOUT_MS", 1_800_000);
+  return {
+    knightName: requireEnv(env, "KNIGHT_NAME"),
+    natsUrl: env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
+    natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
+    metricsPort: intEnv(env, "METRICS_PORT", 3000),
+    logLevel: env["LOG_LEVEL"] ?? "info",
+    taskTimeoutMs,
+    drainTimeoutMs: intEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
+  };
+}

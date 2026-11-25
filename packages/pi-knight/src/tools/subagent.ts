@@ -10,7 +10,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { createAgentSession, DefaultResourceLoader, defineTool, type AgentSession } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { resolveModel, createTrustedSettingsManager } from "../model.js";
-import { log } from "../logger.js";
+import { log } from "@roundtable/knight-core";
 import * as metrics from "../metrics.js";
 
 const SpawnParams = Type.Object({

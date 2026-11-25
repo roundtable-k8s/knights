@@ -5,7 +5,7 @@ import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { KnightConfig } from "./config.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 
 /**
  * Built-in tools that need a human, schedule work outside the task, or belong to

@@ -26,7 +26,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { buildChildEnv } from "./auth.js";
 import type { KnightConfig } from "./config.js";
 import { DISALLOWED_TOOLS, EXTRA_BUILTINS, loadMcpServers } from "./mcp-config.js";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { buildAppendPrompt } from "./prompt.js";
 import { roundtableToolIds } from "./tools.js";
 

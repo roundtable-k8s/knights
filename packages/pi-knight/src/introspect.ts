@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import { getConnection } from "./nats.js";
 import { findSession, getActiveSession } from "./knight.js";
 import { listInflight, natsPrefix, podIdentity } from "./activity.js";

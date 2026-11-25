@@ -7,7 +7,7 @@ import {
   AckPolicy,
   DeliverPolicy,
 } from "nats";
-import { log } from "./logger.js";
+import { log } from "@roundtable/knight-core";
 import type { KnightConfig } from "./config.js";
 
 const sc = NatsStringCodec();
