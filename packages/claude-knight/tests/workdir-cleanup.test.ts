@@ -18,15 +18,15 @@ function readonlyTree(base: string): string {
   return base;
 }
 
-test("forceRemoveTree removes nested read-only dirs and files", () => {
+test("forceRemoveTree removes nested read-only dirs and files", async () => {
   const root = mkdtempSync(join(tmpdir(), "ck-rm-"));
   const dir = readonlyTree(join(root, "task"));
-  forceRemoveTree(dir);
+  await forceRemoveTree(dir);
   assert.equal(existsSync(dir), false);
   rmSync(root, { recursive: true, force: true });
 });
 
-test("forceRemoveTree leaves symlink targets intact and unchmodded", () => {
+test("forceRemoveTree leaves symlink targets intact and unchmodded", async () => {
   const root = mkdtempSync(join(tmpdir(), "ck-rm-"));
   const protectedDir = join(root, ".claude");
   const protectedFile = join(root, "CLAUDE.md");
@@ -39,7 +39,7 @@ test("forceRemoveTree leaves symlink targets intact and unchmodded", () => {
   symlinkSync(protectedDir, join(dir, ".claude"));
   symlinkSync(protectedFile, join(dir, "CLAUDE.md"));
 
-  forceRemoveTree(dir);
+  await forceRemoveTree(dir);
 
   assert.equal(existsSync(dir), false);
   assert.equal(statSync(protectedDir).mode & 0o777, 0o555);
@@ -50,7 +50,7 @@ test("forceRemoveTree leaves symlink targets intact and unchmodded", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("sweepStaleWorkDirs removes only old dirs", () => {
+test("sweepStaleWorkDirs removes only old dirs", async () => {
   const root = mkdtempSync(join(tmpdir(), "ck-sweep-"));
   const config = loadConfig({ KNIGHT_NAME: "Gawain", SUBSCRIBE_TOPICS: "rt.tasks.x.>", KNIGHT_WORKDIR: root });
   const work = join(root, "work");
@@ -59,8 +59,23 @@ test("sweepStaleWorkDirs removes only old dirs", () => {
   const past = new Date(Date.now() - 48 * 3600 * 1000);
   utimesSync(old, past, past);
 
-  assert.equal(sweepStaleWorkDirs(config), 1);
+  assert.equal(await sweepStaleWorkDirs(config), 1);
   assert.equal(existsSync(old), false);
   assert.equal(existsSync(join(work, "fresh")), true);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("forceRemoveTree does not block the event loop while it removes a big tree (#75)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ck-big-"));
+  for (let i = 0; i < 40; i++) {
+    const sub = join(dir, `d${i}`);
+    mkdirSync(sub);
+    for (let j = 0; j < 50; j++) writeFileSync(join(sub, `f${j}`), "x");
+  }
+  let ticks = 0;
+  const t = setInterval(() => ticks++, 0);
+  await forceRemoveTree(dir);
+  clearInterval(t);
+  assert.equal(existsSync(dir), false);
+  assert.ok(ticks > 0, "timers (task heartbeats) still ran during the removal");
 });

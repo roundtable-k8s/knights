@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { connect, type NatsConnection } from "@nats-io/transport-node";
 import { AckPolicy, DeliverPolicy, jetstream, jetstreamManager } from "@nats-io/jetstream";
-import { connectNats, drain, publishResult, startPullLoop, subscribe, type NatsSubscribeConfig, type PulledMsg, type TaskDelivery } from "../src/nats/index.ts";
+import { connectNats, drain, publishResult, startPullLoop, subscribe, TaskTracker, type NatsSubscribeConfig, type PulledMsg, type TaskDelivery } from "../src/nats/index.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(cond: () => boolean, ms = 8000) {
@@ -21,7 +21,7 @@ describe("pull loop (fake fetch)", () => {
   const msg = (id: string): PulledMsg => ({
     data: new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id })),
     subject: `fleet-a.tasks.x.${id}`,
-    ack() {}, working() {}, term() {}, nak() {},
+    ack() {}, working() {}, term() {},
   });
 
   it("requests exactly the number of free slots and nothing when full", async () => {
@@ -49,32 +49,34 @@ describe("pull loop (fake fetch)", () => {
     await puller.stop();
   });
 
-  it("naks, without handling, messages delivered from an in-flight fetch after stop", async () => {
+  it("runs, never naks, a task an in-flight fetch delivers after stop (max_deliver 1 would lose it) (#75)", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
     let fetching!: () => void;
     const inFetch = new Promise<void>((r) => { fetching = r; });
-    const calls: string[] = [];
     const handled: string[] = [];
-    const m: PulledMsg = { ...msg("late"), nak: () => calls.push("nak") };
+    let fetches = 0;
     const puller = startPullLoop({
       freeSlots: () => 1,
-      fetch: async () => (async function* () { fetching(); await gate; yield m; })(),
+      fetch: async () => { fetches++; return (async function* () { fetching(); await gate; yield msg("late"); })(); },
       onTask: (d) => { handled.push(d.task.taskId); },
     });
     await inFetch;
-    const stopping = puller.stop();
+    let stopped = false;
+    const stopping = puller.stop().then(() => { stopped = true; });
+    await sleep(30);
+    assert.equal(stopped, false, "stop() waits for the outstanding pull request to end");
     release();
     await stopping;
-    assert.deepEqual(handled, []);
-    assert.deepEqual(calls, ["nak"]);
+    assert.deepEqual(handled, ["late"]);
+    assert.equal(fetches, 1, "no new pull request after stop()");
   });
 
   it("terms empty payloads and acks filtered ones without running them", async () => {
     const calls: string[] = [];
     const mk = (body: string): PulledMsg => ({
       data: new TextEncoder().encode(body), subject: "fleet-a.tasks.x.1",
-      ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"), nak() {},
+      ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"),
     });
     let served = false;
     const ran: string[] = [];
@@ -99,7 +101,7 @@ describe("pull loop (fake fetch)", () => {
     const calls: string[] = [];
     const mk = (body: string): PulledMsg => ({
       data: new TextEncoder().encode(body), subject: "fleet-a.tasks.x.subj",
-      ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"), nak() {},
+      ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"),
     });
     const run = async (onInvalid?: (t: TaskDelivery["task"]) => Promise<void>) => {
       let served = false;
@@ -127,6 +129,23 @@ describe("pull loop (fake fetch)", () => {
     calls.length = 0;
     await run();
     assert.deepEqual(calls, ["term"]);
+  });
+});
+
+describe("TaskTracker (#75)", () => {
+  it("knows active tasks, remembers finished ones for ttlMs, and stays bounded", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 2, () => now);
+    t.started("a");
+    assert.equal(t.state("a"), "active");
+    t.finished("a");
+    assert.equal(t.state("a"), "finished");
+    assert.equal(t.state("x"), undefined);
+    now = 1500;
+    assert.equal(t.state("a"), undefined, "forgotten after ttlMs");
+    for (const id of ["b", "c", "d"]) { t.started(id); t.finished(id); }
+    assert.equal(t.state("b"), undefined, "oldest dropped beyond max");
+    assert.equal(t.state("d"), "finished");
   });
 });
 
@@ -182,17 +201,18 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     let active = 0;
     const deliveries: TaskDelivery[] = [];
     const lost: string[] = [];
+    const onLost = async (t: TaskDelivery["task"]) => {
+      lost.push(t.taskId);
+      await publishResult(t.taskId, {
+        task_id: t.taskId, knight: "Tester", success: false, result: "lost", error: "lost", lost: true,
+        duration_ms: 0, cost: 0, tokens: { input: 0, output: 0 }, model: "m", timestamp: new Date().toISOString(),
+      });
+    };
     const puller = await subscribe(config, {
       ackWaitMs: 1000,
       freeSlots: () => 1 - active,
       onTask: (d) => { active++; deliveries.push(d); },
-      onLost: async (t) => {
-        lost.push(t.taskId);
-        await publishResult(t.taskId, {
-          task_id: t.taskId, knight: "Tester", success: false, result: "lost", error: "lost", lost: true,
-          duration_ms: 0, cost: 0, tokens: { input: 0, output: 0 }, model: "m", timestamp: new Date().toISOString(),
-        });
-      },
+      onLost,
     });
 
     await waitFor(() => deliveries.length === 1);
@@ -219,7 +239,11 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     await waitFor(() => deliveries.length === 2);
     assert.equal(deliveries[1]!.task.taskId, "b");
 
-    // "crash": task b is never acked and never heartbeats -> reported, not silently lost or re-run
+    // "crash": the pod running b dies (no heartbeat, no ack); the replacement pod reports it,
+    // b is neither silently lost nor re-run. (The pod that runs a task never reports it lost itself.)
+    await puller.stop();
+    const nc2 = await connect({ servers: config.natsUrl });
+    const replacement = await subscribe(config, { connection: nc2, freeSlots: () => 0, onTask: (d) => deliveries.push(d), onLost });
     await waitFor(() => lost.length === 1, 10_000);
     assert.deepEqual(lost, ["b"]);
     const results = await jetstream(admin).consumers.get("TASKS", await (async () => {
@@ -229,7 +253,8 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     const m = await results.next({ expires: 2000 });
     assert.equal(JSON.parse(new TextDecoder().decode(m!.data)).error, "lost");
     assert.equal(deliveries.filter((d) => d.task.taskId === "b").length, 1, "never redelivered");
-    await puller.stop();
+    await replacement.stop();
+    await nc2.close();
   });
 
   it("sends in-progress heartbeats for a running task and acks it exactly once (#8)", async () => {

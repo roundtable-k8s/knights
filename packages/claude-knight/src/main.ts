@@ -46,7 +46,7 @@ export async function main(): Promise<void> {
   // Introspect in this process reads the same config dir the Claude Code child
   // processes write to.
   process.env["CLAUDE_CONFIG_DIR"] = config.claudeConfigDir;
-  sweepStaleWorkDirs(config);
+  await sweepStaleWorkDirs(config);
 
   log.info("Claude-Knight starting", {
     model: config.claudeModel ?? "claude-code-default",
@@ -130,6 +130,9 @@ export async function main(): Promise<void> {
     metrics.activeTasks.labels().set(n);
   };
 
+  // Abort handles of running tasks, for the forced shutdown path.
+  const inflight = new Set<AbortController>();
+
   async function processTask(delivery: TaskDelivery): Promise<void> {
     const parsed = delivery.task;
     // Skills may have changed (git-sync): re-read and re-register the service if so.
@@ -163,6 +166,7 @@ export async function main(): Promise<void> {
     const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    inflight.add(controller);
 
     try {
       // Plan reserve: refuse new work before spawning Claude Code at all.
@@ -220,6 +224,7 @@ export async function main(): Promise<void> {
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
       clearTimeout(timer);
+      inflight.delete(controller);
       clearInterval(heartbeat);
       activity.close();
       knightService?.markTaskFinished();
@@ -269,6 +274,11 @@ export async function main(): Promise<void> {
     stopPulling: async () => void (await puller?.stop()),
     getActive: () => activeCount,
     maxWaitMs: config.drainTimeoutMs,
+    // Grace period over with tasks still running: abort them so each publishes a failure
+    // result (and acks) before exit, instead of being dead-lettered as lost later.
+    abortInflight: () => {
+      for (const c of inflight) c.abort();
+    },
     drainNats: drain,
     cleanup: async () => {
       metrics.natsConnected.labels().set(0);

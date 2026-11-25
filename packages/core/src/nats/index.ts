@@ -89,8 +89,7 @@ export interface PulledMsg {
   ack(): void;
   working(): void;
   term(reason?: string): void;
-  /** Hand the message back for redelivery without running it. */
-  nak(): void;
+  // No nak(): with max_deliver 1 a nak'd task is never delivered again (MAX_DELIVERIES at once), i.e. lost.
 }
 
 /** A task taken from the stream. It stays un-acked until `ack()`; call `working()` to extend its ack window. */
@@ -125,7 +124,12 @@ export interface PullLoopOptions {
 export interface TaskPuller {
   /** Call when a slot frees so the loop re-checks capacity immediately. */
   wake(): void;
-  /** Stop pulling. Messages already handed to onTask are unaffected. */
+  /**
+   * Stop pulling. Resolves once the outstanding pull request has ended (at most fetchExpiresMs);
+   * anything it still delivers is handed to onTask like any other task (max_deliver 1 means it can
+   * never be delivered again), so the drain that follows waits for it. Tasks already handed to
+   * onTask are unaffected.
+   */
   stop(): Promise<void>;
 }
 
@@ -152,9 +156,11 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
       }
       try {
         const msgs = await opts.fetch(free, opts.fetchExpiresMs ?? FETCH_EXPIRES_MS);
+        // Read the pull request to its end even after stop(): the server can still deliver to it,
+        // and an un-run, un-acked message there is lost for good (max_deliver 1). It asked for at
+        // most `free` messages, so taking them keeps within the slots that were free.
         for await (const msg of msgs) {
-          // A fetch already in flight when we began draining must not start new work.
-          if (stopped) { msg.nak(); continue; }
+          if (stopped) log.info("Task delivered while stopping — running it before exit", { subject: msg.subject });
           handleMsg(msg);
         }
       } catch (err) {
@@ -229,6 +235,10 @@ export interface SubscribeOptions {
   /** A payload that does not match the TaskPayload schema; publish a failure result naming the field. */
   onInvalid?(task: ParsedTask): void | Promise<void>;
   /**
+   * Connection to use instead of the one from connectNats (tests: a second replica in one process).
+   */
+  connection?: NatsConnection;
+  /**
    * Override the ack_wait heartbeat window (tests only). Only affects a consumer created by the
    * bindConsumer fallback; an operator-owned consumer keeps its own ack_wait.
    */
@@ -299,10 +309,12 @@ export async function bindConsumer(
 
 /** Bind to the operator-owned durable pull consumer, start the pull loop and the lost-task watcher. */
 export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOptions): Promise<TaskPuller> {
-  if (!nc || !js) throw new Error("NATS not connected");
-  _config = config;
+  const conn = opts.connection ?? nc;
+  if (!conn) throw new Error("NATS not connected");
+  if (!opts.connection) _config = config;
+  const client = jetstream(conn);
 
-  const jsm: JetStreamManager = await jetstreamManager(nc);
+  const jsm: JetStreamManager = await jetstreamManager(conn);
 
   const durableName = `${config.knightName}-consumer`;
   const ackWaitMs = opts.ackWaitMs ?? ACK_WAIT_MS;
@@ -317,12 +329,29 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
     ack_wait: ackWaitMs * 1_000_000, // nanoseconds
   });
 
-  const pullConsumer = await js.consumers.get(config.natsTasksStream, durableName);
-  const stopWatch = watchLostTasks(jsm, config.natsTasksStream, durableName, opts.onLost);
+  const pullConsumer = await client.consumers.get(config.natsTasksStream, durableName);
+  const tracker = new TaskTracker();
+  const stopWatch = watchLostTasks(conn, jsm, {
+    stream: config.natsTasksStream,
+    durable: durableName,
+    resultsPrefix: config.natsResultsPrefix,
+    tracker,
+    onLost: opts.onLost,
+  });
   const puller = startPullLoop({
     fetch: (max, expires) => pullConsumer.fetch({ max_messages: max, expires }),
     freeSlots: opts.freeSlots,
-    onTask: opts.onTask,
+    onTask: (d) => {
+      const id = d.task.taskId;
+      tracker.started(id);
+      opts.onTask({
+        ...d,
+        ack: () => {
+          tracker.finished(id);
+          d.ack();
+        },
+      });
+    },
     accept: opts.accept,
     onInvalid: opts.onInvalid,
   });
@@ -336,33 +365,116 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
 }
 
 /**
+ * Task ids this process is running or finished recently. A MAX_DELIVERIES advisory for one of
+ * them is not a lost task: this process answers it (or already did) itself. Typical cause: the
+ * event loop was blocked long enough to miss heartbeats, so the server gave up on the message
+ * while the task was still running here.
+ */
+export class TaskTracker {
+  private readonly active = new Map<string, number>();
+  private readonly done = new Map<string, number>();
+  constructor(
+    private readonly ttlMs = 15 * 60_000,
+    private readonly max = 1_000,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  started(taskId: string): void {
+    this.active.set(taskId, (this.active.get(taskId) ?? 0) + 1);
+  }
+
+  finished(taskId: string): void {
+    const n = this.active.get(taskId) ?? 0;
+    if (n <= 1) this.active.delete(taskId);
+    else this.active.set(taskId, n - 1);
+    this.done.delete(taskId); // re-insert: Map order = finish order, oldest first
+    this.done.set(taskId, this.now());
+    this.prune();
+  }
+
+  /** "active", "finished" (within ttlMs) or undefined when this process does not know the task. */
+  state(taskId: string): "active" | "finished" | undefined {
+    if (this.active.has(taskId)) return "active";
+    this.prune();
+    return this.done.has(taskId) ? "finished" : undefined;
+  }
+
+  private prune(): void {
+    const cutoff = this.now() - this.ttlMs;
+    for (const [id, at] of this.done) {
+      if (at >= cutoff && this.done.size <= this.max) break;
+      this.done.delete(id);
+    }
+  }
+}
+
+/**
+ * The last result published for a task on `<resultsPrefix>.<taskId>`, if a stream stores it.
+ * Undefined when there is none or it cannot be looked up (no results stream, no permission).
+ */
+export async function findResult(
+  jsm: Pick<JetStreamManager, "streams">,
+  resultsPrefix: string,
+  taskId: string,
+): Promise<{ success: boolean } | undefined> {
+  const subject = `${resultsPrefix}.${taskId}`;
+  try {
+    const stream = await jsm.streams.find(subject);
+    const m = await jsm.streams.getMessage(stream, { last_by_subj: subject });
+    if (!m) return undefined;
+    const r = m.json<{ success?: unknown }>();
+    return { success: r.success === true };
+  } catch {
+    return undefined;
+  }
+}
+
+interface WatchLostOptions {
+  stream: string;
+  durable: string;
+  resultsPrefix: string;
+  tracker: TaskTracker;
+  onLost: (task: ParsedTask) => void | Promise<void>;
+}
+
+/**
  * Redelivery policy: max_deliver=1, so a task that was handed to a knight but never acked
  * (crash, OOM, hang past the heartbeat window) is not re-run. JetStream publishes a
  * MAX_DELIVERIES advisory for it; we load the original message by stream sequence and
  * report a failure result instead of losing it silently. The advisory subscription uses a
- * queue group so only one replica of the knight reports each lost task.
+ * queue group so only one replica of the knight reports each lost task — but any replica,
+ * so it can be about a task another replica (or this one) is running or has finished. Hence
+ * no lost result for a task this process is running or recently finished, nor for one that
+ * already has a successful result.
  */
-function watchLostTasks(
-  jsm: JetStreamManager,
-  stream: string,
-  durable: string,
-  onLost: (task: ParsedTask) => void | Promise<void>,
-): () => void {
-  const sub = nc!.subscribe(`$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.${stream}.${durable}`, { queue: durable });
+function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLostOptions): () => void {
+  const sub = conn.subscribe(`$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.${o.stream}.${o.durable}`, { queue: o.durable });
   (async () => {
     for await (const m of sub) {
       try {
         const adv = m.json<{ stream_seq?: number }>();
         if (typeof adv.stream_seq !== "number") continue;
-        const stored = await jsm.streams.getMessage(stream, { seq: adv.stream_seq });
+        const stored = await jsm.streams.getMessage(o.stream, { seq: adv.stream_seq });
         if (!stored) {
           log.warn("Lost task no longer in the stream — cannot report it", { seq: adv.stream_seq });
           continue;
         }
         const subjectTaskId = stored.subject.split(".").pop() || "unknown";
         const parsed = parseTask(stored.string(), subjectTaskId);
+        const local = o.tracker.state(parsed.taskId);
+        if (local) {
+          log.warn("Ack deadline missed for a task this pod answers itself — not reporting it lost (heartbeats late? blocked event loop?)", {
+            taskId: parsed.taskId, seq: adv.stream_seq, state: local,
+          });
+          continue;
+        }
+        const existing = await findResult(jsm, o.resultsPrefix, parsed.taskId);
+        if (existing?.success) {
+          log.warn("Ack deadline missed for a task that already has a successful result — not reporting it lost", { taskId: parsed.taskId, seq: adv.stream_seq });
+          continue;
+        }
         log.warn("Task delivered but never acked — reporting failure", { taskId: parsed.taskId, seq: adv.stream_seq });
-        await onLost(parsed);
+        await o.onLost(parsed);
       } catch (err) {
         log.error("Failed to handle lost-task advisory", { error: err instanceof Error ? err.message : String(err) });
       }
