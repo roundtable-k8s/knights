@@ -1,8 +1,8 @@
 import http from "node:http";
 import type { KnightConfig } from "./config.js";
-import { handleIntrospect, type IntrospectRequest } from "./introspect.js";
+import { introspectOptions } from "./session-source.js";
 import { registry } from "./metrics.js";
-import { getStatus as getNatsStatus } from "@roundtable/knight-core";
+import { getStatus as getNatsStatus, handleIntrospect, introspectRequestFromQuery } from "@roundtable/knight-core";
 
 let server: http.Server | null = null;
 let skillCount = 0;
@@ -63,11 +63,7 @@ export function startHealthServer(config: KnightConfig): void {
           });
         }
         case "/introspect": {
-          const type = (url.searchParams.get("type") ?? "stats") as IntrospectRequest["type"];
-          const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
-          const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
-          const id = url.searchParams.get("id") ?? undefined;
-          return json(200, await handleIntrospect({ type, limit, offset, id }, config));
+          return json(200, await handleIntrospect(introspectRequestFromQuery(url.searchParams), introspectOptions(config)));
         }
         case "/metrics":
           res.writeHead(200, { "Content-Type": registry.contentType });

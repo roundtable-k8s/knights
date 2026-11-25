@@ -1,12 +1,12 @@
 import { loadConfig } from "./config.js";
-import { initLogger, log, connectNats, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
+import { initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, TaskActivity, type TaskDelivery } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { createShutdown, installSignalHandlers } from "./drain.js";
 import { startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining } from "./health.js";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
-import { startIntrospect } from "./introspect.js";
+import { introspectOptions } from "./session-source.js";
 import { resolveModel } from "./model.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   metrics.natsConnected.labels(config.knightName).set(1);
 
   // Start introspection responder (zero-cost session queries)
-  startIntrospect(config);
+  startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
 
   // Subscribe to task stream
 

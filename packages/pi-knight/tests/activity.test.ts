@@ -10,9 +10,10 @@ process.env.POD_NAME = "pod-a";
 process.env.NODE_NAME = "node-1";
 
 // Generic activity behaviour (bounds, redaction, rate limit, schema) is tested in packages/core.
-const { TaskActivity, listInflight, MAX_EVENT_BYTES, MAX_ARGS_CHARS, MAX_PREVIEW_CHARS } = await import("@roundtable/knight-core");
+const { TaskActivity, listInflight, MAX_EVENT_BYTES, MAX_ARGS_CHARS, MAX_PREVIEW_CHARS, handleIntrospect: coreIntrospect } = await import("@roundtable/knight-core");
 const { executeTask, onSessionEvent, __setSessionFactoryForTests } = await import("../src/knight.ts");
-const { handleIntrospect } = await import("../src/introspect.ts");
+const { introspectOptions } = await import("../src/session-source.ts");
+const handleIntrospect = (req: any, cfg: any) => coreIntrospect(req, introspectOptions(cfg));
 
 const config = {
   knightName: "k", knightModel: "x/y", natsResultsPrefix: "rt.results",
