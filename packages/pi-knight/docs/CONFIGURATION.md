@@ -134,6 +134,7 @@ Pi-knight registers custom tools alongside Pi SDK's built-in coding tools:
 | `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` | File I/O and shell | Pi SDK built-in |
 | `nats_publish` | Fire-and-forget NATS message | pi-knight custom |
 | `nats_request` | Cross-knight collaboration (send + wait) | pi-knight custom |
+| `find_knights` | List the knights at your table from their agent cards | knight-core roster |
 
 ## Session Persistence
 

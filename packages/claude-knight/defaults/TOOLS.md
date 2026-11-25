@@ -10,7 +10,8 @@
 - **TodoWrite**: track multi-step work within a task
 
 ## Round Table Tools (MCP server "roundtable")
-- **mcp__roundtable__nats_request**: send a task to another knight in your table and wait for the answer
+- **mcp__roundtable__find_knights**: who at your table can do X (agent cards: domain, skills, ready/suspended/live)
+- **mcp__roundtable__nats_request**: send a task to another knight in your table and wait for the answer (the name is enough; the domain comes from its card)
 - **mcp__roundtable__nats_publish**: fire-and-forget alerts/reports (NOT your task result — that is published for you)
 
 Extra MCP servers (vault, fetch, kagent tools, …) appear as mcp__<server>__<tool> when configured.

@@ -17,6 +17,8 @@ export interface BaseKnightConfig {
   memoryDir?: string;
   /** Read-only root of every knight's memory (KNIGHT_MEMORY_ROOT). */
   memoryRoot?: string;
+  /** NATS KV bucket with the table's agent cards (KNIGHT_CARDS_BUCKET); unset on older operators. */
+  cardsBucket?: string;
 }
 
 export function requireEnv(env: Env, name: string): string {
@@ -45,5 +47,6 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     drainTimeoutMs: intEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
     ...(env["KNIGHT_MEMORY_DIR"] ? { memoryDir: env["KNIGHT_MEMORY_DIR"] } : {}),
     ...(env["KNIGHT_MEMORY_ROOT"] ? { memoryRoot: env["KNIGHT_MEMORY_ROOT"] } : {}),
+    ...(env["KNIGHT_CARDS_BUCKET"]?.trim() ? { cardsBucket: env["KNIGHT_CARDS_BUCKET"].trim() } : {}),
   };
 }

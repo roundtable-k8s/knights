@@ -17,7 +17,7 @@ contract, NATS consumer, result payload, `/health` `/ready` `/metrics` `/introsp
 ```
 NATS task ──► claude-knight ──► claude -p  (cli)  ──► Claude Code process (one per task)
                  │          └─► query()    (sdk)  ─┘   ├─ built-in tools (Bash, Read, Edit, Grep, WebFetch, Agent, Skill…)
-                 │                     │               ├─ mcp__roundtable__nats_request / nats_publish / browser_*
+                 │                     │               ├─ mcp__roundtable__nats_request / nats_publish / find_knights / browser_*
                  │                     │               ├─ arsenal skills (/skills → $CLAUDE_CONFIG_DIR/skills)
                  │                     │               └─ extra MCP servers (MCP_SERVERS_JSON, /config/mcp.json)
                  └─ result ◄───────────┘  (stream-json: result, usage, cost, session id, plan-limit events)

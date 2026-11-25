@@ -45,7 +45,7 @@ Send a task to another knight and wait for their response. This is the **branch-
 Tool: nats_request
 Params:
   knight: "percival"
-  domain: "finance"
+  domain: "finance"  (optional: looked up from the knight's agent card)
   task: "What is the estimated financial impact of the Conduent breach?"
   timeout_ms: 600000  (optional, default 10 min)
 ```
@@ -58,6 +58,28 @@ Flow:
 5. Returns the response text — agent continues with that context
 
 Use for: asking another knight a question, delegating subtasks, gathering cross-domain expertise.
+
+Without `domain`, the domain comes from the target's agent card; a name with no card at this table is
+rejected with the list of valid names. Without a roster (`KNIGHT_CARDS_BUCKET` or `ROUNDTABLE_TABLE`
+unset) `domain` stays required.
+
+### `find_knights`
+
+Lists the other knights at your table from their agent cards (NATS KV `KNIGHT_CARDS_BUCKET`, keys
+`<table>.<knight>`): name, domain, description, matching skills and status (`ready`, `suspended`,
+`not ready`; plus `live` when a pod answers `$SRV.PING.roundtable-knight` within 300 ms).
+
+```
+Tool: find_knights
+Params (all optional):
+  query: "cve"             (case-insensitive: name, description, skill descriptions)
+  domain: "security"       (exact)
+  skill: "cve-triage"      (skill id or tag)
+  includeSuspended: true   (default)
+```
+
+The cards are cached by a KV watch on `<table>.*` started at boot; until it has loaded, calls read
+the bucket directly. Without the env the tool answers "no roster available".
 
 ## Task Message Format
 

@@ -7,14 +7,15 @@
  * transport. Logs go to stderr.
  *
  * The process opens its own NATS connection from the env the knight passes
- * down (NATS_URL, KNIGHT_NAME, NATS_RESULTS_PREFIX).
+ * down (NATS_URL, KNIGHT_NAME, NATS_RESULTS_PREFIX; ROUNDTABLE_TABLE and
+ * KNIGHT_CARDS_BUCKET for find_knights).
  */
 import { createRequire } from "node:module";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { roundtableTools, configureTools } from "./tools.js";
-import { connectNats, drain, initLogger, log, setLogStream } from "@roundtable/knight-core";
+import { connectNats, drain, getConnection, initLogger, initRoster, log, setLogStream } from "@roundtable/knight-core";
 
 // dist/mcp-stdio.js and src/mcp-stdio.ts both sit one level below package.json.
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -61,9 +62,11 @@ export async function runMcpServer(env: NodeJS.ProcessEnv = process.env): Promis
   const natsUrl = env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222";
   // Connect in the background so initialize/tools/list answer at once; tool
   // calls wait for the connection (bounded), then report "NATS not connected".
-  const connected = connectNats({ natsUrl, knightName }, `claude-knight-${knightName}-mcp`).catch((e) =>
-    log.warn("MCP server could not connect to NATS", { error: String(e) }),
-  );
+  // The roster's watch starts once connected; before that, find_knights reads the cards directly.
+  const roster = initRoster(env, knightName, getConnection);
+  const connected = connectNats({ natsUrl, knightName }, `claude-knight-${knightName}-mcp`)
+    .then(() => void roster?.start())
+    .catch((e) => log.warn("MCP server could not connect to NATS", { error: String(e) }));
   const beforeCall = () =>
     Promise.race([connected, new Promise<void>((r) => setTimeout(r, 10_000).unref())]).then(() => undefined);
 

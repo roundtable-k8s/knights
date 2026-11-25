@@ -142,6 +142,14 @@ test("generates the MCP config, the guardrail hook settings and the system promp
     alwaysLoad: true,
   });
   assert.equal(mcp.mcpServers.vault.url, "http://from-env", "MCP_SERVERS_JSON wins over /config/mcp.json");
+  const withCards = buildCliInvocation(loadConfig({ ...env, KNIGHT_CARDS_BUCKET: "roundtable-cards", ROUNDTABLE_TABLE: "personal" }), {
+    taskDir: "/tmp/task",
+    selfCommand: ["node", "x.js"],
+    env: {},
+  });
+  const cardsEnv = JSON.parse(withCards.files["/tmp/task/mcp.json"]!).mcpServers.roundtable.env;
+  assert.equal(cardsEnv.KNIGHT_CARDS_BUCKET, "roundtable-cards", "find_knights in the stdio server reads the cards bucket");
+  assert.equal(cardsEnv.ROUNDTABLE_TABLE, "personal");
   assert.equal(mcp.mcpServers.files.command, "mcp-files");
 
   const settings = JSON.parse(inv.files["/tmp/task/settings.json"]!);

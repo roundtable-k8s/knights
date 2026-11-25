@@ -12,7 +12,8 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getJetStream, getConnection, log } from "@roundtable/knight-core";
+import { getJetStream, getConnection, log, resolveRequestTarget } from "@roundtable/knight-core";
+import { findKnightsTool } from "./find-knights.js";
 
 
 // Knight identity — set once at startup for self-echo prevention
@@ -32,7 +33,7 @@ const PublishParams = Type.Object({
 
 const RequestParams = Type.Object({
   knight: Type.String({ description: "Target knight name (e.g. 'galahad', 'rt-operator')" }),
-  domain: Type.String({ description: "Task domain matching the target knight's NATS filter (e.g. 'security', 'operator', 'frontend')" }),
+  domain: Type.Optional(Type.String({ description: "Task domain of the target knight (e.g. 'security'). Optional: looked up from the knight's agent card when omitted" })),
   task: Type.String({ description: "Clear, self-contained task description — the target knight has NO context about your current work" }),
   timeout_ms: Type.Optional(Type.Number({ description: "Timeout in ms (default: 600000 = 10 min). Increase for complex tasks." })),
 });
@@ -117,6 +118,9 @@ const natsRequestTool = defineTool({
     `Use nats_request to ask another knight for help. The request is routed`,
     `through your table's NATS streams automatically.`,
     ``,
+    `Call find_knights first to see who is at your table; then the knight's name is enough`,
+    `(the domain is looked up from its agent card).`,
+    ``,
     `### Rules`,
     `- **Stay in your table**: only request knights that share your NATS prefix.`,
     `  Cross-table requests WILL timeout (different streams).`,
@@ -128,7 +132,6 @@ const natsRequestTool = defineTool({
     `\`\`\``,
     `nats_request(`,
     `  knight: "galahad",`,
-    `  domain: "security",`,
     `  task: "Check if CVE-2026-1234 affects any images in the roundtable namespace. Do not delegate to other knights."`,
     `)`,
     `\`\`\``,
@@ -141,33 +144,38 @@ const natsRequestTool = defineTool({
     "Write clear, self-contained task descriptions with full context",
     "Include 'Do not delegate to other knights' to prevent request chains",
     "Default timeout is 10 minutes — increase for complex tasks",
-    "Check the target knight's domain matches their NATS filter subject",
+    "Call find_knights before delegating; pass domain only if find_knights has no roster",
   ],
   parameters: RequestParams,
   async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-    const js = getJetStream();
-    const nc = getConnection();
-    if (!js || !nc) return textResult("Error: NATS not connected");
-
     if (!params.task || params.task.trim().length === 0) {
       log.warn("nats_request: empty task rejected", { knight: params.knight, domain: params.domain });
       return textResult("Error: Cannot send empty task. Provide a non-empty task description.");
     }
 
+    // Without a domain, look it up from the target's agent card (unknown names are rejected).
+    const target = await resolveRequestTarget(params.knight, params.domain);
+    if ("error" in target) return textResult(`Error: ${target.error}`);
+    const { knight, domain } = target;
+
+    const js = getJetStream();
+    const nc = getConnection();
+    if (!js || !nc) return textResult("Error: NATS not connected");
+
     const timeoutMs = params.timeout_ms ?? 600_000; // 10 min default
-    const taskId = `${params.knight}-xreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const taskSubject = `${_natsPrefix}.tasks.${params.domain}.${taskId}`;
+    const taskId = `${knight}-xreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const taskSubject = `${_natsPrefix}.tasks.${domain}.${taskId}`;
     const resultSubject = `${_natsPrefix}.results.${taskId}`;
 
     log.info("nats_request: dispatching", {
-      knight: params.knight,
-      domain: params.domain,
+      knight,
+      domain,
       taskId,
       timeoutMs,
       prefix: _natsPrefix,
     });
 
-    onUpdate?.(textResult(`Dispatching to ${params.knight} (${params.domain})…`));
+    onUpdate?.(textResult(`Dispatching to ${knight} (${domain})…`));
 
     try {
       // Subscribe to result subject BEFORE publishing the task
@@ -177,7 +185,7 @@ const natsRequestTool = defineTool({
       const payload = JSON.stringify({
         task: params.task,
         task_id: taskId,
-        domain: params.domain,
+        domain,
         from: _knightName.toLowerCase(),
         dispatched_by: _knightName,
         timestamp: new Date().toISOString(),
@@ -185,7 +193,7 @@ const natsRequestTool = defineTool({
       });
       await js.publish(taskSubject, payload);
       log.info("nats_request: task published", { taskId, subject: taskSubject });
-      onUpdate?.(textResult(`Task sent to ${params.knight}; awaiting response (timeout ${Math.round(timeoutMs / 1000)}s)…`));
+      onUpdate?.(textResult(`Task sent to ${knight}; awaiting response (timeout ${Math.round(timeoutMs / 1000)}s)…`));
 
       // Wait for result
       for await (const msg of sub) {
@@ -206,30 +214,30 @@ const natsRequestTool = defineTool({
 
           if (success) {
             return textResult(
-              `Response from ${params.knight} (${Math.round(duration / 1000)}s, $${cost.toFixed(4)}):\n\n${text}`,
+              `Response from ${knight} (${Math.round(duration / 1000)}s, $${cost.toFixed(4)}):\n\n${text}`,
             );
           } else {
-            return textResult(`${params.knight} reported failure: ${text}`);
+            return textResult(`${knight} reported failure: ${text}`);
           }
         } catch {
-          return textResult(`Raw response from ${params.knight}: ${raw}`);
+          return textResult(`Raw response from ${knight}: ${raw}`);
         }
       }
 
       // Sub exhausted without message = timeout
-      return textResult(`Timeout: ${params.knight} did not respond within ${Math.round(timeoutMs / 1000)}s`);
+      return textResult(`Timeout: ${knight} did not respond within ${Math.round(timeoutMs / 1000)}s`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (signal?.aborted) {
-        return textResult(`Request to ${params.knight} was cancelled`);
+        return textResult(`Request to ${knight} was cancelled`);
       }
       log.error("nats_request failed", { taskId, error: msg });
-      return textResult(`Error requesting from ${params.knight}: ${msg}`);
+      return textResult(`Error requesting from ${knight}: ${msg}`);
     }
   },
 });
 
 /**
- * All NATS tools for registration with Pi SDK.
+ * All NATS tools (and find_knights, registered next to nats_request) for registration with Pi SDK.
  */
-export const natsTools = [natsPublishTool, natsRequestTool];
+export const natsTools = [natsPublishTool, natsRequestTool, findKnightsTool];

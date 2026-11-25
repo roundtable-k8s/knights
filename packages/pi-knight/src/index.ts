@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -85,6 +85,9 @@ async function main(): Promise<void> {
   // Connect to NATS
   await connectNats(config, `pi-knight-${config.knightName}`);
   metrics.natsConnected.labels().set(1);
+
+  // Agent-card roster for find_knights / nats_request by name: a KV watch on <table>.* (none without KNIGHT_CARDS_BUCKET).
+  void initRoster(process.env, config.knightName, getConnection)?.start();
 
   // Start introspection responder (zero-cost session queries)
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });

@@ -76,6 +76,7 @@ function mcpServerEnv(config: KnightConfig): Record<string, string> {
     ROUNDTABLE_TABLE: config.table,
     NATS_RESULTS_PREFIX: config.natsResultsPrefix,
     LOG_LEVEL: config.logLevel,
+    ...(config.cardsBucket ? { KNIGHT_CARDS_BUCKET: config.cardsBucket } : {}),
   };
 }
 

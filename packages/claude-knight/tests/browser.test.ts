@@ -35,7 +35,7 @@ test("browser tools refuse when the capability is off", async () => {
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /spec\.capabilities\.browser/);
   assert.equal(calls.length, 0);
-  assert.deepEqual(roundtableToolIds(), ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request"]);
+  assert.deepEqual(roundtableToolIds(), ["mcp__roundtable__nats_publish", "mcp__roundtable__nats_request", "mcp__roundtable__find_knights"]);
 });
 
 test("arguments go to agent-browser as argv, never through a shell", async () => {
