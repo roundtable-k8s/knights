@@ -33,15 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     procps \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/*
-
-# ── Nix installer cache (Nix itself lives on the PVC; see scripts/nix-lib.sh) ──
-ARG NIX_VERSION=2.28.3
-RUN curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/nix-${NIX_VERSION}-x86_64-linux.tar.xz" \
-      -o /tmp/nix-installer.tar.xz \
-    && mkdir -p /opt/nix-cache \
-    && mv /tmp/nix-installer.tar.xz /opt/nix-cache/
 
 # ── Mise baseline tools (python, yq, ripgrep for skill scripts) ──
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh

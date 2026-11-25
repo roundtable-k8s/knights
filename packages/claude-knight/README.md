@@ -167,9 +167,8 @@ The image bakes its baseline tools (ripgrep, python, yq) at build time; start-up
 entrypoint runs `mise install` only when `/config/mise.toml` (`spec.tools.mise`) lists at least one tool under
 `[tools]`. An empty or comment-only file makes no network request. The install is bounded by
 `MISE_INSTALL_TIMEOUT` (seconds, default `120`); on timeout or failure it logs one `WARNING: mise install gave up …
-could not reach <host>` line and the runtime starts anyway. The other network start-up steps are bounded the same
-way: `STARTUP_NIX_TIMEOUT` (Nix bootstrap and flake build, default `600`), `STARTUP_APT_TIMEOUT` and
-`STARTUP_PIP_TIMEOUT` (default `180` each). Each logs a WARNING naming the host to allow, and every start-up phase
+could not reach <host>` line and the runtime starts anyway. `apt` is bounded the same
+way by `STARTUP_APT_TIMEOUT` (default `180`). Each logs a WARNING naming the host to allow, and every start-up phase
 logs its elapsed time.
 
 A knight with `spec.tools.mise` needs these hosts on its egress allowlist, plus the host of each tool's own

@@ -39,12 +39,18 @@ python = "3.12"                        # skill scripts
 
 Plus system packages via apt: `jq`, `curl`, `git`, `ca-certificates`.
 
+### Layer 1.5: Operator tools image (`/nix`)
+
+Nix tools (`spec.tools.nix`) come from the operator's tools image, mounted read-only at `/nix`.
+The entrypoint only puts `$KNIGHT_NIX_PROFILE/bin` (default `/nix/profile/bin`) on `PATH`; it never
+installs Nix or builds a flake at start-up. Without a `/nix` mount the step is skipped.
+
 ### Layer 2: Knight-Specific Config (`/config/`)
 
 Injected via ConfigMap, installed by init container (`scripts/mise-init.sh`) at pod start.
 Two files supported:
 
-- **`mise.toml`** — Declarative CLI tools (GitHub releases, languages, pip/npm CLIs)
+- **`mise.toml`** — Declarative CLI tools (GitHub releases, languages, pipx/npm CLIs)
 - **`apt.txt`** — System packages (one per line, for tools that aren't on GitHub releases)
 
 Each knight only gets the tools it needs:

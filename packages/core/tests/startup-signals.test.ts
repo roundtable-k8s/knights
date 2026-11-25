@@ -130,7 +130,8 @@ describe("startup-signals.sh (entrypoint)", () => {
       const src = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "scripts", "entrypoint.sh"), "utf8");
       const statements = src.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#"));
       assert.equal(statements[0], '. "$(dirname "$0")/startup-signals.sh"', pkg);
-      for (const phase of ["rt_run rt_bootstrap_nix_bounded", "rt_run timeout \"$STARTUP_NIX_TIMEOUT\" nix build", "rt_run rt_mise"]) assert.ok(src.includes(phase), `${pkg}: ${phase}`);
+      assert.ok(src.includes("rt_run rt_mise"), `${pkg}: rt_run rt_mise`);
+      assert.doesNotMatch(src, /rt_bootstrap_nix|nix build|nix-lib|nix-env/, `${pkg}: legacy Nix installers removed`);
       assert.equal(statements.at(-1), "exec node dist/index.js", pkg);
       const dockerfile = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "Dockerfile"), "utf8");
       assert.match(dockerfile, /COPY packages\/core\/scripts\/startup-signals\.sh \.\/scripts\/startup-signals\.sh/, pkg);
