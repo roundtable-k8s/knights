@@ -1,0 +1,11 @@
+# Tristan — Infrastructure & HomeLab tools
+# Mount via ConfigMap at /config/mise.toml
+
+[tools]
+# Kubernetes
+kubectl = "latest"
+"github:helm/helm" = "latest"
+"github:fluxcd/flux2" = "latest"
+
+# Observability
+"github:stern/stern" = "latest"     # Multi-pod log tailing

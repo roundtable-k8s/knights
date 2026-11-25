@@ -1,0 +1,64 @@
+import os from "node:os";
+
+export interface KnightConfig {
+  knightName: string;
+  knightModel: string;
+  subscribeTopics: string[];
+  natsUrl: string;
+  natsTasksStream: string;
+  natsResultsStream: string;
+  natsResultsPrefix: string;
+  taskTimeoutMs: number;
+  /** Max wait for in-flight tasks after SIGTERM. Default taskTimeoutMs + 60s, matching the operator's terminationGracePeriodSeconds. */
+  drainTimeoutMs: number;
+  maxConcurrentTasks: number;
+  metricsPort: number;
+  logLevel: string;
+  hostname: string;
+  thinkingLevel: string;
+  maxRetryDelayMs: number;
+  thinkingBudgetLow: number;
+  thinkingBudgetMedium: number;
+  thinkingBudgetHigh: number;
+  /** Max persisted session JSONL files kept on the PVC (0 = no count cap). */
+  sessionRetentionMaxFiles: number;
+  /** Delete persisted session files older than this many days (0 = no age cap). */
+  sessionRetentionDays: number;
+  /** Task activity event content: `preview` (default) or `none` (no previews / argument summaries). */
+  activityContent: "none" | "preview";
+}
+
+function requireEnv(name: string): string {
+  const val = process.env[name];
+  if (!val) throw new Error(`Required environment variable ${name} is not set`);
+  return val;
+}
+
+export function loadConfig(): KnightConfig {
+  return {
+    knightName: requireEnv("KNIGHT_NAME"),
+    // Cheap, tool-capable, cache-enabled fleet default. Upgrade individual knights
+    // by setting KNIGHT_MODEL on their pod (e.g. openrouter/anthropic/claude-sonnet-4.6).
+    knightModel: process.env["KNIGHT_MODEL"] ?? "openrouter/deepseek/deepseek-v3.2",
+    subscribeTopics: requireEnv("SUBSCRIBE_TOPICS").split(",").map((s) => s.trim()),
+    natsUrl: process.env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
+    natsTasksStream: process.env["NATS_TASKS_STREAM"] ?? "fleet_a_tasks",
+    natsResultsStream: process.env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
+    natsResultsPrefix: process.env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
+    taskTimeoutMs: parseInt(process.env["TASK_TIMEOUT_MS"] ?? "1800000", 10),
+    drainTimeoutMs: parseInt(process.env["DRAIN_TIMEOUT_MS"] ?? String(parseInt(process.env["TASK_TIMEOUT_MS"] ?? "1800000", 10) + 60_000), 10),
+    maxConcurrentTasks: parseInt(process.env["MAX_CONCURRENT_TASKS"] ?? "2", 10),
+    metricsPort: parseInt(process.env["METRICS_PORT"] ?? "3000", 10),
+    logLevel: process.env["LOG_LEVEL"] ?? "info",
+    hostname: os.hostname(),
+    thinkingLevel: process.env["KNIGHT_THINKING"] ?? "off",
+    maxRetryDelayMs: parseInt(process.env["MAX_RETRY_DELAY_MS"] ?? "60000", 10),
+    thinkingBudgetLow: parseInt(process.env["THINKING_BUDGET_LOW"] ?? "1024", 10),
+    thinkingBudgetMedium: parseInt(process.env["THINKING_BUDGET_MEDIUM"] ?? "4096", 10),
+    thinkingBudgetHigh: parseInt(process.env["THINKING_BUDGET_HIGH"] ?? "8192", 10),
+    // Each chain run gets its own persisted session (#31); cap how many stay on disk.
+    sessionRetentionMaxFiles: parseInt(process.env["SESSION_RETENTION_MAX_FILES"] ?? "100", 10),
+    sessionRetentionDays: parseFloat(process.env["SESSION_RETENTION_DAYS"] ?? "30"),
+    activityContent: process.env["ACTIVITY_CONTENT"] === "none" ? "none" : "preview",
+  };
+}
