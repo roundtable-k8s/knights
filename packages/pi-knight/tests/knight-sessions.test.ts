@@ -27,7 +27,7 @@ function fakeSession(id: number, disposed: number[]) {
       totalMessages: messages.length,
       cost: 0,
       toolCalls: 0,
-      tokens: { input: 0, output: 0, cacheRead: 0 },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     }),
     getLastAssistantText: () => messages.filter((m) => m.role === "assistant").at(-1)?.content,
     prompt: async (t: string) => {

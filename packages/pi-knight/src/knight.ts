@@ -28,7 +28,7 @@ export interface TaskResult {
   /** Populated when success is false. */
   error?: string;
   cost: number;
-  tokens: { input: number; output: number; cacheRead: number };
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   model: string;
   toolCalls: number;
   /** Pull requests this task opened or updated (omitted when none). */
@@ -403,6 +403,7 @@ export async function executeTask(
     input: statsBefore.tokens.input,
     output: statsBefore.tokens.output,
     cacheRead: statsBefore.tokens.cacheRead,
+    cacheWrite: statsBefore.tokens.cacheWrite,
   };
 
   log.info("Executing task", { model: modelUsed, taskLength: task.length, runId: runId ?? null, workDir });
@@ -489,6 +490,7 @@ export async function executeTask(
     input: delta(statsAfter.tokens.input, tokensBefore.input),
     output: delta(statsAfter.tokens.output, tokensBefore.output),
     cacheRead: delta(statsAfter.tokens.cacheRead, tokensBefore.cacheRead),
+    cacheWrite: delta(statsAfter.tokens.cacheWrite, tokensBefore.cacheWrite),
   };
 
   // Extract the most recent real deliverable, not an intermediate tool-call payload.

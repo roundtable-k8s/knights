@@ -7,7 +7,7 @@ const base: TaskResult = {
   result: "r",
   success: false,
   cost: 0,
-  tokens: { input: 1, output: 2, cacheRead: 3 },
+  tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
   model: "p/m",
   toolCalls: 0,
 };
@@ -48,7 +48,7 @@ test("buildResultPayload matches the recorded pi-knight result fixture byte for 
   const raw = readFileSync(new URL("../../core/tests/fixtures/pi-knight-result.json", import.meta.url), "utf8").trim();
   const msg = "402 This request requires more credits, or fewer max_tokens";
   const p = buildResultPayload(
-    { ...failedTaskResult(msg, "openrouter/anthropic/claude-sonnet-4.5"), tokens: { input: 0, output: 0, cacheRead: 0 } },
+    { ...failedTaskResult(msg, "openrouter/anthropic/claude-sonnet-4.5"), tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
     { taskId: "lancelot-1764000000000-a1b2c3", knight: "lancelot", durationMs: 1234, timestamp: "2026-11-24T10:00:01.234Z" },
   );
   assert.equal(encodeResult(p), raw);
@@ -64,7 +64,7 @@ const run: TaskResult = {
   result: "Done.",
   success: true,
   cost: 0.0125,
-  tokens: { input: 1200, output: 340, cacheRead: 800 },
+  tokens: { input: 1200, output: 340, cacheRead: 800, cacheWrite: 0 },
   model: "claude-opus-5-5",
   toolCalls: 4,
 };
@@ -122,4 +122,9 @@ test("ordinary failures and refusals are not transient", () => {
     const p = buildResultPayload(failedTaskResult(msg, "m"), meta);
     assert.ok(!("transient" in p) && !("transientReason" in p), msg);
   }
+});
+
+test("cache usage: tokens.cacheRead and cacheWrite are published, input stays uncached", () => {
+  const p = buildResultPayload({ ...run, tokens: { input: 6, output: 340, cacheRead: 800, cacheWrite: 120 } }, fx);
+  assert.deepEqual(p.tokens, { input: 6, output: 340, cacheRead: 800, cacheWrite: 120 });
 });

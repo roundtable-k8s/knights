@@ -71,7 +71,7 @@
         "cacheWrite": {
           "type": "number",
           "minimum": 0,
-          "description": "Cached input tokens written (claude-knight)."
+          "description": "Cached input tokens written."
         }
       }
     },
