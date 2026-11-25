@@ -3,13 +3,14 @@ name: Trigger autodeploy
 # Instant deploy (roundtable-k8s/roundtable#256): after a successful main build,
 # send `roundtable-deploy` to dapperdivers/dapper-cluster, whose Round Table
 # Autodeploy bumps the images (its 5-minute cron stays as a fallback).
-# Runs on workflow_run, i.e. after CI has finished: autodeploy only deploys
-# builds whose push run has already succeeded, so a step inside CI would be early.
+# Runs on workflow_run of the image workflows (`pi-knight`, `claude-knight`),
+# i.e. after the image is pushed: autodeploy only deploys builds whose push run
+# has already succeeded, so a step inside the build would be early.
 # The dunce-bot key lives in the `deploy` environment (main only); the minted
 # token is scoped to dapper-cluster with contents:write and lasts an hour.
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] -- main only, checks out nothing
-    workflows: ["CI"]
+    workflows: ["pi-knight", "claude-knight"]
     types: [completed]
     branches: [main]
 

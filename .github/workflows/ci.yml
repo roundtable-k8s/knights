@@ -1,0 +1,134 @@
+name: CI
+
+# Single required status check: `ci-ok`.
+#
+# Path-filtered workflows don't run (so don't report) on PRs that miss their
+# paths, which would leave a required check "pending" forever. So all
+# typecheck/test/build work lives here, in a workflow that always triggers, and
+# a `changes` job (dorny/paths-filter) decides which package jobs to run. Skipped
+# jobs count as passing. `ci-ok` always runs and fails if any needed job failed
+# or was cancelled; require only `ci-ok` in the branch ruleset.
+#
+# merge_group has no path filter support, and the queue should test the full
+# set, so on merge_group `changes` skips the filter and enables every job.
+#
+# pi-knight.yml / claude-knight.yml only build and push the images on push to
+# main (autodeploy depends on their names); they are not required checks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pi: ${{ github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.pi == 'true' }}
+      claude: ${{ github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.claude == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push'
+
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        with:
+          filters: |
+            pi:
+              - 'packages/pi-knight/**'
+              - 'packages/core/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+            claude:
+              - 'packages/claude-knight/**'
+              - 'packages/core/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.base.json'
+              - '.github/workflows/ci.yml'
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck --workspace packages/core
+      - run: npm test --workspace packages/core
+
+  pi-knight:
+    needs: changes
+    if: needs.changes.outputs.pi == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace packages/core --if-present
+      - run: npm run typecheck --workspace packages/pi-knight
+      - run: npm test --workspace packages/pi-knight
+      - run: npm run build --workspace packages/pi-knight
+
+  claude-knight:
+    needs: changes
+    if: needs.changes.outputs.claude == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build --workspace packages/core --if-present
+      - run: npm run typecheck --workspace packages/claude-knight
+      - run: npm test --workspace packages/claude-knight
+      - run: npm run build --workspace packages/claude-knight
+
+  ci-ok:
+    if: always()
+    needs: [changes, lint, core, pi-knight, claude-knight]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$RESULTS" | jq -e '[.[].result] | any(. == "failure" or . == "cancelled")' >/dev/null; then
+            echo "::error::A required job did not succeed."
+            exit 1
+          fi

@@ -1,0 +1,15 @@
+**/node_modules
+**/dist
+.git
+.github
+**/.github
+.env
+.env.*
+**/*.md
+!packages/*/defaults/**/*.md
+**/docs
+**/examples
+**/flake.nix
+**/flake.lock
+result
+result-*

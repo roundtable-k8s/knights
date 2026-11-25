@@ -1,11 +1,28 @@
+# Build from the repo root: docker build -f packages/claude-knight/Dockerfile .
 FROM node:22.19-slim AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY tsconfig.json ./
-COPY src/ ./src/
-RUN npm run build && npm prune --omit=dev \
-    && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/claude-knight/package.json ./packages/claude-knight/
+RUN npm ci --workspace packages/claude-knight --workspace packages/core --include-workspace-root
+COPY packages/core/tsconfig.json ./packages/core/
+COPY packages/core/src/ ./packages/core/src/
+COPY packages/claude-knight/tsconfig.json ./packages/claude-knight/
+COPY packages/claude-knight/src/ ./packages/claude-knight/src/
+RUN npm run build --workspace packages/core --workspace packages/claude-knight
+RUN npm ci --omit=dev --workspace packages/claude-knight --workspace packages/core --include-workspace-root \
+    && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl \
+       packages/claude-knight/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl
+# Flatten into the layout the runtime stage expects: nested workspace deps
+# (kept out of the hoisted root by version conflicts) are merged over the root
+# node_modules, and the dangling workspace symlinks are dropped. The shared core is installed as a real
+# package so a later dependency on @roundtable/knight-core resolves at runtime.
+RUN mkdir -p /out \
+    && cp -a node_modules /out/node_modules \
+    && if [ -d packages/claude-knight/node_modules ]; then cp -a packages/claude-knight/node_modules/. /out/node_modules/; fi \
+    && rm -rf /out/node_modules/claude-knight /out/node_modules/@roundtable/knight-core \
+    && mkdir -p /out/node_modules/@roundtable/knight-core \
+    && cp -a packages/core/package.json packages/core/dist /out/node_modules/@roundtable/knight-core/
 
 FROM node:22.19-slim
 WORKDIR /app
@@ -28,7 +45,7 @@ RUN curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/nix-${NIX_VERSION
 
 # ── Mise baseline tools (python, yq, ripgrep for skill scripts) ──
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
-COPY mise.toml /app/mise.toml
+COPY packages/claude-knight/mise.toml /app/mise.toml
 ENV MISE_DATA_DIR=/app/.mise \
     MISE_CONFIG_FILE=/app/mise.toml \
     MISE_YES=1
@@ -41,17 +58,17 @@ RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION}
 # ── GitHub token file (roundtable-k8s/roundtable#194) ──
 # A git credential helper and a gh shim that read $GITHUB_TOKEN_FILE on every
 # call. The entrypoint puts /opt/roundtable/bin first on PATH when it is set.
-COPY scripts/github/git-credential-roundtable /usr/local/bin/git-credential-roundtable
-COPY scripts/github/gh /opt/roundtable/bin/gh
+COPY packages/claude-knight/scripts/github/git-credential-roundtable /usr/local/bin/git-credential-roundtable
+COPY packages/claude-knight/scripts/github/gh /opt/roundtable/bin/gh
 
 # ── App ──
 # node_modules carries the Agent SDK and its platform package with the native
 # Claude Code binary (@anthropic-ai/claude-agent-sdk-linux-x64).
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-COPY defaults/ ./defaults/
-COPY scripts/ ./scripts/
+COPY --from=builder /app/packages/claude-knight/dist ./dist
+COPY --from=builder /out/node_modules ./node_modules
+COPY --from=builder /app/packages/claude-knight/package.json ./
+COPY packages/claude-knight/defaults/ ./defaults/
+COPY packages/claude-knight/scripts/ ./scripts/
 
 # ── Claude Code CLI (`claude` on PATH, for CLAUDE_RUNTIME=cli) ──
 # Pinned. The Agent SDK's platform package ships the official Claude Code

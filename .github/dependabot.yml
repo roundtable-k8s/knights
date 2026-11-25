@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /packages/pi-knight
+    schedule:
+      interval: weekly
+    groups:
+      docker-pi-knight-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /packages/pi-knight
+    schedule:
+      interval: weekly
+    groups:
+      actions-pi-knight-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /packages/claude-knight
+    schedule:
+      interval: weekly
+    groups:
+      docker-claude-knight-minor-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /packages/claude-knight
+    schedule:
+      interval: weekly
+    groups:
+      actions-claude-knight-minor-patch:
+        update-types: [minor, patch]

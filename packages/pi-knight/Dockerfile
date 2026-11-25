@@ -1,10 +1,25 @@
+# Build from the repo root: docker build -f packages/pi-knight/Dockerfile .
 FROM node:22.19-slim AS builder
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY tsconfig.json ./
-COPY src/ ./src/
-RUN npm run build
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/core/package.json ./packages/core/
+COPY packages/pi-knight/package.json ./packages/pi-knight/
+RUN npm ci --workspace packages/pi-knight --workspace packages/core --include-workspace-root
+COPY packages/core/tsconfig.json ./packages/core/
+COPY packages/core/src/ ./packages/core/src/
+COPY packages/pi-knight/tsconfig.json ./packages/pi-knight/
+COPY packages/pi-knight/src/ ./packages/pi-knight/src/
+RUN npm run build --workspace packages/core --workspace packages/pi-knight
+# Flatten into the layout the runtime stage expects: nested workspace deps
+# (kept out of the hoisted root by version conflicts) are merged over the root
+# node_modules, and the dangling workspace symlinks are dropped. The shared core is installed as a real
+# package so a later dependency on @roundtable/knight-core resolves at runtime.
+RUN mkdir -p /out \
+    && cp -a node_modules /out/node_modules \
+    && if [ -d packages/pi-knight/node_modules ]; then cp -a packages/pi-knight/node_modules/. /out/node_modules/; fi \
+    && rm -rf /out/node_modules/pi-knight /out/node_modules/@roundtable/knight-core \
+    && mkdir -p /out/node_modules/@roundtable/knight-core \
+    && cp -a packages/core/package.json packages/core/dist /out/node_modules/@roundtable/knight-core/
 
 FROM node:22.19-slim
 WORKDIR /app
@@ -29,7 +44,7 @@ RUN curl -L "https://releases.nixos.org/nix/nix-${NIX_VERSION}/nix-${NIX_VERSION
 
 # ── Mise (baseline tools) ────────────────────────────────────────
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
-COPY mise.toml /app/mise.toml
+COPY packages/pi-knight/mise.toml /app/mise.toml
 ENV MISE_DATA_DIR=/app/.mise \
     MISE_CONFIG_FILE=/app/mise.toml \
     MISE_YES=1
@@ -39,11 +54,11 @@ RUN mise install --cd /app && mise reshim
 RUN npm install -g agent-browser 2>/dev/null || true
 
 # ── App code ──────────────────────────────────────────────────────
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-COPY defaults/ ./defaults/
-COPY scripts/ ./scripts/
+COPY --from=builder /app/packages/pi-knight/dist ./dist
+COPY --from=builder /out/node_modules ./node_modules
+COPY --from=builder /app/packages/pi-knight/package.json ./
+COPY packages/pi-knight/defaults/ ./defaults/
+COPY packages/pi-knight/scripts/ ./scripts/
 # GitHub token-file support (roundtable-k8s/roundtable#194): a git credential
 # helper and a gh shim that read $GITHUB_TOKEN_FILE on every call. The
 # entrypoint puts /opt/roundtable/bin first on PATH when that file is set.

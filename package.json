@@ -1,0 +1,21 @@
+{
+  "name": "knights",
+  "private": true,
+  "type": "module",
+  "description": "Knights of the Round Table runtimes (pi-knight, claude-knight) and shared core",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}

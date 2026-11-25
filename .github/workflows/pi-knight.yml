@@ -1,0 +1,63 @@
+name: pi-knight
+
+# Image build for ghcr.io/roundtable-k8s/pi-knight. Typecheck, test and build live in
+# ci.yml (the single required check). This workflow's NAME is load-bearing: the
+# dapper-cluster autodeploy lists successful `push` runs of the workflow called
+# "pi-knight" and checks the image tag exists, and trigger-autodeploy.yml fires on it.
+# On push to main it builds and pushes :<sha> and :latest, so a successful push
+# run means the image was pushed. On pull requests it only builds (no push, no
+# cache write) to catch Dockerfile breakage. merge_group is deliberately not
+# triggered: ci.yml covers the queue, and nothing is pushed from it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/pi-knight/**"
+      - "packages/core/**"
+      - package.json
+      - package-lock.json
+      - tsconfig.base.json
+      - .github/workflows/pi-knight.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/pi-knight/**"
+      - "packages/core/**"
+      - package.json
+      - package-lock.json
+      - tsconfig.base.json
+      - .github/workflows/pi-knight.yml
+
+env:
+  REGISTRY: ghcr.io
+  # Fixed: github.repository is now "knights", not the image name.
+  IMAGE_NAME: roundtable-k8s/pi-knight
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/pi-knight/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE_NAME) || '' }}

@@ -10,7 +10,7 @@ name: Merge guard
 #   out. They still auto-merge on a ship-it review; the label is for visibility.
 # The verdict is enforced in the merge queue (PR runs only report it); `hold`
 # fails everywhere, so a `hold` added after queueing still stops the merge.
-# This file is identical in every roundtable-k8s repo; only merge-guard-paths differs.
+# This file matches the other roundtable-k8s repos; only merge-guard-paths differs.
 on:
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]

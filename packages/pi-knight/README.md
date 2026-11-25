@@ -1,5 +1,7 @@
 # Pi-Knight 🛡️
 
+> This package now lives in the [roundtable-k8s/knights](https://github.com/roundtable-k8s/knights) monorepo under `packages/`.
+
 > Universal base agent runtime for the Knights of the Round Table, built on [Pi SDK](https://github.com/earendil-works/pi-mono).
 
 ## What Is This?
@@ -93,7 +95,7 @@ Pi-Knight uses Pi's SDK directly — native API calls, no CLI subprocess, no pro
 
 ## License
 
-MIT
+Apache-2.0 (see [LICENSE](../../LICENSE))
 
 ## Draining on rollout
 

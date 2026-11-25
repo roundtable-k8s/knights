@@ -1,5 +1,7 @@
 # claude-knight
 
+> This package now lives in the [roundtable-k8s/knights](https://github.com/roundtable-k8s/knights) monorepo under `packages/`.
+
 A knight runtime for [Roundtable](https://github.com/roundtable-k8s/roundtable) that runs each task through
 **Claude Code**: the official Claude Code CLI run headless (`claude -p`) on a **Claude Max/Pro plan** with a
 `claude setup-token`, or the Claude Agent SDK with an API key.

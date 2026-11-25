@@ -18,14 +18,14 @@ Steps to reproduce:
 What you expected to happen.
 
 ## Environment
-- Kubernetes version: 
-- Operator version/image: 
-- Helm chart version: 
-- Cloud provider / distro: 
+- Package: pi-knight / claude-knight / core
+- Image tag or commit: 
+- Model and provider: 
+- Round Table operator version: 
 
 ## Logs
 ```
-Paste relevant operator logs here
+Paste relevant knight pod logs here (remove anything sensitive)
 ```
 
 ## Additional Context
