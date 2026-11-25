@@ -39,7 +39,7 @@ async function waitForSkills(config: KnightConfig): Promise<number> {
 
 export async function main(): Promise<void> {
   const config = loadConfig();
-  initLogger(config.knightName, config.logLevel);
+  initLogger(config.knightName, config.logLevel, config.table);
   migrateMemory({ memoryDir: config.memoryDir, dataDir: config.workDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: config.workDir }));
   // Introspect in this process reads the same config dir the Claude Code child
@@ -91,7 +91,7 @@ export async function main(): Promise<void> {
   setSkillCount(await waitForSkills(config));
 
   await connectNats(config, `claude-knight-${config.knightName}`);
-  metrics.natsConnected.labels(config.knightName).set(1);
+  metrics.natsConnected.labels().set(1);
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
 
   let activeCount = 0;
@@ -101,7 +101,7 @@ export async function main(): Promise<void> {
   const setActive = (n: number) => {
     activeCount = n;
     setActiveTaskCount(n);
-    metrics.activeTasks.labels(config.knightName).set(n);
+    metrics.activeTasks.labels().set(n);
   };
 
   async function processTask(delivery: TaskDelivery): Promise<void> {
@@ -110,6 +110,7 @@ export async function main(): Promise<void> {
     const started = Date.now();
     const activity = new TaskActivity({
       knight: config.knightName,
+      table: config.table,
       prefix: natsPrefix(config),
       taskId: parsed.taskId,
       identity: podIdentity(process.env, hostname()),
@@ -148,8 +149,8 @@ export async function main(): Promise<void> {
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
         activity.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
-        metrics.usageLimitHits.labels(config.knightName).inc();
-        metrics.tasksTotal.labels(config.knightName, "refused").inc();
+        metrics.usageLimitHits.labels().inc();
+        metrics.tasksTotal.labels("refused").inc();
         await publishResult(
           parsed.taskId,
           buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
@@ -165,13 +166,11 @@ export async function main(): Promise<void> {
       activity.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
       await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs }));
 
-      metrics.tasksTotal.labels(config.knightName, outcome.success ? "success" : "error").inc();
-      metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
-      metrics.llmCost.labels(config.knightName, outcome.model, outcome.billing).inc(outcome.cost);
-      metrics.tokensTotal.labels(config.knightName, "input").inc(outcome.tokens.input);
-      metrics.tokensTotal.labels(config.knightName, "output").inc(outcome.tokens.output);
-      metrics.tokensTotal.labels(config.knightName, "cached").inc(outcome.tokens.cacheRead);
-      if (outcome.usageLimited) metrics.usageLimitHits.labels(config.knightName).inc();
+      metrics.tasksTotal.labels(outcome.success ? "success" : "error").inc();
+      metrics.taskDuration.labels().observe(durationMs / 1000);
+      metrics.llmCost.labels(outcome.model, outcome.billing).inc(outcome.cost);
+      metrics.recordTokens(outcome.model, outcome.tokens);
+      if (outcome.usageLimited) metrics.usageLimitHits.labels().inc();
     } catch (err) {
       const durationMs = Date.now() - started;
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -182,8 +181,8 @@ export async function main(): Promise<void> {
         buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs }),
       ).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
-      metrics.tasksTotal.labels(config.knightName, "error").inc();
-      metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
+      metrics.tasksTotal.labels("error").inc();
+      metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
       clearTimeout(timer);
       clearInterval(heartbeat);
@@ -207,7 +206,7 @@ export async function main(): Promise<void> {
       void processTask(delivery);
     },
     onLost: async (parsed) => {
-      metrics.recordLostTask(config.knightName);
+      metrics.recordLostTask();
       const model = config.claudeModel ?? "claude-code-default";
       await publishResult(parsed.taskId, {
         ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model }),
@@ -216,7 +215,7 @@ export async function main(): Promise<void> {
     },
     // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
     onInvalid: async (parsed) => {
-      metrics.tasksTotal.labels(config.knightName, "error").inc();
+      metrics.tasksTotal.labels("error").inc();
       const model = config.claudeModel ?? "claude-code-default";
       await publishResult(parsed.taskId, {
         ...invalidTaskResult({ taskId: parsed.taskId, knight: config.knightName, model, invalid: parsed.invalid ?? "invalid" }),
@@ -235,7 +234,7 @@ export async function main(): Promise<void> {
     maxWaitMs: config.drainTimeoutMs,
     drainNats: drain,
     cleanup: async () => {
-      metrics.natsConnected.labels(config.knightName).set(0);
+      metrics.natsConnected.labels().set(0);
       await stopHealthServer();
     },
     exit: (code) => process.exit(code),

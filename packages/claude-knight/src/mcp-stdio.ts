@@ -55,7 +55,7 @@ export function createMcpServer(tools: ToolDef[], beforeCall: () => Promise<void
 export async function runMcpServer(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   setLogStream(process.stderr);
   const knightName = env["KNIGHT_NAME"] ?? "unknown";
-  initLogger(knightName, env["LOG_LEVEL"] ?? "info");
+  initLogger(knightName, env["LOG_LEVEL"] ?? "info", env["ROUNDTABLE_TABLE"]);
   configureTools(knightName, env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results");
 
   const natsUrl = env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222";

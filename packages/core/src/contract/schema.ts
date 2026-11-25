@@ -165,6 +165,7 @@ export const ActivityEvent = Type.Object(
     type: Type.Enum([...ACTIVITY_TYPES]),
     ts: Type.String({ format: "date-time" }),
     knight: Type.String(),
+    table: Type.Optional(Type.String()),
     pod: Type.String(),
     node: Type.Optional(Type.String()),
     taskId: Type.String(),

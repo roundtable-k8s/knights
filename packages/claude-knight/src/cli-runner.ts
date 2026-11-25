@@ -73,6 +73,7 @@ export interface CliInvocationOptions {
 function mcpServerEnv(config: KnightConfig): Record<string, string> {
   return {
     KNIGHT_NAME: config.knightName,
+    ROUNDTABLE_TABLE: config.table,
     NATS_RESULTS_PREFIX: config.natsResultsPrefix,
     LOG_LEVEL: config.logLevel,
   };

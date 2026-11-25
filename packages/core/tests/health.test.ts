@@ -14,7 +14,7 @@ const freePort = () =>
 
 test("health server serves /health, /metrics, extra routes and readyExtras", async () => {
   const port = await freePort();
-  const m = createKnightMetrics({ prefix: "t_knight" });
+  const m = createKnightMetrics({ runtime: "test", knight: "T" });
   startHealthServer({
     knightName: "T",
     port,
@@ -29,7 +29,7 @@ test("health server serves /health, /metrics, extra routes and readyExtras", asy
     assert.equal(h.status, "ok");
     assert.equal(h.knight, "T");
     assert.deepEqual(await (await fetch(`${base}/introspect?a=1`)).json(), { q: "1" });
-    assert.match(await (await fetch(`${base}/metrics`)).text(), /t_knight_tasks_total/);
+    assert.match(await (await fetch(`${base}/metrics`)).text(), /roundtable_knight_tasks_total/);
     const ready = await fetch(`${base}/ready`);
     assert.equal(ready.status, 503); // NATS not connected
     assert.equal((await ready.json()).model, "x");

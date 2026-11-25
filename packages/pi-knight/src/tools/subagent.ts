@@ -37,13 +37,6 @@ export function setParentModel(model: string): void {
   parentModel = model;
 }
 
-/** Parent knight's name — used to attribute sub-agent spend in fleet metrics */
-let parentKnight = "unknown";
-
-export function setParentKnight(name: string): void {
-  parentKnight = name;
-}
-
 export const spawnSubagentTool = defineTool({
   name: "spawn_subagent",
   label: "Spawn Sub-Agent",
@@ -117,10 +110,12 @@ export const spawnSubagentTool = defineTool({
       // spawn's total (no diff needed). Clamp finite/non-negative — same guard as the
       // parent task accounting — to stay safe with routing/custom models.
       const finite = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
-      metrics.llmCost.labels(parentKnight, modelStr).inc(finite(stats.cost));
-      metrics.tokensTotal.labels(parentKnight, "input").inc(finite(stats.tokens.input));
-      metrics.tokensTotal.labels(parentKnight, "output").inc(finite(stats.tokens.output));
-      metrics.tokensTotal.labels(parentKnight, "cached").inc(finite(stats.tokens.cacheRead));
+      metrics.llmCost.labels(modelStr, metrics.BILLING).inc(finite(stats.cost));
+      metrics.recordTokens(modelStr, {
+        input: finite(stats.tokens.input),
+        output: finite(stats.tokens.output),
+        cacheRead: finite(stats.tokens.cacheRead),
+      });
 
       log.info("Sub-agent completed", {
         durationMs,

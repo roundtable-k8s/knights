@@ -337,3 +337,12 @@ test("every event type the core emits validates against the v1 JSON schema", () 
     assert.ok(Buffer.byteLength(raw) <= MAX_EVENT_BYTES);
   }
 });
+
+test("events carry the table when set and omit it otherwise", () => {
+  const withTable: Pub[] = [];
+  make(withTable, { table: "dev" }).started();
+  assert.equal(withTable[0]!.ev["table"], "dev");
+  const without: Pub[] = [];
+  make(without).started();
+  assert.equal("table" in without[0]!.ev, false);
+});

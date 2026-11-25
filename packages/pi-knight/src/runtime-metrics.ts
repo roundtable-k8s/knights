@@ -1,24 +1,21 @@
-import client from "prom-client";
 import { createKnightMetrics } from "@roundtable/knight-core";
 
-const metrics = createKnightMetrics({ prefix: "pi_knight" });
+// pi-knight has no auth-mode switch: it always calls model providers with API keys.
+export const BILLING = "api";
 
-export const { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, activeTasks, toolCallsTotal, toolCallsBlocked, recordLostTask } =
-  metrics;
+const metrics = createKnightMetrics({ runtime: "pi", knight: process.env["KNIGHT_NAME"] ?? "unknown", table: process.env["ROUNDTABLE_TABLE"] });
 
-// ─── pi-knight only: tool call metrics (used by hooks.ts) ───────────
-
-export const toolCallDuration = new client.Histogram({
-  name: "pi_knight_tool_call_duration_seconds",
-  help: "Tool call execution duration in seconds",
-  labelNames: ["tool"] as const,
-  buckets: [0.1, 0.5, 1, 2, 5, 10, 30, 60],
-  registers: [registry],
-});
-
-export const toolCallErrors = new client.Counter({
-  name: "pi_knight_tool_call_errors_total",
-  help: "Total tool call errors",
-  labelNames: ["tool"] as const,
-  registers: [registry],
-});
+export const {
+  registry,
+  tasksTotal,
+  taskDuration,
+  llmCost,
+  tokensTotal,
+  natsConnected,
+  activeTasks,
+  toolCallDuration,
+  toolCallsTotal,
+  toolCallsBlocked,
+  recordLostTask,
+  recordTokens,
+} = metrics;

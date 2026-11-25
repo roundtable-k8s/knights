@@ -12,7 +12,7 @@ import * as metrics from "./runtime-metrics.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  initLogger(config.knightName, config.logLevel);
+  initLogger(config.knightName, config.logLevel, config.table);
   migrateMemory({ memoryDir: config.memoryDir });
   ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot }));
 
@@ -82,7 +82,7 @@ async function main(): Promise<void> {
 
   // Connect to NATS
   await connectNats(config, `pi-knight-${config.knightName}`);
-  metrics.natsConnected.labels(config.knightName).set(1);
+  metrics.natsConnected.labels().set(1);
 
   // Start introspection responder (zero-cost session queries)
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
     const activity = new TaskActivity({
       knight: config.knightName,
+      table: config.table,
       prefix: natsPrefix(config),
       taskId,
       identity: podIdentity(process.env, hostname()),
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
     activeCount++;
     activity.started();
     setActiveTaskCount(activeCount);
-    metrics.activeTasks.labels(config.knightName).set(activeCount);
+    metrics.activeTasks.labels().set(activeCount);
 
     const startTime = Date.now();
     const controller = new AbortController();
@@ -141,12 +142,10 @@ async function main(): Promise<void> {
 
       // Token/cost are recorded regardless — a no-output task still spent them. Only the
       // task-outcome counter reflects the honest success/failure. (#31)
-      metrics.tasksTotal.labels(config.knightName, result.success ? "success" : "error").inc();
-      metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
-      metrics.llmCost.labels(config.knightName, result.model).inc(result.cost);
-      metrics.tokensTotal.labels(config.knightName, "input").inc(result.tokens.input);
-      metrics.tokensTotal.labels(config.knightName, "output").inc(result.tokens.output);
-      metrics.tokensTotal.labels(config.knightName, "cached").inc(result.tokens.cacheRead);
+      metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
+      metrics.taskDuration.labels().observe(durationMs / 1000);
+      metrics.llmCost.labels(result.model, metrics.BILLING).inc(result.cost);
+      metrics.recordTokens(result.model, result.tokens);
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -158,8 +157,8 @@ async function main(): Promise<void> {
         { taskId, knight: config.knightName, durationMs },
       )).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
-      metrics.tasksTotal.labels(config.knightName, "error").inc();
-      metrics.taskDuration.labels(config.knightName).observe(durationMs / 1000);
+      metrics.tasksTotal.labels("error").inc();
+      metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
       clearTimeout(timeout);
       clearInterval(heartbeat);
@@ -168,7 +167,7 @@ async function main(): Promise<void> {
       delivery.ack();
       activeCount--;
       setActiveTaskCount(activeCount);
-      metrics.activeTasks.labels(config.knightName).set(activeCount);
+      metrics.activeTasks.labels().set(activeCount);
       puller?.wake();
     }
   }
@@ -186,12 +185,12 @@ async function main(): Promise<void> {
       void processTask(delivery);
     },
     onLost: async (parsed) => {
-      metrics.recordLostTask(config.knightName);
+      metrics.recordLostTask();
       await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel }));
     },
     // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
     onInvalid: async (parsed) => {
-      metrics.tasksTotal.labels(config.knightName, "error").inc();
+      metrics.tasksTotal.labels("error").inc();
       await publishResult(parsed.taskId, invalidTaskResult({
         taskId: parsed.taskId,
         knight: config.knightName,
@@ -222,7 +221,7 @@ async function main(): Promise<void> {
     },
     drainNats: drain,
     cleanup: async () => {
-      metrics.natsConnected.labels(config.knightName).set(0);
+      metrics.natsConnected.labels().set(0);
       await stopHealthServer();
     },
     exit: (code) => process.exit(code),

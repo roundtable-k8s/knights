@@ -3,6 +3,8 @@ export type Env = NodeJS.ProcessEnv;
 /** The config both runtimes share: the env contract the operator sets on every knight pod. */
 export interface BaseKnightConfig {
   knightName: string;
+  /** The table this knight belongs to (ROUNDTABLE_TABLE); "none" when unset or empty. */
+  table: string;
   natsUrl: string;
   natsResultsPrefix: string;
   /** Port for the health and metrics HTTP server (METRICS_PORT). */
@@ -34,6 +36,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
   const taskTimeoutMs = intEnv(env, "TASK_TIMEOUT_MS", 1_800_000);
   return {
     knightName: requireEnv(env, "KNIGHT_NAME"),
+    table: env["ROUNDTABLE_TABLE"]?.trim() || "none",
     natsUrl: env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
     metricsPort: intEnv(env, "METRICS_PORT", 3000),

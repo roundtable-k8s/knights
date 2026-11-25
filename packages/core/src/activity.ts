@@ -32,6 +32,8 @@ export interface ActivityEvent {
   type: ActivityType;
   ts: string;
   knight: string;
+  /** The table the knight belongs to; optional on the wire (older pods omit it). */
+  table?: string;
   pod: string;
   node?: string;
   taskId: string;
@@ -224,6 +226,8 @@ export const natsActivityPublish: ActivityPublish = (subject, payload) => {
 
 export interface TaskActivityInit {
   knight: string;
+  /** The table the knight belongs to (ROUNDTABLE_TABLE); reported on every event. */
+  table?: string;
   /** `<prefix>` of the table (see `natsPrefix`). */
   prefix: string;
   taskId: string;
@@ -324,6 +328,7 @@ export class TaskActivity {
         type,
         ts: new Date(this.now()).toISOString(),
         knight: i.knight,
+        ...(i.table ? { table: i.table } : {}),
         pod: i.identity.pod,
         ...(i.identity.node ? { node: i.identity.node } : {}),
         taskId: i.taskId,

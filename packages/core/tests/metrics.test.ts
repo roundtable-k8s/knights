@@ -3,50 +3,67 @@ import assert from "node:assert/strict";
 import { createKnightMetrics } from "../src/metrics.ts";
 
 const metricNames = (text: string) =>
-  [...text.matchAll(/^# TYPE (\S+)/gm)].map((m) => m[1]).filter((n) => /_knight_/.test(n)).sort();
+  [...text.matchAll(/^# TYPE (\S+)/gm)].map((m) => m[1]).filter((n) => /^roundtable_knight_/.test(n)).sort();
+
+const opts = { runtime: "pi", knight: "galahad" };
 
 test("recordLostTask increments tasks_total with status=lost, not error", async () => {
-  const m = createKnightMetrics({ prefix: "pi_knight" });
-  m.recordLostTask("galahad");
+  const m = createKnightMetrics(opts);
+  m.recordLostTask();
   const text = await m.registry.metrics();
-  assert.match(text, /pi_knight_tasks_total\{knight="galahad",status="lost"\} 1/);
-  assert.doesNotMatch(text, /pi_knight_tasks_total\{knight="galahad",status="error"\}/);
+  assert.match(text, /roundtable_knight_tasks_total\{status="lost",table="none",knight="galahad",runtime="pi"\} 1/);
+  assert.doesNotMatch(text, /status="error"/);
 });
 
-test("metric names and labels are stable per prefix (pi_knight)", async () => {
-  const m = createKnightMetrics({ prefix: "pi_knight" });
-  m.tasksTotal.labels("k", "ok").inc();
-  m.taskDuration.labels("k").observe(1);
-  m.llmCost.labels("k", "m").inc(1);
-  m.tokensTotal.labels("k", "in").inc(1);
-  m.natsConnected.labels("k").set(1);
-  m.activeTasks.labels("k").set(0);
+test("a task increments tasks_total with table=none by default and the table when set", async () => {
+  const none = createKnightMetrics({ ...opts, table: "" });
+  none.tasksTotal.labels("success").inc();
+  const t1 = await none.registry.metrics();
+  assert.match(t1, /roundtable_knight_tasks_total\{status="success",table="none",knight="galahad",runtime="pi"\} 1/);
+
+  const named = createKnightMetrics({ ...opts, table: "x" });
+  named.tasksTotal.labels("success").inc();
+  const t2 = await named.registry.metrics();
+  assert.match(t2, /roundtable_knight_tasks_total\{status="success",table="x",knight="galahad",runtime="pi"\} 1/);
+});
+
+test("metric names and labels are the shared roundtable_knight_* scheme", async () => {
+  const m = createKnightMetrics(opts);
+  m.tasksTotal.labels("ok").inc();
+  m.taskDuration.observe(1);
+  m.llmCost.labels("m", "api").inc(1);
+  m.recordTokens("m", { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 });
+  m.natsConnected.set(1);
+  m.activeTasks.set(0);
   m.toolCallsTotal.labels("t", "ok").inc();
+  m.toolCallDuration.labels("t").observe(1);
   m.toolCallsBlocked.labels("t", "r").inc();
   const text = await m.registry.metrics();
   assert.deepEqual(metricNames(text), [
-    "pi_knight_active_tasks",
-    "pi_knight_llm_cost_dollars_total",
-    "pi_knight_nats_connected",
-    "pi_knight_task_duration_seconds",
-    "pi_knight_tasks_total",
-    "pi_knight_tokens_total",
-    "pi_knight_tool_calls_blocked_total",
-    "pi_knight_tool_calls_total",
+    "roundtable_knight_active_tasks",
+    "roundtable_knight_llm_cost_usd_total",
+    "roundtable_knight_llm_tokens_total",
+    "roundtable_knight_nats_connected",
+    "roundtable_knight_task_duration_seconds",
+    "roundtable_knight_tasks_total",
+    "roundtable_knight_tool_call_duration_seconds",
+    "roundtable_knight_tool_calls_blocked_total",
+    "roundtable_knight_tool_calls_total",
   ]);
-  assert.match(text, /pi_knight_llm_cost_dollars_total\{knight="k",model="m"\} 1/);
-  assert.match(text, /pi_knight_tool_calls_blocked_total\{tool="t",reason="r"\} 1/);
+  assert.doesNotMatch(text, /pi_knight_|claude_knight_/);
+  assert.match(text, /roundtable_knight_llm_cost_usd_total\{model="m",billing="api",table="none",knight="galahad",runtime="pi"\} 1/);
+  for (const [type, n] of [["input", 1], ["output", 2], ["cache_read", 3], ["cache_write", 4]] as const) {
+    assert.match(text, new RegExp(`roundtable_knight_llm_tokens_total\\{model="m",type="${type}",table="none",knight="galahad",runtime="pi"\\} ${n}`));
+  }
+  assert.match(text, /roundtable_knight_tool_calls_blocked_total\{tool="t",reason="r",table="none",knight="galahad",runtime="pi"\} 1/);
 });
 
-test("claude-style overrides: extra llm cost label and bucket", async () => {
-  const m = createKnightMetrics({
-    prefix: "claude_knight",
-    taskDurationBuckets: [1, 3600],
-    llmCost: { labelNames: ["knight", "model", "billing"] },
-  });
-  m.llmCost.labels("k", "m", "sub").inc(2);
-  m.taskDuration.labels("k").observe(1);
+test("claude runtime: cost help override", async () => {
+  const m = createKnightMetrics({ runtime: "claude", knight: "k", taskDurationBuckets: [1, 3600], llmCostHelp: "API-equivalent" });
+  m.llmCost.labels("m", "subscription").inc(2);
+  m.taskDuration.observe(1);
   const text = await m.registry.metrics();
-  assert.match(text, /claude_knight_llm_cost_dollars_total\{knight="k",model="m",billing="sub"\} 2/);
-  assert.match(text, /claude_knight_task_duration_seconds_bucket\{le="3600",knight="k"\} 1/);
+  assert.match(text, /# HELP roundtable_knight_llm_cost_usd_total API-equivalent/);
+  assert.match(text, /roundtable_knight_llm_cost_usd_total\{model="m",billing="subscription",table="none",knight="k",runtime="claude"\} 2/);
+  assert.match(text, /roundtable_knight_task_duration_seconds_bucket\{le="3600",table="none",knight="k",runtime="claude"\} 1/);
 });

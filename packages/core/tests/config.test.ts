@@ -5,6 +5,7 @@ import { loadBaseConfig } from "../src/config.js";
 test("loadBaseConfig applies defaults", () => {
   assert.deepEqual(loadBaseConfig({ KNIGHT_NAME: "k" }), {
     knightName: "k",
+    table: "none",
     natsUrl: "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: "fleet-a.results",
     metricsPort: 3000,
@@ -41,4 +42,9 @@ test("loadBaseConfig reads the optional memory env vars", () => {
   const c = loadBaseConfig({ KNIGHT_NAME: "k", KNIGHT_MEMORY_DIR: "/memory/k", KNIGHT_MEMORY_ROOT: "/memory" });
   assert.equal(c.memoryDir, "/memory/k");
   assert.equal(c.memoryRoot, "/memory");
+});
+
+test("loadBaseConfig reads ROUNDTABLE_TABLE, none when empty", () => {
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", ROUNDTABLE_TABLE: "dev" }).table, "dev");
+  assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", ROUNDTABLE_TABLE: "" }).table, "none");
 });

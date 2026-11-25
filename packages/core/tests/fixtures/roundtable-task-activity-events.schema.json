@@ -9,6 +9,7 @@
     "type": {"enum": ["task.started", "task.heartbeat", "tool.started", "tool.finished", "assistant.message", "task.finished"]},
     "ts": {"type": "string", "format": "date-time"},
     "knight": {"type": "string"},
+    "table": {"type": "string"},
     "pod": {"type": "string"},
     "node": {"type": "string"},
     "taskId": {"type": "string"},

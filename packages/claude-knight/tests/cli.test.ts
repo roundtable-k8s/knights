@@ -138,7 +138,7 @@ test("generates the MCP config, the guardrail hook settings and the system promp
     type: "stdio",
     command: "/usr/local/bin/node",
     args: ["/app/dist/index.js", "mcp"],
-    env: { KNIGHT_NAME: "Gawain", NATS_RESULTS_PREFIX: "rt.results", LOG_LEVEL: "info" },
+    env: { KNIGHT_NAME: "Gawain", ROUNDTABLE_TABLE: "none", NATS_RESULTS_PREFIX: "rt.results", LOG_LEVEL: "info" },
     alwaysLoad: true,
   });
   assert.equal(mcp.mcpServers.vault.url, "http://from-env", "MCP_SERVERS_JSON wins over /config/mcp.json");
@@ -229,8 +229,8 @@ test("tool use: final text after the tool round trip, tool calls counted", async
   assert.equal(r.success, true, r.error);
   assert.equal(r.result, "TOOL_RESULT: hello-from-bash");
   assert.equal(r.turns, 2);
-  const m = await registry.getSingleMetricAsString("claude_knight_tool_calls_total");
-  assert.match(m, /tool="Bash",status="success"\} 1/);
+  const m = await registry.getSingleMetricAsString("roundtable_knight_tool_calls_total");
+  assert.match(m, /tool="Bash",status="success",table="none",knight="[^"]*",runtime="claude"\} 1/);
 });
 
 test("usage limit: fast-fail with usage_limited and the reset time; plan reserve blocks", async () => {

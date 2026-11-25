@@ -55,42 +55,35 @@ Expose metrics on `/metrics` endpoint (HTTP, same port as health check).
 
 ### Metric Definitions
 
+Every series carries the constant labels `table` (`ROUNDTABLE_TABLE`, `none` when unset),
+`knight` and `runtime` (`pi`). The names are shared with claude-knight (`runtime="claude"`).
+
 ```prometheus
 # Task execution
-pi_knight_tasks_total{knight="galahad",status="success"} 42
-pi_knight_tasks_total{knight="galahad",status="error"} 3
-pi_knight_tasks_total{knight="galahad",status="timeout"} 1
-pi_knight_tasks_total{knight="galahad",status="lost"} 1
+roundtable_knight_tasks_total{table="dev",knight="galahad",runtime="pi",status="success"} 42
+roundtable_knight_tasks_total{table="dev",knight="galahad",runtime="pi",status="error"} 3
+roundtable_knight_tasks_total{table="dev",knight="galahad",runtime="pi",status="lost"} 1
 
 # Task duration (histogram)
-pi_knight_task_duration_seconds_bucket{knight="galahad",le="10"} 5
-pi_knight_task_duration_seconds_bucket{knight="galahad",le="30"} 15
-pi_knight_task_duration_seconds_bucket{knight="galahad",le="60"} 30
-pi_knight_task_duration_seconds_bucket{knight="galahad",le="300"} 40
-pi_knight_task_duration_seconds_bucket{knight="galahad",le="1800"} 42
-pi_knight_task_duration_seconds_sum{knight="galahad"} 4523.7
-pi_knight_task_duration_seconds_count{knight="galahad"} 42
+roundtable_knight_task_duration_seconds_bucket{table="dev",knight="galahad",runtime="pi",le="60"} 30
+roundtable_knight_task_duration_seconds_sum{table="dev",knight="galahad",runtime="pi"} 4523.7
+roundtable_knight_task_duration_seconds_count{table="dev",knight="galahad",runtime="pi"} 42
 
-# LLM cost tracking
-pi_knight_llm_cost_dollars_total{knight="galahad",model="openrouter/deepseek/deepseek-v3.2"} 23.47
+# LLM cost (billing = auth mode; pi-knight is always "api")
+roundtable_knight_llm_cost_usd_total{table="dev",knight="galahad",runtime="pi",model="openrouter/deepseek/deepseek-v3.2",billing="api"} 23.47
 
-# Token usage
-pi_knight_tokens_total{knight="galahad",direction="input"} 504000
-pi_knight_tokens_total{knight="galahad",direction="output"} 357000
+# Token usage (type = input | output | cache_read | cache_write)
+roundtable_knight_llm_tokens_total{table="dev",knight="galahad",runtime="pi",model="openrouter/deepseek/deepseek-v3.2",type="input"} 504000
+roundtable_knight_llm_tokens_total{table="dev",knight="galahad",runtime="pi",model="openrouter/deepseek/deepseek-v3.2",type="output"} 357000
 
-# Tool usage
-pi_knight_tool_calls_total{knight="galahad",tool="bash"} 120
-pi_knight_tool_calls_total{knight="galahad",tool="read"} 89
-pi_knight_tool_calls_total{knight="galahad",tool="web_fetch"} 45
+# Tool usage (errors are status="error"; there is no separate errors counter)
+roundtable_knight_tool_calls_total{table="dev",knight="galahad",runtime="pi",tool="bash",status="success"} 120
+roundtable_knight_tool_call_duration_seconds_count{table="dev",knight="galahad",runtime="pi",tool="bash"} 120
+roundtable_knight_tool_calls_blocked_total{table="dev",knight="galahad",runtime="pi",tool="bash",reason="..."} 1
 
-# NATS health
-pi_knight_nats_connected{knight="galahad"} 1
-pi_knight_nats_messages_received_total{knight="galahad"} 46
-pi_knight_nats_messages_published_total{knight="galahad"} 42
-
-# Concurrency
-pi_knight_active_tasks{knight="galahad"} 1
-pi_knight_max_concurrent_tasks{knight="galahad"} 2
+# NATS health and concurrency
+roundtable_knight_nats_connected{table="dev",knight="galahad",runtime="pi"} 1
+roundtable_knight_active_tasks{table="dev",knight="galahad",runtime="pi"} 1
 ```
 
 ### Grafana Dashboard
@@ -186,11 +179,11 @@ The Prometheus metrics provide rolling totals. Combined with Grafana:
 
 | Alert | Condition | Severity |
 |-------|-----------|----------|
-| KnightDown | `pi_knight_nats_connected == 0` for 5m | Critical |
-| HighErrorRate | `rate(pi_knight_tasks_total{status="error"}[15m]) > 0.3` | Warning |
-| TaskTimeout | `pi_knight_tasks_total{status="timeout"}` increases | Warning |
-| TaskLost | `increase(pi_knight_tasks_total{status="lost"}[15m]) > 0` | Warning |
-| HighCost | `rate(pi_knight_llm_cost_dollars_total[1h]) > 5` | Info |
+| KnightDown | `roundtable_knight_nats_connected == 0` for 5m | Critical |
+| HighErrorRate | `rate(roundtable_knight_tasks_total{status="error"}[15m]) > 0.3` | Warning |
+| TaskTimeout | `roundtable_knight_tasks_total{status="timeout"}` increases | Warning |
+| TaskLost | `increase(roundtable_knight_tasks_total{status="lost"}[15m]) > 0` | Warning |
+| HighCost | `rate(roundtable_knight_llm_cost_usd_total[1h]) > 5` | Info |
 | ConsumerLag | Pending messages > 10 for 10m | Warning |
 | NoTasks | No tasks completed in 24h | Info |
 
