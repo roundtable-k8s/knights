@@ -13,7 +13,8 @@
  * (MEMORY.md, memory/*.md), as the knight contract already asks.
  */
 import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync } from "node:fs";
+import { chmod, lstat, readdir, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { resolveClaudeModel, type KnightConfig } from "./config.js";
@@ -128,36 +129,40 @@ export function taskWorkDir(config: KnightConfig, taskId: string, runId?: string
  * Remove a directory tree even when it holds read-only files/dirs (e.g. Go
  * envtest binaries). Adds owner write (+exec on dirs) before removing, and
  * never follows symlinks: links are unlinked, their targets left untouched.
+ * Asynchronous on purpose: a task's tree can hold a cloned repo with
+ * node_modules, and walking it synchronously blocked the event loop long enough
+ * to miss the task's heartbeats, so the server dead-lettered a task that then
+ * succeeded (#75).
  */
-export function forceRemoveTree(path: string): void {
-  const fix = (p: string): void => {
+export async function forceRemoveTree(path: string): Promise<void> {
+  const fix = async (p: string): Promise<void> => {
     let st;
     try {
-      st = lstatSync(p);
+      st = await lstat(p);
     } catch {
       return;
     }
     if (st.isSymbolicLink()) return;
     try {
-      chmodSync(p, st.mode | (st.isDirectory() ? 0o700 : 0o200));
+      await chmod(p, st.mode | (st.isDirectory() ? 0o700 : 0o200));
     } catch {
-      /* best effort; rmSync reports real failures */
+      /* best effort; rm reports real failures */
     }
-    if (st.isDirectory()) for (const name of readdirSync(p)) fix(join(p, name));
+    if (st.isDirectory()) for (const name of await readdir(p)) await fix(join(p, name));
   };
-  fix(path);
-  rmSync(path, { recursive: true, force: true });
+  await fix(path);
+  await rm(path, { recursive: true, force: true });
 }
 
 const activeWorkDirs = new Set<string>();
 
 /** Remove per-task dirs under <workDir>/work older than maxAgeMs that no running task owns. */
-export function sweepStaleWorkDirs(config: KnightConfig, maxAgeMs = 24 * 3600 * 1000): number {
+export async function sweepStaleWorkDirs(config: KnightConfig, maxAgeMs = 24 * 3600 * 1000): Promise<number> {
   const root = join(config.workDir, "work");
   let removed = 0;
   let names: string[];
   try {
-    names = readdirSync(root);
+    names = await readdir(root);
   } catch {
     return 0;
   }
@@ -165,9 +170,9 @@ export function sweepStaleWorkDirs(config: KnightConfig, maxAgeMs = 24 * 3600 * 
     const dir = join(root, name);
     if (activeWorkDirs.has(dir)) continue;
     try {
-      const st = lstatSync(dir);
+      const st = await lstat(dir);
       if (!st.isDirectory() || Date.now() - st.mtimeMs < maxAgeMs) continue;
-      forceRemoveTree(dir);
+      await forceRemoveTree(dir);
       removed++;
     } catch (e) {
       log.warn("Could not sweep stale task working directory", { dir, error: String(e) });
@@ -305,11 +310,11 @@ export async function executeTask(
     let cleanup = () => {};
     const cwd = taskWorkDir(config, taskId, runId);
     activeWorkDirs.add(cwd);
-    const removeWorkDir = (failed: boolean) => {
+    const removeWorkDir = async (failed: boolean) => {
       activeWorkDirs.delete(cwd);
       if (failed && process.env["DEBUG"]) return log.info("Keeping task working directory (DEBUG)", { taskId, cwd });
       try {
-        forceRemoveTree(cwd);
+        await forceRemoveTree(cwd);
       } catch (e) {
         log.warn("Could not remove task working directory", { taskId, cwd, error: String(e) });
       }
@@ -333,7 +338,7 @@ export async function executeTask(
         config,
         durationMs: Date.now() - started,
       });
-      removeWorkDir(true);
+      await removeWorkDir(true);
       remember({ taskId, runId, sessionId: state.sessionId, success: false, costUsd: outcome.cost, durationMs: Date.now() - started, turns: state.result?.num_turns ?? 0, finishedAt: new Date().toISOString(), error: outcome.error });
       return outcome;
     } finally {
@@ -367,7 +372,7 @@ export async function executeTask(
       durationMs: Date.now() - started,
       prs: state.prs,
     });
-    removeWorkDir(!outcome.success);
+    await removeWorkDir(!outcome.success);
     remember({
       taskId,
       runId,
