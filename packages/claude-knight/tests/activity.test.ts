@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { listInflight, TaskActivity } from "@roundtable/knight-core";
 import { applyMessage, newStreamState } from "../src/stream.js";
-import { activityEventErrors } from "@roundtable/knight-core";
 
 type Pub = { subject: string; ev: Record<string, any> };
 
