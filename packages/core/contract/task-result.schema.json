@@ -150,6 +150,48 @@
       "type": "boolean",
       "description": "The task was delivered to a knight that stopped before finishing it (max_deliver=1); it was not re-run."
     },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Echo of the task's attempt number (set only on a manual retry)."
+    },
+    "retry_of": {
+      "type": "string",
+      "description": "Echo of the task's `retryOf` (set only on a manual retry)."
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "task"
+      ],
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string",
+          "description": "The task text, capped at 64 KB."
+        },
+        "runId": {
+          "type": "string"
+        },
+        "chainName": {
+          "type": "string"
+        },
+        "stepName": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "The original task, on failure results only (`success: false`, including `lost`), so the operator can dead-letter and retry it."
+    },
     "timestamp": {
       "type": "string",
       "format": "date-time",

@@ -22,6 +22,7 @@
     "slot": {"type": "integer", "minimum": 0},
     "concurrency": {"type": "integer", "minimum": 1},
     "queuedFor": {"type": "integer", "minimum": 0},
+    "attempt": {"type": "integer", "minimum": 1},
     "turns": {"type": "integer", "minimum": 0},
     "inputTokens": {"type": "integer", "minimum": 0},
     "outputTokens": {"type": "integer", "minimum": 0},

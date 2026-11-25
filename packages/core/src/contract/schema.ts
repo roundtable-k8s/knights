@@ -42,6 +42,7 @@ export const TaskPayload = Type.Object(
       Type.Integer({ minimum: 1, description: "1-based attempt number, set by a manual retry. Absent means attempt 1." }),
     ),
     retryOf: str("The task ID this task retries (manual retry)."),
+    previousFailure: str("Why the earlier attempt failed or was lost (manual retry; up to 2 KB, longer values are cut)."),
     domain: str("Task domain the dispatcher routed on."),
     from: str("Knight that sent the task; a knight skips tasks it sent itself."),
     dispatched_by: str("Who dispatched the task (knight `nats_request` payloads)."),
@@ -131,6 +132,22 @@ export const TaskResult = Type.Object(
     lost: Type.Optional(
       Type.Boolean({ description: "The task was delivered to a knight that stopped before finishing it (max_deliver=1); it was not re-run." }),
     ),
+    attempt: Type.Optional(Type.Integer({ minimum: 1, description: "Echo of the task's attempt number (set only on a manual retry)." })),
+    retry_of: Type.Optional(Type.String({ description: "Echo of the task's `retryOf` (set only on a manual retry)." })),
+    task: Type.Optional(
+      Type.Object(
+        {
+          taskId: Type.String(),
+          task: Type.String({ description: "The task text, capped at 64 KB." }),
+          runId: Type.Optional(Type.String()),
+          chainName: Type.Optional(Type.String()),
+          stepName: Type.Optional(Type.String()),
+          model: Type.Optional(Type.String()),
+          attempt: Type.Optional(Type.Integer({ minimum: 1 })),
+        },
+        { description: "The original task, on failure results only (`success: false`, including `lost`), so the operator can dead-letter and retry it." },
+      ),
+    ),
     timestamp: Type.String({ format: "date-time", description: "When the result was published." }),
   },
   {
@@ -178,6 +195,7 @@ export const ActivityEvent = Type.Object(
     slot: Type.Optional(nonNegInt),
     concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
     queuedFor: Type.Optional(nonNegInt),
+    attempt: Type.Optional(Type.Integer({ minimum: 1 })),
     turns: Type.Optional(nonNegInt),
     inputTokens: Type.Optional(nonNegInt),
     outputTokens: Type.Optional(nonNegInt),

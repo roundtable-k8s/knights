@@ -346,3 +346,15 @@ test("events carry the table when set and omit it otherwise", () => {
   make(without).started();
   assert.equal("table" in without[0]!.ev, false);
 });
+
+test("task.started carries attempt only for a retry (#36)", () => {
+  const out: Pub[] = [];
+  make(out, { attempt: 2 }).started();
+  assert.equal(out[0]!.ev.attempt, 2);
+  const first: Pub[] = [];
+  make(first, { attempt: 1 }).started();
+  assert.ok(!("attempt" in first[0]!.ev));
+  const none: Pub[] = [];
+  make(none, {}).started();
+  assert.ok(!("attempt" in none[0]!.ev));
+});

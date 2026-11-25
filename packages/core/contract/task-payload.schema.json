@@ -72,6 +72,10 @@
       "type": "string",
       "description": "The task ID this task retries (manual retry)."
     },
+    "previousFailure": {
+      "type": "string",
+      "description": "Why the earlier attempt failed or was lost (manual retry; up to 2 KB, longer values are cut)."
+    },
     "domain": {
       "type": "string",
       "description": "Task domain the dispatcher routed on."

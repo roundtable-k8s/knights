@@ -160,3 +160,53 @@ test("refusals: pi-knight sends refused credits, claude-knight refused quota plu
   assert.equal(claude.refused, "quota");
   assert.equal(claude.usage_limited, true);
 });
+
+// ── Manual retry (#36) ──────────────────────────────────────────────
+
+import { promptWithRetryContext, taskResultFields, failureResult, lostTaskResult, MAX_ECHOED_TASK_BYTES } from "../src/contract/index.ts";
+
+test("parseTask reads attempt, retryOf and previousFailure (capped at 2 KB)", () => {
+  const p = parseTask(JSON.stringify({ task: "x", attempt: 2, retryOf: "t-1", previousFailure: "boom".repeat(1000) }), "s");
+  assert.equal(p.attempt, 2);
+  assert.equal(p.retryOf, "t-1");
+  assert.equal(p.previousFailure?.length, 2048);
+  const plain = parseTask(JSON.stringify({ task: "x" }), "s");
+  assert.equal(plain.attempt, undefined);
+  assert.equal(plain.previousFailure, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x", previousFailure: "  " }), "s").previousFailure, undefined);
+});
+
+test("promptWithRetryContext prefixes attempts above 1 only", () => {
+  const p = parseTask(JSON.stringify({ task: "Do it", attempt: 2, retryOf: "t-1", previousFailure: "timed out" }), "s");
+  const prompt = promptWithRetryContext(p);
+  assert.ok(prompt.startsWith("This is attempt 2 of a task that did not finish before (original task `t-1`; previous outcome: `timed out`). Before doing anything, check"));
+  assert.ok(prompt.endsWith("\n\nDo it"));
+  assert.equal(promptWithRetryContext(parseTask(JSON.stringify({ task: "Do it" }), "s")), "Do it");
+  assert.equal(promptWithRetryContext(parseTask(JSON.stringify({ task: "Do it", attempt: 1 }), "s")), "Do it");
+});
+
+test("taskResultFields: attempt/retry_of when set, task only on failure", () => {
+  const p = parseTask(JSON.stringify({ taskId: "t-2", task: "Do it", runId: "r", chainName: "c", stepName: "s", model: "m", attempt: 2, retryOf: "t-1" }), "x");
+  const ok = taskResultFields(p, true);
+  assert.deepEqual(ok, { attempt: 2, retry_of: "t-1" });
+  const failed = taskResultFields(p, false);
+  assert.deepEqual(failed.task, { taskId: "t-2", task: "Do it", runId: "r", chainName: "c", stepName: "s", model: "m", attempt: 2 });
+  assert.deepEqual(taskResultFields(parseTask("plain", "t-3"), true), {});
+  assert.equal(taskResultFields(parseTask("plain", "t-3"), false).task?.task, "plain");
+});
+
+test("failure echoes cap the task text at 64 KB of UTF-8", () => {
+  const big = "é".repeat(MAX_ECHOED_TASK_BYTES);
+  const echoed = taskResultFields({ task: big, taskId: "t" }, false).task!.task;
+  assert.ok(Buffer.byteLength(echoed) <= MAX_ECHOED_TASK_BYTES);
+  assert.ok(!echoed.includes("�"));
+});
+
+test("failure and lost results carry the task", () => {
+  const parsed = parseTask("hello", "t-4");
+  assert.equal(failureResult({ taskId: "t-4", knight: "k", model: "m", error: "e", parsed }).task?.task, "hello");
+  const lost = lostTaskResult({ taskId: "t-4", knight: "k", model: "m", parsed });
+  assert.equal(lost.lost, true);
+  assert.equal(lost.task?.taskId, "t-4");
+  assert.equal(failureResult({ taskId: "t-4", knight: "k", model: "m", error: "e" }).task, undefined);
+});

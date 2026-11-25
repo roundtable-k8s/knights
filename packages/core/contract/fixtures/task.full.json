@@ -7,6 +7,7 @@
   "model": "claude-opus-5-5",
   "attempt": 2,
   "retryOf": "chain-dev-implement.5f0c2a8e-1763990000000",
+  "previousFailure": "Task failed: timed out after 1800s",
   "domain": "code",
   "from": "rt-dev",
   "dispatched_by": "rt-dev",

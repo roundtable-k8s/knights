@@ -74,3 +74,14 @@ test("fixture result.lost: the lost-task result with claude-knight runtime field
   assert.equal(p.runtime, "claude-knight");
   assert.deepEqual(resultFixtureDiff(p, "result.lost"), []);
 });
+
+test("retry attempt: result carries attempt/retry_of; only a failure carries the task (#36)", () => {
+  const parsed = { task: "Do it", taskId: "t-1", attempt: 2, retryOf: "t-0" };
+  const ok = buildResultPayload(run, { ...meta, parsed });
+  assert.equal(ok.attempt, 2);
+  assert.equal(ok.retry_of, "t-0");
+  assert.ok(!("task" in ok));
+  const fail = buildResultPayload({ ...run, success: false, error: "x" }, { ...meta, parsed });
+  assert.equal(fail.task?.task, "Do it");
+  assert.ok(!("attempt" in buildResultPayload(run, meta)));
+});
