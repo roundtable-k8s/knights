@@ -1,0 +1,76 @@
+# A Knight running on claude-knight instead of pi-knight. The operator needs no
+# changes: spec.image swaps the runtime, everything else is the normal Knight CR.
+#
+# 1. Create the token once, on a machine with a browser (Claude Max/Pro plan):
+#      claude setup-token        # prints sk-ant-oat01-…, valid for one year
+# 2. Store it as a Secret (encrypt with SOPS before committing to the Flux repo):
+#      kubectl -n roundtable create secret generic claude-setup-token \
+#        --from-literal=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+# 3. Apply this Knight.
+---
+apiVersion: ai.roundtable.io/v1alpha1
+kind: Knight
+metadata:
+  name: galahad
+  namespace: roundtable
+spec:
+  image: ghcr.io/roundtable-k8s/claude-knight:latest
+  domain: security
+  # Claude Code aliases (sonnet, opus, haiku) or full claude-* ids. A non-Claude
+  # model here (like the CRD default) falls back to the plan's default model.
+  model: sonnet
+
+  skills:
+    - security
+    - shared
+    - vault
+
+  nats:
+    subjects:
+      - "fleet-a.tasks.security.>"
+
+  vault:
+    writablePaths:
+      - "Briefings/"
+      - "Roundtable/"
+
+  # Every concurrent task is its own Claude Code process on the same plan limits.
+  concurrency: 1
+  taskTimeout: 1800
+
+  envFrom:
+    - secretRef:
+        name: claude-setup-token   # provides CLAUDE_CODE_OAUTH_TOKEN
+  # Alternative: keep the token out of the pod and let an egress gateway swap it
+  # in. Drop the secretRef above and add these to env:
+  #   - name: ANTHROPIC_AUTH_TOKEN
+  #     value: placeholder-replaced-at-egress
+  #   - name: ANTHROPIC_CUSTOM_HEADERS
+  #     value: "anthropic-beta: oauth-2025-04-20"
+
+  env:
+    # subscription (default): bill to the Claude plan via the setup-token.
+    # api: use ANTHROPIC_API_KEY instead (e.g. the Max plan's monthly API credit).
+    - name: CLAUDE_AUTH_MODE
+      value: subscription
+    # Subscription knights run the official Claude Code CLI headless (claude -p);
+    # that is the default for subscription mode and the only runtime it allows.
+    # api mode defaults to the Agent SDK (CLAUDE_RUNTIME=sdk).
+    # - name: CLAUDE_RUNTIME
+    #   value: cli
+    # Stop taking tasks when any plan window is 80% used, leaving the rest of the
+    # week for interactive Claude Code and chat. 1 disables the reserve.
+    - name: CLAUDE_PLAN_RESERVE
+      value: "0.8"
+    - name: CLAUDE_EFFORT
+      value: medium
+    # Optional extra MCP servers, same shape as .mcp.json.
+    # - name: MCP_SERVERS_JSON
+    #   value: '{"mcpServers":{"vault":{"type":"http","url":"http://mcpvault.roundtable.svc:8080/mcp"}}}'
+
+  prompt:
+    identity: |
+      You are Sir Galahad, Knight of Security for the Round Table.
+      Your domain is threat intelligence, vulnerability triage and the
+      security posture of Derek's stack. Be precise, cite sources, and say
+      plainly when something does not affect us.

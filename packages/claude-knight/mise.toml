@@ -1,0 +1,10 @@
+# Claude-Knight baseline tools — baked into image at build time.
+# Every knight gets these. Knight-specific tools go in ConfigMap mise.toml.
+
+[tools]
+# ripgrep — fast search for skill scripts (Claude Code bundles its own for Grep)
+ripgrep = "latest"
+# Python — many arsenal skill scripts depend on it
+python = "3.12"
+# yq — YAML processing for skill scripts
+"github:mikefarah/yq" = "latest"

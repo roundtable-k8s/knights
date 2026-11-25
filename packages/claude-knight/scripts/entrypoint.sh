@@ -1,0 +1,212 @@
+#!/bin/bash
+# entrypoint.sh — Claude-Knight startup (same phases as pi-knight, minus Pi model config)
+#
+# Architecture:
+#   - /nix is a PVC mount (empty on first boot, persistent after)
+#   - Nix installer tarball is cached in the image at /opt/nix-cache/
+#   - First boot: install Nix to PVC (~30s), build flake tools (~1-3min)
+#   - Subsequent boots: everything cached on PVC (~2s)
+#   - NO init containers needed for Nix
+#
+# Mount requirements:
+#   /nix   → PVC (the entire Nix store + profiles)
+#   /data  → PVC (workspace, memory, mise tools)
+#   /config → ConfigMap (SOUL.md, flake.nix, etc.)
+
+set -eo pipefail
+
+log() { echo "[entrypoint] $(date '+%H:%M:%S') $*"; }
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 1: Workspace seeding (from defaults + ConfigMap)
+# ──────────────────────────────────────────────────────────────────
+log "Phase 1: Workspace"
+mkdir -p /data/memory /data/session-notes /data/scratch
+
+# Seed operational files from image defaults (only if missing on PVC)
+if [ -d /app/defaults ]; then
+  for f in /app/defaults/*.md; do
+    fname=$(basename "$f")
+    [ ! -f "/data/$fname" ] && cp "$f" "/data/$fname" && log "  Seeded $fname"
+  done
+fi
+
+# Sync personality files from ConfigMap → PVC (hash-gated)
+# Only overwrites when ConfigMap content actually changed.
+# Knights can self-modify /data/ files, but CRD-driven changes win.
+mkdir -p /data/.config-hashes
+for f in SOUL.md IDENTITY.md TOOLS.md; do
+  if [ -f "/config/$f" ]; then
+    config_hash=$(md5sum "/config/$f" | cut -d' ' -f1)
+    stored_hash=""
+    [ -f "/data/.config-hashes/$f" ] && stored_hash=$(cat "/data/.config-hashes/$f")
+    if [ "$config_hash" != "$stored_hash" ]; then
+      cp "/config/$f" "/data/$f"
+      echo "$config_hash" > "/data/.config-hashes/$f"
+      if [ -z "$stored_hash" ]; then
+        log "  Seeded $f from ConfigMap"
+      else
+        log "  Updated $f from ConfigMap (hash changed)"
+      fi
+    fi
+  fi
+done
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 1.5: Claude Code config dir on the PVC
+# ──────────────────────────────────────────────────────────────────
+# Sessions, linked skills and Claude Code state live under CLAUDE_CONFIG_DIR so
+# they survive restarts. Mark onboarding done so the CLI never prompts.
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/data/.claude-home}"
+mkdir -p "$CLAUDE_CONFIG_DIR/skills"
+if [ ! -f "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
+  echo '{"hasCompletedOnboarding":true}' > "$CLAUDE_CONFIG_DIR/.claude.json"
+fi
+# Optional MCP servers from the knight ConfigMap are read at task time from
+# /config/mcp.json; nothing to do here.
+log "Phase 1.5: Claude config dir $CLAUDE_CONFIG_DIR ✓"
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 2: Nix bootstrap (first boot only)
+# ──────────────────────────────────────────────────────────────────
+# Three modes:
+#   - /nix read-only  → shared store; tools prebuilt by the operator's build
+#     Job. Skip bootstrap/build, just source the per-knight profile.
+#   - /nix writable   → per-pod PVC store (legacy). Bootstrap + build locally.
+#   - no /nix         → skip Nix entirely.
+NIX_PROFILE="$HOME/.nix-profile"
+NIX_SHARED_STORE="false"
+
+# shellcheck source=scripts/nix-lib.sh
+. /app/scripts/nix-lib.sh
+
+if [ -d /nix ] && [ ! -w /nix ]; then
+  # Shared read-only store — tools come from the operator-published profile.
+  NIX_SHARED_STORE="true"
+  KNIGHT_NIX_PROFILE="${KNIGHT_NIX_PROFILE:-/nix/var/nix/profiles/knights/$(echo "${KNIGHT_NAME:-}" | tr '[:upper:]' '[:lower:]')}"
+  if [ -d "$KNIGHT_NIX_PROFILE/bin" ]; then
+    export PATH="$KNIGHT_NIX_PROFILE/bin:$PATH"
+    export NIX_CONF_DIR="/nix/etc/nix"
+    log "Phase 2: Shared Nix store (read-only) — profile $KNIGHT_NIX_PROFILE ✓"
+  else
+    log "Phase 2: Shared Nix store mounted but no profile at $KNIGHT_NIX_PROFILE yet (build pending)"
+  fi
+elif [ -d /nix ] && [ -w /nix ]; then
+  rt_bootstrap_nix
+  rt_restore_profile
+  if rt_source_nix; then
+    log "Phase 2: Nix ready — $(nix --version 2>/dev/null || echo 'binary found')"
+  fi
+else
+  log "Phase 2: No /nix mount — skipping Nix bootstrap"
+fi
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 3: Flake tool installation (content-addressed, cached)
+# ──────────────────────────────────────────────────────────────────
+FLAKE_FILE="/config/flake.nix"
+NIX_ENV="/data/nix-env"
+HASH_FILE="/data/.nix-flake-hash"
+
+if [ "$NIX_SHARED_STORE" = "true" ]; then
+  log "Phase 3: Shared store — flake tools prebuilt by operator, skipping local build"
+elif [ -f "$FLAKE_FILE" ] && command -v nix >/dev/null 2>&1; then
+  NEW_HASH=$(sha256sum "$FLAKE_FILE" | cut -d' ' -f1)
+
+  if [ -f "$HASH_FILE" ] && [ "$(cat "$HASH_FILE")" = "$NEW_HASH" ] \
+     && [ -d "$NIX_ENV/bin" ] && [ "$(ls "$NIX_ENV/bin/" 2>/dev/null | wc -l)" -gt 0 ]; then
+    # Verify a symlink actually resolves
+    FIRST_BIN=$(ls "$NIX_ENV/bin/" | head -1)
+    if [ -x "$NIX_ENV/bin/$FIRST_BIN" ] 2>/dev/null; then
+      log "Phase 3: Flake tools cached ($(ls "$NIX_ENV/bin/" | wc -l) tools) ✓"
+    else
+      log "Phase 3: Flake cache broken — rebuilding"
+      rm -f "$HASH_FILE"
+    fi
+  fi
+
+  # Build if not cached
+  if [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$NEW_HASH" ]; then
+    log "Phase 3: Building flake tools..."
+
+    BUILD_DIR=$(mktemp -d)
+    cp "$FLAKE_FILE" "$BUILD_DIR/flake.nix"
+    cd "$BUILD_DIR"
+
+    if STORE_PATH=$(nix build ".#default" --no-link --print-out-paths 2>&1); then
+      STORE_PATH=$(echo "$STORE_PATH" | tail -1)
+      if [ -d "$STORE_PATH" ]; then
+        chmod -R u+w "$NIX_ENV" 2>/dev/null || true
+        rm -rf "$NIX_ENV" 2>/dev/null || true
+        cp -a "$STORE_PATH" "$NIX_ENV"
+        echo "$NEW_HASH" > "$HASH_FILE"
+        log "  Flake tools ready: $(ls "$NIX_ENV/bin/" | wc -l) tools"
+      else
+        log "  WARNING: Nix build produced invalid path: $STORE_PATH"
+      fi
+    else
+      log "  WARNING: Nix flake build failed (non-fatal):"
+      echo "$STORE_PATH" | tail -5
+    fi
+
+    rm -rf "$BUILD_DIR"
+    cd /app
+  fi
+else
+  log "Phase 3: No flake.nix or no Nix — skipping"
+fi
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 4: Mise tools (if any per-knight config)
+# ──────────────────────────────────────────────────────────────────
+if [ -f /config/mise.toml ] && command -v mise >/dev/null 2>&1; then
+  log "Phase 4: Mise tools"
+  /app/scripts/mise-init.sh 2>&1 | sed 's/^/  /' || log "  WARNING: mise init failed (non-fatal)"
+else
+  log "Phase 4: No mise config — skipping"
+fi
+
+# ──────────────────────────────────────────────────────────────────
+# Phase 4.5: Vault write check
+# ──────────────────────────────────────────────────────────────────
+if [ -d "/vault" ]; then
+  VAULT_WRITABLE="false"
+  for wpath in Briefings Roundtable; do
+    if [ -d "/vault/$wpath" ]; then
+      if touch "/vault/$wpath/.write-test" 2>/dev/null; then
+        rm -f "/vault/$wpath/.write-test"
+        VAULT_WRITABLE="true"
+      fi
+    fi
+  done
+  if [ "$VAULT_WRITABLE" = "true" ]; then
+    log "Phase 4.5: Vault writable paths verified ✓"
+    export VAULT_WRITABLE=true
+  else
+    log "  WARNING: Vault mounted but writable paths NOT writable"
+    export VAULT_WRITABLE=false
+  fi
+else
+  log "Phase 4.5: No vault mount — skipping"
+fi
+
+# Phase 4.9: Git credential setup
+# ──────────────────────────────────────────────────────────────────
+# With GITHUB_TOKEN_FILE (set by the operator when spec.github.tokenSecretRef
+# is configured) git reads the refreshing token file on every call; otherwise
+# gh / GH_TOKEN env as before. See scripts/github/configure-git.sh.
+# shellcheck source=scripts/github/configure-git.sh
+. /app/scripts/github/configure-git.sh
+
+# Phase 5: Start the knight
+# ──────────────────────────────────────────────────────────────────
+# Set PATH with tool priority
+export PATH="/data/nix-env/bin:/data/bin:/data/.mise/shims:/app/.mise/shims:$PATH"
+# The gh shim goes first so every gh call, including Claude Code's Bash tool
+# (it inherits this PATH), picks up the current token from GITHUB_TOKEN_FILE.
+if [ -n "${GITHUB_TOKEN_FILE:-}" ]; then
+  export PATH="/opt/roundtable/bin:$PATH"
+fi
+
+log "Phase 5: Starting claude-knight"
+exec node dist/index.js
