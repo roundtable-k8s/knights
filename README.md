@@ -40,7 +40,7 @@ Each package keeps its own `flake.nix` and `mise.toml` for now.
 
 The images do not set `NODE_ENV=production`, and both runtimes strip `NODE_ENV=production` and `npm_config_omit` / `npm_config_production` (see `agentShellEnv` in `packages/core`) from the environment of agent shells: pi-knight scrubs its own process env at startup, claude-knight scrubs the Claude Code child env. So `npm ci` in a repo a knight works on installs its dev dependencies.
 
-The real-NATS tests in `packages/core` (pull loop, rollouts, micro service, roster) need a `nats-server` binary on `PATH` or in `NATS_SERVER_BIN`; without one they are skipped. CI installs it.
+The real-NATS tests in `packages/core` (pull loop, rollouts, micro service, roster) need a `nats-server` binary on `PATH` or in `NATS_SERVER_BIN`; without one they are skipped.
 
 ## What happens to tasks during a rollout
 
