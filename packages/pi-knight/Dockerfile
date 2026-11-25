@@ -66,8 +66,7 @@ RUN install -D -m 0755 scripts/github/git-credential-roundtable /usr/local/bin/g
     && install -D -m 0755 scripts/github/gh /opt/roundtable/bin/gh
 
 # ── Runtime ───────────────────────────────────────────────────────
-ENV NODE_ENV=production \
-    MISE_DATA_DIR=/data/.mise \
+ENV MISE_DATA_DIR=/data/.mise \
     MISE_YES=1
 
 # Non-root

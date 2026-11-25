@@ -91,6 +91,16 @@ test("api mode requires an API key and strips the OAuth token", () => {
   assert.equal(child.ANTHROPIC_BASE_URL, "http://tensorzero"); // gateways are fine with API keys
 });
 
+test("the Claude Code child env carries no production-mode switches", () => {
+  const env = { NODE_ENV: "production", npm_config_omit: "dev", CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-abc", PATH: "/bin" };
+  for (const mode of ["subscription", "api"] as const) {
+    const child = buildChildEnv(mode, {}, env);
+    assert.equal(child.NODE_ENV, undefined);
+    assert.equal(child.npm_config_omit, undefined);
+    assert.equal(child.PATH, "/bin");
+  }
+});
+
 // ── hooks ──────────────────────────────────────────────────────────
 
 test("bash guardrails block the commands listed in src/guardrails.ts", () => {
