@@ -7,7 +7,7 @@
  *   - system-prompt.md  → --append-system-prompt-file (SOUL/IDENTITY/AGENTS/TOOLS can be large)
  *   - mcp.json          → --mcp-config: the Round Table tools as a stdio server
  *                         (`node dist/index.js mcp`) merged with /config/mcp.json and MCP_SERVERS_JSON
- *   - settings.json     → --settings: the Bash guardrails as a PreToolUse command hook
+ *   - settings.json     → --settings: the Bash and secret-write guardrails as a PreToolUse command hook
  *                         (`node dist/index.js hook pretooluse`)
  * The prompt goes in on stdin, so its size is not bound by argv limits.
  *
@@ -105,7 +105,7 @@ export function buildCliInvocation(config: KnightConfig, opts: CliInvocationOpti
     attribution: { commit: "", pr: "" },
     hooks: {
       PreToolUse: [
-        { matcher: "Bash", hooks: [{ type: "command", command: `${shellQuote(self)} hook pretooluse`, timeout: 30 }] },
+        { matcher: "Bash|Write|Edit|MultiEdit", hooks: [{ type: "command", command: `${shellQuote(self)} hook pretooluse`, timeout: 30 }] },
       ],
     },
   };

@@ -247,3 +247,26 @@ test("cli stream logs the blocked command (truncated to 200 chars)", async () =>
     setLogStream(process.stdout);
   }
 });
+
+test("hook denies Write, Edit and MultiEdit that carry a token-shaped secret", () => {
+  const token = `ghp_${"a".repeat(36)}`;
+  const inputs: Array<[string, unknown]> = [
+    ["Write", { file_path: "/x", content: `T=${token}` }],
+    ["Edit", { file_path: "/x", old_string: "a", new_string: token }],
+    ["MultiEdit", { file_path: "/x", edits: [{ old_string: "a", new_string: token }] }],
+  ];
+  for (const [tool_name, tool_input] of inputs) {
+    const out = JSON.parse(handlePreToolUseHook(JSON.stringify({ hook_event_name: "PreToolUse", tool_name, tool_input })));
+    assert.equal(out.hookSpecificOutput.permissionDecision, "deny", tool_name);
+    assert.equal(out.hookSpecificOutput.permissionDecisionReason, "Blocked by knight safety policy: secret_in_content");
+  }
+});
+
+test("hook allows Write and Edit without a secret", () => {
+  for (const [tool_name, tool_input] of [
+    ["Write", { file_path: "/x", content: "const a = 1;\n" }],
+    ["Edit", { file_path: "/x", old_string: "a", new_string: "b" }],
+  ] as Array<[string, unknown]>) {
+    assert.equal(handlePreToolUseHook(JSON.stringify({ hook_event_name: "PreToolUse", tool_name, tool_input })), "");
+  }
+});
