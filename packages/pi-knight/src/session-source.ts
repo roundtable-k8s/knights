@@ -3,6 +3,7 @@
  * sessions come from knight.ts, persisted ones from the pi session JSONL files
  * (sessions.ts), mapped to the dashboard's shapes by introspect-format.ts.
  */
+import { hostname } from "node:os";
 import { readFile } from "node:fs/promises";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { IntrospectItem, IntrospectOptions, LiveSession, SessionSource } from "@roundtable/knight-core";
@@ -88,6 +89,5 @@ export function piSessionSource(config: Pick<KnightConfig, "knightModel">, root:
 
 /** Options for the core's startIntrospect / handleIntrospect. */
 export function introspectOptions(config: KnightConfig): IntrospectOptions<Entry> {
-  const { pod, node } = podIdentity();
-  return { knight: config.knightName, source: piSessionSource(config), identity: { pod, ...(node ? { node } : {}) } };
+  return { knight: config.knightName, source: piSessionSource(config), identity: podIdentity(process.env, hostname()) };
 }
