@@ -114,7 +114,7 @@ export const TaskResult = Type.Object(
       input: count("Input tokens."),
       output: count("Output tokens."),
       cacheRead: Type.Optional(count("Cached input tokens read.")),
-      cacheWrite: Type.Optional(count("Cached input tokens written (claude-knight).")),
+      cacheWrite: Type.Optional(count("Cached input tokens written.")),
     }),
     model: Type.String({ description: "The model actually used, whether or not the task carried an override." }),
     tool_calls: Type.Optional(count("pi-knight: tool calls the agent made.")),

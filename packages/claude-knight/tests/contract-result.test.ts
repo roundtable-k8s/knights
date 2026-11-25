@@ -114,3 +114,15 @@ test("a thrown connection reset is transient network; an ordinary failure is not
   });
   assert.equal(turns.transient, undefined);
 });
+
+test("cache usage: tokens.cacheRead and cacheWrite are published, input stays uncached", () => {
+  const out = classifyResult({
+    result: { type: "result", subtype: "success", is_error: false, result: "ok", num_turns: 1, total_cost_usd: 0.1,
+      usage: { input_tokens: 6, output_tokens: 40, cache_read_input_tokens: 9000, cache_creation_input_tokens: 1500 } } as never,
+    lastAssistantText: "",
+    aborted: false,
+    config,
+    durationMs: 1000,
+  });
+  assert.deepEqual(buildResultPayload(out, meta).tokens, { input: 6, output: 40, cacheRead: 9000, cacheWrite: 1500 });
+});

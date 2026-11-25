@@ -11,7 +11,7 @@ export function failedTaskResult(errMsg: string, model: string): TaskResult {
     success: false,
     error: errMsg,
     cost: 0,
-    tokens: { input: 0, output: 0, cacheRead: 0 },
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     model,
     toolCalls: 0,
     ...(refused ? { refused } : {}),
