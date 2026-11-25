@@ -68,7 +68,7 @@ describe("knight micro service against a real nats-server", { skip: !hasBin(NATS
   let svc: KnightService;
   let active = 1;
   let shutdownDone = false;
-  const metrics = createKnightMetrics({ prefix: "svc_test" });
+  const metrics = createKnightMetrics({ runtime: "pi-knight", knight: "Tester" });
   const port = 4800 + Math.floor(Math.random() * 500);
   const url = `nats://127.0.0.1:${port}`;
 
@@ -82,9 +82,8 @@ describe("knight micro service against a real nats-server", { skip: !hasBin(NATS
       try { client = await connect({ servers: url }); break; } catch { await sleep(100); }
     }
     nc = await connect({ servers: url });
-    metrics.tasksTotal.labels("Tester", "success").inc(3);
-    metrics.tasksTotal.labels("Tester", "error").inc();
-    metrics.tasksTotal.labels("Other", "error").inc(5);
+    metrics.tasksTotal.labels("success").inc(3);
+    metrics.tasksTotal.labels("error").inc();
     svc = await startKnightService({
       nc,
       knightName: "Tester",

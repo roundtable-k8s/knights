@@ -155,7 +155,10 @@ export interface KnightService {
   metadata(): Record<string, string>;
 }
 
-/** Counts from the shared prom-client `tasksTotal` counter (labels: knight, status). */
+/**
+ * Counts from the shared prom-client `tasksTotal` counter (label: status). `knight` is a registry
+ * default label, which get() does not return, so only a series that names another knight is skipped.
+ */
 export async function countsFromMetrics(
   tasksTotal: { get(): Promise<{ values: Array<{ value: number; labels: Record<string, unknown> }> }> },
   knight: string,
@@ -163,7 +166,7 @@ export async function countsFromMetrics(
   let total = 0;
   let failed = 0;
   for (const v of (await tasksTotal.get()).values) {
-    if (v.labels["knight"] !== knight) continue;
+    if (v.labels["knight"] !== undefined && v.labels["knight"] !== knight) continue;
     total += v.value;
     if (v.labels["status"] === "error" || v.labels["status"] === "lost") failed += v.value;
   }
