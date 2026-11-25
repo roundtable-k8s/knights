@@ -229,70 +229,87 @@ export interface SubscribeOptions {
   ackWaitMs?: number;
 }
 
-/** Reconcile the durable pull consumer, start the pull loop and the lost-task watcher. */
+/** Minimal JetStream manager surface bindConsumer needs (lets tests inject a fake). */
+export interface ConsumerManager {
+  consumers: {
+    info(stream: string, durable: string): Promise<unknown>;
+    add(stream: string, cfg: any): Promise<unknown>;
+  };
+}
+
+export interface BindConsumerOptions {
+  /** How long to wait for the operator to create the consumer before falling back. Default 2 min. */
+  waitMs?: number;
+  /** First retry delay; doubles each attempt up to maxDelayMs. */
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}
+
+const BIND_WAIT_MS = 120_000;
+
+/**
+ * Bind to the durable consumer the operator owns; never modifies or deletes it.
+ * If it is missing, retry with backoff for up to waitMs, then create it with `desired`
+ * (fallback for knights running against an older operator).
+ */
+export async function bindConsumer(
+  jsm: ConsumerManager,
+  stream: string,
+  desired: { durable_name: string; [k: string]: unknown },
+  opts: BindConsumerOptions = {},
+): Promise<"bound" | "created"> {
+  const durable = desired.durable_name;
+  const waitMs = opts.waitMs ?? BIND_WAIT_MS;
+  const maxDelay = opts.maxDelayMs ?? 10_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const now = opts.now ?? Date.now;
+  const deadline = now() + waitMs;
+  let delay = opts.initialDelayMs ?? 1_000;
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await jsm.consumers.info(stream, durable);
+      log.info("Bound to operator-owned consumer", { durable, stream, attempt });
+      return "bound";
+    } catch (err) {
+      const code = (err as { code?: string | number; message?: string }) ?? {};
+      const notFound = /not found|10014|404/i.test(`${code.code ?? ""} ${code.message ?? ""}`) || code.code === undefined;
+      if (!notFound) throw err;
+      const remaining = deadline - now();
+      log.info("Consumer not found yet — waiting for the operator", { durable, stream, attempt, remainingMs: Math.max(0, remaining) });
+      if (remaining <= 0) break;
+      await sleep(Math.min(delay, remaining));
+      delay = Math.min(delay * 2, maxDelay);
+    }
+  }
+
+  log.warn("Consumer not created by the operator in time — creating it (older operator?)", { durable, stream, waitMs });
+  await jsm.consumers.add(stream, desired);
+  log.info("Consumer ready", { durable, stream });
+  return "created";
+}
+
+/** Bind to the operator-owned durable pull consumer, start the pull loop and the lost-task watcher. */
 export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOptions): Promise<TaskPuller> {
   if (!nc || !js) throw new Error("NATS not connected");
   _config = config;
 
   const jsm: JetStreamManager = await jetstreamManager(nc);
 
-  // Create/bind durable pull consumer
   const durableName = `${config.knightName}-consumer`;
-  const filterSubjects = config.subscribeTopics;
-
-  // Reconcile durable consumer. NATS does not allow updating deliver_policy or max_deliver
-  // on an existing consumer, so those (and the filters) force a recreate; ack_wait can be
-  // updated in place — which matters, because recreating a DeliverPolicy.All consumer can replay the stream.
   const ackWaitMs = opts.ackWaitMs ?? ACK_WAIT_MS;
-  const desiredConfig = {
+  await bindConsumer(jsm, config.natsTasksStream, {
     durable_name: durableName,
-    filter_subjects: filterSubjects,
+    filter_subjects: config.subscribeTopics,
     ack_policy: AckPolicy.Explicit,
     deliver_policy: DeliverPolicy.All,
     // A task that crashed mid-run is NOT re-run silently; it is reported as a failure (see watchLostTasks).
     max_deliver: 1,
     // Heartbeat window, not the task timeout: running tasks send working() every HEARTBEAT_MS.
     ack_wait: ackWaitMs * 1_000_000, // nanoseconds
-  };
-
-  let exists = false;
-  try {
-    const existing = await jsm.consumers.info(config.natsTasksStream, durableName);
-    const existingFilters = existing.config.filter_subjects ??
-      (existing.config.filter_subject ? [existing.config.filter_subject] : []);
-    const filtersDiffer = JSON.stringify([...existingFilters].sort()) !== JSON.stringify([...filterSubjects].sort());
-    const mustRecreate =
-      filtersDiffer ||
-      existing.config.deliver_policy !== DeliverPolicy.All ||
-      existing.config.max_deliver !== 1;
-
-    if (mustRecreate) {
-      log.warn("Consumer config mismatch — recreating", {
-        durable: durableName,
-        reason: {
-          filters: filtersDiffer,
-          deliverPolicy: existing.config.deliver_policy !== DeliverPolicy.All,
-          maxDeliver: existing.config.max_deliver !== 1,
-        },
-      });
-      await jsm.consumers.delete(config.natsTasksStream, durableName);
-    } else {
-      exists = true;
-      if (existing.config.ack_wait !== desiredConfig.ack_wait) {
-        log.info("Updating consumer ack_wait in place", { durable: durableName, ackWaitMs });
-        await jsm.consumers.update(config.natsTasksStream, durableName, { ack_wait: desiredConfig.ack_wait });
-      } else {
-        log.info("Consumer config matches — reusing", { durable: durableName, filters: existingFilters });
-      }
-    }
-  } catch {
-    log.info("No existing consumer found, creating new", { durable: durableName });
-  }
-
-  if (!exists) {
-    await jsm.consumers.add(config.natsTasksStream, desiredConfig);
-    log.info("Consumer ready", { durable: durableName, stream: config.natsTasksStream, filters: filterSubjects });
-  }
+  });
 
   const pullConsumer = await js.consumers.get(config.natsTasksStream, durableName);
   const stopWatch = watchLostTasks(jsm, config.natsTasksStream, durableName, opts.onLost);
