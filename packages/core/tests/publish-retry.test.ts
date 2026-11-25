@@ -17,10 +17,12 @@ function fixture(errors: unknown[]) {
   const sleeps: number[] = [];
   let calls = 0;
   const delivered: string[] = [];
+  const msgIDs: (string | undefined)[] = [];
   const opts: PublishResultOptions = {
     js: {
-      publish: (async (subject: string) => {
+      publish: (async (subject: string, _p: unknown, o?: { msgID?: string }) => {
         calls++;
+        msgIDs.push(o?.msgID);
         const e = errors.shift();
         if (e) throw e;
         delivered.push(subject);
@@ -30,7 +32,7 @@ function fixture(errors: unknown[]) {
     sleep: async (ms) => { sleeps.push(ms); t += ms; },
     now: () => t,
   };
-  return { opts, sleeps, calls: () => calls, delivered };
+  return { opts, sleeps, calls: () => calls, delivered, msgIDs };
 }
 
 describe("publishResult retry (#91)", () => {
@@ -40,6 +42,7 @@ describe("publishResult retry (#91)", () => {
     assert.equal(f.calls(), 3);
     assert.deepEqual(f.sleeps, [500, 1000]);
     assert.equal(f.delivered.length, 1);
+    assert.deepEqual(f.msgIDs, ["result-t1", "result-t1", "result-t1"]);
   });
 
   it("caps the delay at 5 s and gives up once the budget is spent", async () => {
@@ -73,5 +76,21 @@ describe("publishResult retry (#91)", () => {
     const f = fixture([new JetStreamApiError({ code: 503, err_code: 10008, description: "no leader" })]);
     await publishResult("t1", result, f.opts);
     assert.equal(f.calls(), 2);
+  });
+});
+
+describe("publishResult no responders (#91)", () => {
+  const noResp = () => new Error("jetstream is not enabled");
+
+  it("retries no-responders under a short sub-budget, then delivers (leader election)", async () => {
+    const f = fixture([noResp(), noResp()]);
+    await publishResult("t1", result, { ...f.opts, retryMs: 60_000, isConnected: () => true });
+    assert.equal(f.calls(), 3);
+  });
+
+  it("fails fast on no-responders once the sub-budget is spent (missing stream)", async () => {
+    const f = fixture(Array.from({ length: 100 }, noResp));
+    await assert.rejects(publishResult("t1", result, { ...f.opts, retryMs: 60_000, isConnected: () => true, noRespondersRetryMs: 3_000 }), /not enabled/);
+    assert.ok(f.sleeps.reduce((a, b) => a + b, 0) <= 3_500, "gave up long before the full budget");
   });
 });

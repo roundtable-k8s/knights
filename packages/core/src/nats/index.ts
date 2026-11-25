@@ -500,6 +500,8 @@ let _retryMs = 60_000;
 
 /** Default total time publishResult retries a failing publish. */
 export const RESULT_PUBLISH_RETRY_MS = 60_000;
+/** While connected, "no responders" is retried this long (a stream electing a leader) before it counts as a missing stream. */
+export const NO_RESPONDERS_RETRY_MS = 10_000;
 const RETRY_INITIAL_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 5_000;
 
@@ -508,6 +510,10 @@ export interface PublishResultOptions {
   retryMs?: number;
   /** JetStream client to use instead of the one from connectNats (tests). */
   js?: Pick<JetStreamClient, "publish">;
+  /** Budget for "no responders" while connected (leader election); a missing stream fails after this. Default 10 s. */
+  noRespondersRetryMs?: number;
+  /** Connection state probe (tests). Default: the live connection. */
+  isConnected?: () => boolean;
   initialDelayMs?: number;
   maxDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -516,15 +522,17 @@ export interface PublishResultOptions {
 
 /**
  * True for an error no retry can fix: a payload over the server's max_payload, a bad argument,
- * a 4xx JetStream API answer, or JetStream/the stream not answering while the connection is up
- * (no stream matches the subject). While the connection is down, "nobody answered" is retried.
+ * or a 4xx JetStream API answer. "Nobody answered" is not here: see isNoRespondersError.
  */
-export function isNonRetryablePublishError(err: unknown, isConnected: boolean): boolean {
+export function isNonRetryablePublishError(err: unknown): boolean {
   if (err instanceof InvalidArgumentError || err instanceof TypeError) return true;
   if (err instanceof JetStreamApiError) return err.status >= 400 && err.status < 500;
-  // js.publish reports "nobody answered" as JetStreamNotEnabled (class not exported by the package).
-  if (err instanceof Error && err.message === "jetstream is not enabled") return isConnected;
   return false;
+}
+
+/** js.publish reports "nobody answered" as JetStreamNotEnabled (class not exported by the package). */
+export function isNoRespondersError(err: unknown): boolean {
+  return err instanceof Error && err.message === "jetstream is not enabled";
 }
 
 /**
@@ -551,15 +559,27 @@ export async function publishResult(
   const deadline = now() + (opts.retryMs ?? _retryMs);
   const maxDelay = opts.maxDelayMs ?? RETRY_MAX_DELAY_MS;
   let delay = opts.initialDelayMs ?? RETRY_INITIAL_DELAY_MS;
+  const noRespondersMs = opts.noRespondersRetryMs ?? NO_RESPONDERS_RETRY_MS;
+  let noRespondersSince: number | undefined;
+  // Same msgID on every attempt: a timed-out publish may have been stored, and JetStream
+  // drops the duplicate (default duplicate window 2 min > the retry budget).
+  const msgID = `result-${taskId}`;
 
   for (let attempt = 1; ; attempt++) {
     try {
-      await client.publish(subject, payload);
+      await client.publish(subject, payload, { msgID });
       log.info("Result published", { taskId, subject, ...(attempt > 1 ? { attempt } : {}) });
       return;
     } catch (err) {
       const remaining = deadline - now();
-      if (isNonRetryablePublishError(err, connected) || remaining <= 0) throw err;
+      if (isNonRetryablePublishError(err) || remaining <= 0) throw err;
+      if (isNoRespondersError(err) && (opts.isConnected ?? (() => connected))()) {
+        // Connected but nobody answered: a leader election, or no stream for the subject. Fail fast on the latter.
+        noRespondersSince ??= now();
+        if (now() - noRespondersSince >= noRespondersMs) throw err;
+      } else {
+        noRespondersSince = undefined;
+      }
       const wait = Math.min(delay, remaining);
       log.warn("Result publish failed — retrying", {
         taskId, subject, attempt, retryInMs: wait, error: err instanceof Error ? err.message : String(err),

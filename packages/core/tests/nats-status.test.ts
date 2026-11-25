@@ -7,6 +7,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
+import { connect } from "@nats-io/transport-node";
+import { jetstreamManager } from "@nats-io/jetstream";
 import { connectNats, drain, publishResult } from "../src/nats/index.ts";
 import { createKnightMetrics } from "../src/metrics.ts";
 import type { TaskResult } from "../src/contract/index.ts";
@@ -46,6 +48,16 @@ describe("NATS status callback (real nats-server) (#91)", { skip: !hasBin(NATS_B
     proc = start();
     const url = `nats://127.0.0.1:${port}`;
 
+    // A stream on the file store (-sd) survives the restart.
+    let setup: Awaited<ReturnType<typeof connect>> | undefined;
+    for (let i = 0; i < 100 && !setup; i++) {
+      try { setup = await connect({ servers: url }); } catch { await sleep(100); }
+    }
+    assert.ok(setup, "setup connection");
+    const jsm = await jetstreamManager(setup);
+    await jsm.streams.add({ name: "RESULTS", subjects: ["fleet-a.results.>"] });
+    await setup.close();
+
     const metrics = createKnightMetrics({ runtime: "pi", knight: "k" });
     const seen: boolean[] = [];
     const onStatus = (up: boolean) => { seen.push(up); metrics.setNatsConnected(up); };
@@ -75,7 +87,13 @@ describe("NATS status callback (real nats-server) (#91)", { skip: !hasBin(NATS_B
     const up = await metrics.registry.metrics();
     assert.match(up, /roundtable_knight_nats_connected\{[^}]*\} 1/);
     assert.match(up, /roundtable_knight_nats_reconnects_total\{[^}]*\} 1/);
-    // No stream holds the subject on this fresh server, so the publish fails for good — but not before the reconnect.
-    await pending.then(() => {}, (e) => assert.ok(e instanceof Error));
+    await pending;
+    const check = await connect({ servers: url });
+    try {
+      const info = await (await jetstreamManager(check)).streams.info("RESULTS");
+      assert.equal(info.state.messages, 1, "exactly one stored result");
+    } finally {
+      await check.close();
+    }
   });
 });
