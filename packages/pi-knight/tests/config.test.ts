@@ -30,3 +30,14 @@ test("pi-knight config env overrides and required vars", () => {
   assert.equal(c.maxConcurrentTasks, 4);
   assert.throws(() => loadConfig({ KNIGHT_NAME: "k" }), /SUBSCRIBE_TOPICS/);
 });
+
+test("pi-knight config survives bad numeric and list settings", () => {
+  for (const v of ["abc", "0", "-3"]) assert.equal(loadConfig({ ...env, MAX_CONCURRENT_TASKS: v }).maxConcurrentTasks, 1);
+  assert.deepEqual(loadConfig({ KNIGHT_NAME: "k", SUBSCRIBE_TOPICS: "a, ,b," }).subscribeTopics, ["a", "b"]);
+  assert.equal(loadConfig({ ...env, TASK_TIMEOUT_MS: "0" }).taskTimeoutMs, 1_800_000);
+  const c = loadConfig({ ...env, MAX_RETRY_DELAY_MS: "x", THINKING_BUDGET_LOW: "nan", SESSION_RETENTION_DAYS: "zzz", SESSION_RETENTION_MAX_FILES: "-1" });
+  assert.equal(c.maxRetryDelayMs, 60000);
+  assert.equal(c.thinkingBudgetLow, 1024);
+  assert.equal(c.sessionRetentionDays, 30);
+  assert.equal(c.sessionRetentionMaxFiles, 100);
+});
