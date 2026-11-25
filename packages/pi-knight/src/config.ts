@@ -1,5 +1,5 @@
 import os from "node:os";
-import { loadBaseConfig, maxConcurrentTasks, parseTopics, positiveFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
+import { loadBaseConfig, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
 
 export interface KnightConfig extends BaseKnightConfig {
   knightModel: string;
@@ -33,13 +33,14 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     maxConcurrentTasks: maxConcurrentTasks(env, 2),
     hostname: os.hostname(),
     thinkingLevel: env["KNIGHT_THINKING"] ?? "off",
-    maxRetryDelayMs: positiveIntEnv(env, "MAX_RETRY_DELAY_MS", 60000),
+    // 0 is valid: pi-ai treats it as "no cap" on provider-requested retry delays.
+    maxRetryDelayMs: positiveIntEnv(env, "MAX_RETRY_DELAY_MS", 60000, { min: 0 }),
     thinkingBudgetLow: positiveIntEnv(env, "THINKING_BUDGET_LOW", 1024),
     thinkingBudgetMedium: positiveIntEnv(env, "THINKING_BUDGET_MEDIUM", 4096),
     thinkingBudgetHigh: positiveIntEnv(env, "THINKING_BUDGET_HIGH", 8192),
     // Each chain run gets its own persisted session (#31); cap how many stay on disk.
     sessionRetentionMaxFiles: positiveIntEnv(env, "SESSION_RETENTION_MAX_FILES", 100, { min: 0 }),
-    sessionRetentionDays: positiveFloatEnv(env, "SESSION_RETENTION_DAYS", 30),
+    sessionRetentionDays: nonNegativeFloatEnv(env, "SESSION_RETENTION_DAYS", 30),
     activityContent: env["ACTIVITY_CONTENT"] === "none" ? "none" : "preview",
   };
 }

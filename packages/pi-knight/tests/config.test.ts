@@ -41,3 +41,9 @@ test("pi-knight config survives bad numeric and list settings", () => {
   assert.equal(c.sessionRetentionDays, 30);
   assert.equal(c.sessionRetentionMaxFiles, 100);
 });
+
+test("pi-knight MAX_RETRY_DELAY_MS=0 stays 0 (no cap); invalid values fall back", () => {
+  assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "0" }).maxRetryDelayMs, 0);
+  assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "-1" }).maxRetryDelayMs, 60000);
+  assert.equal(loadConfig({ ...env, MAX_RETRY_DELAY_MS: "abc" }).maxRetryDelayMs, 60000);
+});

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadBaseConfig } from "../src/config.js";
+import { loadBaseConfig, maxConcurrentTasks, parseTopics, positiveIntEnv, floatEnv } from "../src/config.js";
 
 test("loadBaseConfig applies defaults", () => {
   assert.deepEqual(loadBaseConfig({ KNIGHT_NAME: "k" }), {
@@ -49,7 +49,6 @@ test("loadBaseConfig reads ROUNDTABLE_TABLE, none when empty", () => {
   assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", ROUNDTABLE_TABLE: "" }).table, "none");
 });
 
-import { maxConcurrentTasks, parseTopics, positiveIntEnv, floatEnv } from "../src/config.js";
 
 test("maxConcurrentTasks never returns NaN, 0 or negatives", () => {
   for (const v of ["abc", "0", "-3", "1.5"]) assert.equal(maxConcurrentTasks({ MAX_CONCURRENT_TASKS: v }, 2), 1);

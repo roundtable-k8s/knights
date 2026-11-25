@@ -44,6 +44,15 @@ export function floatEnv(env: Env, name: string, fallback: number): number {
 }
 
 /**
+ * Strict numeric parse shared by the validated settings: the whole trimmed string must be a number, so
+ * "1e3" and "0x10" are accepted while "12abc" is rejected (unlike parseInt). Returns null when invalid.
+ */
+function strictNumber(raw: string): number | null {
+  const n = Number(raw.trim());
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Integer setting that must be at least `min` (default 1). An unparseable or too-small value logs a
  * warning naming the variable and falls back; never returns NaN.
  */
@@ -51,21 +60,21 @@ export function positiveIntEnv(env: Env, name: string, fallback: number, opts: {
   const min = opts.min ?? 1;
   const raw = env[name];
   if (raw == null || raw.trim() === "") return fallback;
-  const n = Number(raw.trim());
-  if (!Number.isInteger(n) || n < min) {
+  const n = strictNumber(raw);
+  if (n === null || !Number.isInteger(n) || n < min) {
     log.warn(`Invalid ${name}, using default`, { name, value: raw, min, fallback });
     return fallback;
   }
   return n;
 }
 
-/** Like positiveIntEnv, for fractional settings (e.g. a number of days). */
-export function positiveFloatEnv(env: Env, name: string, fallback: number, opts: { min?: number } = {}): number {
+/** Like positiveIntEnv, for fractional settings (e.g. a number of days); `min` defaults to 0, so it means "non-negative". */
+export function nonNegativeFloatEnv(env: Env, name: string, fallback: number, opts: { min?: number } = {}): number {
   const min = opts.min ?? 0;
   const raw = env[name];
   if (raw == null || raw.trim() === "") return fallback;
-  const n = Number(raw.trim());
-  if (!Number.isFinite(n) || n < min) {
+  const n = strictNumber(raw);
+  if (n === null || n < min) {
     log.warn(`Invalid ${name}, using default`, { name, value: raw, min, fallback });
     return fallback;
   }
@@ -81,8 +90,8 @@ export function parseTopics(raw: string): string[] {
 export function maxConcurrentTasks(env: Env, fallback: number): number {
   const raw = env["MAX_CONCURRENT_TASKS"];
   if (raw == null || raw.trim() === "") return fallback;
-  const n = Number(raw.trim());
-  if (!Number.isInteger(n) || n < 1) {
+  const n = strictNumber(raw);
+  if (n === null || !Number.isInteger(n) || n < 1) {
     log.warn("Invalid MAX_CONCURRENT_TASKS, using minimum of 1", { name: "MAX_CONCURRENT_TASKS", value: raw });
     return 1;
   }
