@@ -135,6 +135,9 @@ test("transient fields validate and classify provider errors only", async () => 
   assert.equal(transientFailure("API Error: 529 Overloaded")?.transientReason, "overloaded");
   for (const c of ["500", "502", "503", "504"]) assert.equal(transientFailure(`HTTP ${c} Bad`)?.transientReason, "provider_5xx");
   assert.equal(transientFailure("connect ETIMEDOUT 1.2.3.4:443")?.transientReason, "network");
+  assert.equal(transientFailure("API Error: Request timed out.")?.transientReason, "network");
+  assert.equal(transientFailure("APIConnectionTimeoutError: Request timed out.")?.transientReason, "network");
+  assert.equal(transientFailure("APIConnectionTimeoutError")?.transientReason, "network");
   assert.equal(transientFailure("Task timed out after 600s"), undefined);
   assert.equal(transientFailure("3 tests failed"), undefined);
 });

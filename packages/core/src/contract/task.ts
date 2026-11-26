@@ -111,7 +111,7 @@ const MAX_PREVIOUS_FAILURE = 2048;
 export const MAX_ECHOED_TASK_BYTES = 64 * 1024;
 
 function normalizePreviousFailure(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.slice(0, MAX_PREVIOUS_FAILURE) : undefined;
+  return typeof value === "string" && value.trim() ? capBytes(value, MAX_PREVIOUS_FAILURE) : undefined;
 }
 
 /** Cut text to at most `maxBytes` of UTF-8 without leaving a broken character at the end. */
@@ -127,9 +127,12 @@ function capBytes(text: string, maxBytes: number): string {
  */
 export function promptWithRetryContext(task: Pick<ParsedTask, "task" | "attempt" | "retryOf" | "previousFailure">): string {
   if (!task.attempt || task.attempt <= 1) return task.task;
+  const outcome = task.previousFailure ?? "unknown";
+  // A fence longer than any backtick run in the text, so the text cannot close it.
+  const fence = "`".repeat(Math.max(3, ...[...outcome.matchAll(/`+/g)].map((m) => m[0].length + 1)));
   return (
     `This is attempt ${task.attempt} of a task that did not finish before ` +
-    `(original task \`${task.retryOf ?? "unknown"}\`; previous outcome: \`${task.previousFailure ?? "unknown"}\`). ` +
+    `(original task \`${task.retryOf ?? "unknown"}\`; previous outcome in the block below).\n\n${fence}\n${outcome}\n${fence}\n\n` +
     "Before doing anything, check what the earlier attempt already did (files, branches, pull requests, messages, notes) " +
     `and continue from there instead of repeating it.\n\n${task.task}`
   );
