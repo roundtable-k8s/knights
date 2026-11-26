@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isPrCommand, mergePrs, normalizeVerdict, parseTaskFailure, parseVerdict, prsFromBash, prsFromText, resolvePrs } from "../src/structured.js";
+import { isGitPush, isPrCommand, mergePrs, normalizeVerdict, parseTaskFailure, parseVerdict, prsFromBash, prsFromText, resolvePrs } from "../src/structured.js";
 
 const URL1 = "https://github.com/roundtable-k8s/claude-knight/pull/20";
 
@@ -64,6 +64,26 @@ test("git push with global options; isPrCommand", () => {
   assert.ok(isPrCommand("git --no-pager push origin HEAD"));
   assert.ok(isPrCommand("gh pr create --fill"));
   assert.ok(!isPrCommand("git status && gh pr view 3"));
+});
+
+test("isGitPush: push is the first non-option token after git", () => {
+  const cases: [string, boolean][] = [
+    ["git push", true],
+    ["git push origin HEAD", true],
+    ["git -C repo push", true],
+    ["git -c user.name=x push", true],
+    ["git --git-dir=.git push", true],
+    ["git -c a=b -C d push -f", true],
+    ["git --no-pager push origin HEAD", true],
+    ["git -c push.default=simple status", false],
+    ["git config push.default simple", false],
+    ["git commit -m \"push later\"", false],
+    ["git log --grep push", false],
+    ["git status", false],
+  ];
+  for (const [segment, expected] of cases) {
+    assert.equal(isGitPush(segment), expected, segment);
+  }
 });
 
 test("PR URL regex ignores /pull/N/<subpage> and longer numbers", () => {
