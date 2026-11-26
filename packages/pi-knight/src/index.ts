@@ -187,9 +187,9 @@ async function main(): Promise<void> {
       timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       const result = await withTaskSpan(
-        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, parent: delivery.traceContext },
+        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
         () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
-        (r) => ({ success: r.success, cost: r.cost, model: r.model, error: r.error }),
+        (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );
       const durationMs = Date.now() - startTime;
 

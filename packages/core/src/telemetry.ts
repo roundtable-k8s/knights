@@ -89,6 +89,12 @@ export interface TaskSpanAttributes {
   model?: string;
   /** W3C trace context from the task message headers; the span becomes its child when valid. */
   parent?: { traceparent?: string; tracestate?: string };
+  /** Runtime name (`pi`, `claude`). */
+  runtime?: string;
+  /** Chain name; absent for ask-a-knight tasks. */
+  chain?: string;
+  /** Chain step name; absent for ask-a-knight tasks. */
+  step?: string;
 }
 
 export interface TaskSpanOutcome {
@@ -97,6 +103,8 @@ export interface TaskSpanOutcome {
   cost?: number;
   /** Resolved model. */
   model?: string;
+  /** Token usage; `input` excludes cached input (task contract). */
+  tokens?: { input: number; output: number; cacheRead?: number };
   error?: string;
 }
 
@@ -121,6 +129,9 @@ export function withTaskSpan<T>(
   if (attrs.runId) attributes["roundtable.run.id"] = attrs.runId;
   if (attrs.attempt) attributes["roundtable.attempt"] = attrs.attempt;
   if (attrs.model) attributes["gen_ai.request.model"] = attrs.model;
+  if (attrs.runtime) attributes["roundtable.knight.runtime"] = attrs.runtime;
+  if (attrs.chain) attributes["roundtable.chain"] = attrs.chain;
+  if (attrs.step) attributes["roundtable.chain.step"] = attrs.step;
   let parentCtx = context.active();
   let root = true;
   if (attrs.parent?.traceparent) {
@@ -140,6 +151,13 @@ export function withTaskSpan<T>(
         const o = outcome(result);
         if (o.cost !== undefined) span.setAttribute("roundtable.cost.usd", o.cost);
         if (o.model) span.setAttribute("gen_ai.response.model", o.model);
+        if (o.tokens) {
+          const cacheRead = o.tokens.cacheRead ?? 0;
+          // semconv input_tokens includes cached tokens; the contract's `input` does not.
+          span.setAttribute("gen_ai.usage.input_tokens", o.tokens.input + cacheRead);
+          span.setAttribute("gen_ai.usage.output_tokens", o.tokens.output);
+          if (o.tokens.cacheRead !== undefined) span.setAttribute("gen_ai.usage.cache_read.input_tokens", cacheRead);
+        }
         if (!o.success) span.setStatus({ code: SpanStatusCode.ERROR, message: o.error });
       }
       return result;
