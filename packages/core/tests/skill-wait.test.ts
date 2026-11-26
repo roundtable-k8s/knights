@@ -46,3 +46,10 @@ test("waitForSkills: gives up after maxAttempts when skills never arrive", async
   assert.equal(n, 0);
   assert.equal(c.sleeps.length, 19);
 });
+
+test("skillsExpected: reads KNIGHT_SKILLS from a non-default config dir", () => {
+  const paths: string[] = [];
+  const read = (p: string) => { paths.push(p); return ""; };
+  assert.equal(skillsExpected({}, read, "/custom"), false);
+  assert.deepEqual(paths, ["/custom/KNIGHT_SKILLS"]);
+});
