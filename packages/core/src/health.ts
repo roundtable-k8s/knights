@@ -1,6 +1,7 @@
 import http from "node:http";
 import type { Registry } from "prom-client";
 import { getStatus as getNatsStatus } from "./nats/index.js";
+import { log } from "./logger.js";
 
 let server: http.Server | null = null;
 let skillCount = 0;
@@ -49,11 +50,17 @@ export interface HealthServerOptions {
 export function startHealthServer(opts: HealthServerOptions): void {
   const startTime = Date.now();
   server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
     const json = (code: number, body: unknown, indent = 0) => {
       res.writeHead(code, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body, null, indent));
     };
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "/", "http://localhost");
+    } catch {
+      // A malformed request target (e.g. "GET //") must not reject this handler: answer 400 and keep serving.
+      return json(400, { error: "invalid request URL" });
+    }
     try {
       const route = opts.routes && Object.hasOwn(opts.routes, url.pathname) ? opts.routes[url.pathname] : undefined;
       if (route) return json(200, await route(url), 2);
@@ -83,6 +90,9 @@ export function startHealthServer(opts: HealthServerOptions): void {
     } catch (err) {
       json(500, { error: err instanceof Error ? err.message : String(err) });
     }
+  });
+  server.on("error", (err) => {
+    log.error("health server failed", { port: opts.port, error: err.message, code: (err as NodeJS.ErrnoException).code });
   });
   server.listen(opts.port);
 }
