@@ -157,6 +157,8 @@ The knight's own `invoke_agent <knight>` task span carries `roundtable.knight.ru
 
 Prompt and response content is captured by default (`OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES`, `OTEL_LOG_TOOL_DETAILS`, `OTEL_LOG_TOOL_CONTENT` set to `1`). `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` sets them to `0`. This export runs inside the CLI, so `redactSecrets` does not touch it; redaction of these spans is done by the chart collector. `OTEL_LOG_RAW_API_BODIES` is never set. With no OTLP endpoint, the child env is unchanged.
 
+`tests/otel-e2e.test.ts` runs the real CLI against a local OTLP receiver and checks that `claude_code.interaction` is a child of the task span and carries the prompt (and not with capture off).
+
 ### GitHub credentials
 
 GitHub App installation tokens expire after an hour, but env vars are frozen at pod start. When the Knight
