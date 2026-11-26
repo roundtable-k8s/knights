@@ -15,7 +15,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { roundtableTools, configureTools } from "./tools.js";
-import { connectNats, drain, getConnection, initLogger, initRoster, log, setLogStream } from "@roundtable/knight-core";
+import { connectNats, drain, getConnection, initLogger, initRoster, installProcessErrorHandlers, log, setLogStream } from "@roundtable/knight-core";
 
 // dist/mcp-stdio.js and src/mcp-stdio.ts both sit one level below package.json.
 const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
@@ -57,6 +57,7 @@ export async function runMcpServer(env: NodeJS.ProcessEnv = process.env): Promis
   setLogStream(process.stderr);
   const knightName = env["KNIGHT_NAME"] ?? "unknown";
   initLogger(knightName, env["LOG_LEVEL"] ?? "info", env["ROUNDTABLE_TABLE"]);
+  installProcessErrorHandlers();
   configureTools(knightName, env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results");
 
   const natsUrl = env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222";
