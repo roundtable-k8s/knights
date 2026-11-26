@@ -31,8 +31,7 @@ the endpoint is unreachable or the model is not pulled.
 ## Example Knight
 
 Under isolation a knight reaches an in-cluster model server only through
-`spec.egress.allowedServices` (roundtable-k8s/roundtable#517). Check the field names against the
-operator CRD of your release.
+`spec.egress.allowedServices` (roundtable-k8s/roundtable#517).
 
 ```yaml
 apiVersion: ai.roundtable.io/v1alpha1
