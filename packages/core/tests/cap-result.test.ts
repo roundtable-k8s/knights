@@ -67,6 +67,31 @@ describe("publishResult cap", () => {
     });
   }
 
+  it("keeps proportional text when newlines double the payload", async () => {
+    const c = capture();
+    await publishResult("t1", withText("\n".repeat(100_000)), { js: c.js, resultMaxBytes: 512 * 1024, maxPayload: 20_000 });
+    assert.ok(Buffer.byteLength(c.sent[0]!) <= 20_000);
+    assert.ok(Buffer.byteLength((JSON.parse(c.sent[0]!) as TaskResult).result) > 8_000);
+  });
+
+  it("keeps proportional text when control characters expand sixfold", async () => {
+    const c = capture();
+    await publishResult("t1", withText("\u001b".repeat(100_000)), { js: c.js, resultMaxBytes: 512 * 1024, maxPayload: 20_000 });
+    assert.ok(Buffer.byteLength(c.sent[0]!) <= 20_000);
+    assert.ok(Buffer.byteLength((JSON.parse(c.sent[0]!) as TaskResult).result) > 2_500);
+  });
+
+  for (const [name, unit] of [["newline", "\n"], ["quote", '"'], ["backslash", "\\"], ["control-char", "\u001b"], ["mixed", 'x\n"\u001b[0m\\']] as const) {
+    it(`keeps at least 70 % of the text the escaping ratio allows for ${name}-heavy text`, async () => {
+      const c = capture();
+      await publishResult("t1", withText(unit.repeat(100_000)), { js: c.js, resultMaxBytes: 512 * 1024, maxPayload: 20_000 });
+      const kept = Buffer.byteLength((JSON.parse(c.sent[0]!) as TaskResult).result);
+      const ratio = Buffer.byteLength(JSON.stringify(unit).slice(1, -1)) / Buffer.byteLength(unit);
+      const allowed = (20_000 - 1_000) / ratio;
+      assert.ok(kept >= 0.7 * allowed, `${name}: kept ${kept}, allowed ${allowed.toFixed(0)}`);
+    });
+  }
+
   it("capResultText stays within a budget smaller than the marker", () => {
     const out = capResultText(withText("é".repeat(100)), 10);
     assert.ok(Buffer.byteLength(out.result) <= 10);
