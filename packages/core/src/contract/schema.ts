@@ -204,6 +204,12 @@ export const ActivityEvent = Type.Object(
     ts: Type.String({ format: "date-time" }),
     knight: Type.String(),
     table: Type.Optional(Type.String()),
+    traceId: Type.Optional(
+      Type.String({
+        pattern: "^[0-9a-f]{32}$",
+        description: "W3C trace id (32 lowercase hex) of the task's trace; the same on every event of a task. Omitted when there is no trace context.",
+      }),
+    ),
     pod: Type.String(),
     node: Type.Optional(Type.String()),
     taskId: Type.String(),

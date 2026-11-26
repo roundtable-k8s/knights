@@ -73,7 +73,7 @@ If the final non-empty line of the agent's answer is `Outcome: failed <reason>` 
 While a task runs the pod publishes core-NATS events (never JetStream) on
 `<prefix>.activity.<Knight>.<taskId>`: `task.started`, `task.heartbeat` (with each JetStream `working()`),
 `tool.started`/`tool.finished`, `assistant.message`, `task.finished`. Every event has `v`, `type`, `ts`,
-`knight`, `pod`, `node`, `taskId`, `runId`, a per-task `seq` and is at most 8 KiB. Previews are cut
+`knight`, `pod`, `node`, `taskId`, `runId`, an optional `traceId` (the task's trace id), a per-task `seq` and is at most 8 KiB. Previews are cut
 (500 chars output/text, 200 chars tool arguments) and redacted; tool events are limited to 20/s per task.
 Set `ACTIVITY_CONTENT=none` to drop all previews. `POD_NAME` and `NODE_NAME` (downward API) identify the
 pod; the pod falls back to the hostname and `node` is omitted when unset. Both runtimes share this

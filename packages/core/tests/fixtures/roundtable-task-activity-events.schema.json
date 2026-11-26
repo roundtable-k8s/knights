@@ -10,6 +10,7 @@
     "ts": {"type": "string", "format": "date-time"},
     "knight": {"type": "string"},
     "table": {"type": "string"},
+    "traceId": {"type": "string", "pattern": "^[0-9a-f]{32}$", "description": "W3C trace id (32 lowercase hex) of the task's trace; the same on every event of a task. Omitted when there is no trace context."},
     "pod": {"type": "string"},
     "node": {"type": "string"},
     "taskId": {"type": "string"},

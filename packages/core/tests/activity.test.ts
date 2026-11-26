@@ -347,6 +347,33 @@ test("events carry the table when set and omit it otherwise", () => {
   assert.equal("table" in without[0]!.ev, false);
 });
 
+test("events carry the traceId when given, identical across the task, and omit it otherwise", () => {
+  const id = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const out: Pub[] = [];
+  const a = make(out, { traceId: id });
+  a.started();
+  a.toolStarted("c1", "bash", { command: "ls" });
+  a.toolFinished("c1", "bash", false, "ok");
+  a.finished({ success: true });
+  assert.ok(out.length >= 4);
+  for (const { ev } of out) assert.equal(ev["traceId"], id);
+  const none: Pub[] = [];
+  make(none).started();
+  assert.equal("traceId" in none[0]!.ev, false);
+  const bad: Pub[] = [];
+  make(bad, { traceId: "nope" }).started();
+  assert.equal("traceId" in bad[0]!.ev, false);
+});
+
+test("setTraceId applies to later events and never overwrites", () => {
+  const out: Pub[] = [];
+  const a = make(out);
+  a.setTraceId("4bf92f3577b34da6a3ce929d0e0e4736");
+  a.setTraceId("00000000000000000000000000000001");
+  a.started();
+  assert.equal(out[0]!.ev["traceId"], "4bf92f3577b34da6a3ce929d0e0e4736");
+});
+
 test("task.started carries attempt only for a retry (#36)", () => {
   const out: Pub[] = [];
   make(out, { attempt: 2 }).started();

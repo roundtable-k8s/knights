@@ -137,7 +137,7 @@ Each task publishes core-NATS (not JetStream) events on `<prefix>.activity.<Knig
 `task.started` (`slot`, `concurrency`, `queuedFor`), `task.heartbeat` (every 10 s: `turns`, `tokens`,
 `cost`, `currentTool`), `tool.started` / `tool.finished`, `assistant.message`, `task.finished`.
 Common fields: `v`, `type`, `ts`, `knight`, `pod`, `node`, `taskId`, `runId`, `chainName`, `stepName`,
-`model`, `seq` (per task; a gap means dropped events). Previews are redacted, then cut to 500 chars
+`model`, optional `traceId` (32-hex trace id, from the task's `traceparent`; the same on every event), `seq` (per task; a gap means dropped events). Previews are redacted, then cut to 500 chars
 (argument summaries 200); events are capped at 8 KiB; tool/assistant events are limited to 20/s per task
 (lifecycle events and heartbeats are never dropped). Publish failures never fail a task.
 
