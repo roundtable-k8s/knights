@@ -640,7 +640,7 @@ export async function executeTask(
  *
  * Pattern: Explicit negative instructions + reasoning (from Claude Code leak analysis).
  */
-function buildKnightPreamble(config: KnightConfig): string {
+export function buildKnightPreamble(config: KnightConfig): string {
   return `You are ${config.knightName}, a Knight of the Round Table.
 You are a specialized AI agent running as a Kubernetes pod in the Round Table fleet.
 The current model is ${config.knightModel}.
