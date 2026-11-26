@@ -8,46 +8,34 @@ Every knight must be observable. In a multi-agent system, you need to know: what
 
 ## 1. Structured Logging
 
-All logs are JSON, compatible with Loki/Promtail ingestion on the dapper-cluster.
+All logs are one JSON object per line on stdout (`packages/core/src/logger.ts`), compatible with Loki/Promtail ingestion on the dapper-cluster.
 
 ### Log Format
 ```json
-{
-  "level": 30,
-  "time": 1771813756000,
-  "pid": 1,
-  "hostname": "galahad-56f4d46d9b-9qrwl",
-  "knight": "galahad",
-  "taskId": "security-1771813755-33254",
-  "msg": "Task completed",
-  "duration_ms": 45000,
-  "cost": 0.54,
-  "model": "openrouter/deepseek/deepseek-v3.2",
-  "tokens": { "input": 12000, "output": 8500 }
-}
+{"level":"info","time":"2026-02-23T09:15:56.000Z","pid":1,"hostname":"galahad-56f4d46d9b-9qrwl","knight":"galahad","table":"dev","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","msg":"Executing task","model":"openrouter/deepseek/deepseek-v3.2","taskLength":412,"runId":null,"workDir":"/data/work/..."}
 ```
 
-### Log Levels
-| Level | Use |
-|-------|-----|
-| `error` (50) | Task failures, NATS disconnections, unrecoverable errors |
-| `warn` (40) | Task timeouts, retry attempts, degraded state |
-| `info` (30) | Task received, task completed, NATS connected, health checks |
-| `debug` (20) | Tool calls, skill activation, LLM request/response metadata |
+Every line carries `level` (a string), `time` (ISO 8601), `pid`, `hostname`, `knight`, `table` (`ROUNDTABLE_TABLE`, `none` when unset) and `msg`. `trace_id` and `span_id` are added only when the line is written inside a task span (see Tracing). The fields after `msg` are per-call context and vary by message.
 
-### Key Events to Log
-- `nats.connected` — NATS connection established
-- `nats.disconnected` — NATS connection lost
-- `nats.reconnected` — NATS connection restored
-- `task.received` — Task message consumed from JetStream
-- `task.acked` — Message acknowledged (after the task finishes and its result is published)
-- `task.started` — Pi agent loop invoked
-- `task.tool_call` — Individual tool invocation (name, duration)
-- `task.skill_activated` — Skill matched and loaded
-- `task.completed` — Task finished (success, duration, cost, tokens)
-- `task.failed` — Task errored (error message, stack trace)
-- `task.timeout` — Task exceeded timeout limit
-- `health.check` — Periodic health status
+### Log Levels
+Levels are `debug`, `info`, `warn`, `error`; `LOG_LEVEL` sets the minimum written.
+
+| Level | Used for (examples from the code) |
+|-------|-----|
+| `error` | `Task failed`, `Failed to publish task result — result lost`, `Failed to publish error result` |
+| `warn` | `NATS disconnected`, `NATS error status`, `Result publish failed — retrying`, `Task fetch failed — retrying`, `Invalid task payload`, `Task delivered but never acked — reporting failure`, `Result text truncated to fit the payload limit`, `Skill refresh failed` |
+| `info` | `NATS connected`, `NATS reconnected`, `Executing task`, `Result published` |
+| `debug` | Per-tool-call detail (`Tool call started`), activity publish failures, other diagnostics that would be noise at `info` |
+
+### Key Log Messages
+The messages below are the ones the code logs today; use them as search strings in Loki.
+- `NATS connected` / `NATS disconnected` / `NATS reconnected` — connection state changes
+- `Executing task` — task accepted by the agent (`model`, `taskLength`, `runId`, `workDir`)
+- `Result published` — result message sent (`taskId`, `subject`; `attempt` on retries)
+- `Task failed` — task errored (`taskId`, `error`)
+- `Task delivered but never acked — reporting failure` — a task was delivered but not acknowledged in time, so a failure result is sent
+
+Per-task duration, cost and tokens are not log lines: they are in the task result and in the metrics below.
 
 ## 2. Prometheus Metrics
 
@@ -88,8 +76,13 @@ roundtable_knight_session_messages{table="dev",knight="galahad",runtime="pi"} 87
 
 # NATS health and concurrency
 roundtable_knight_nats_connected{table="dev",knight="galahad",runtime="pi"} 1
+roundtable_knight_nats_reconnects_total{table="dev",knight="galahad",runtime="pi"} 0
 roundtable_knight_active_tasks{table="dev",knight="galahad",runtime="pi"} 1
 ```
+
+Notes on the task counter:
+- `status` is `success` or `error` for every task that ran (a timeout or an abort is an `error`), plus `lost` (delivered to a pod that stopped before finishing it; never re-run) and `publish_failed`.
+- `publish_failed` is counted **in addition to** the task's `success`/`error`, when the result could not be published. Do not sum across statuses on a dashboard, or such a task is counted twice.
 
 ### Grafana Dashboard
 
@@ -100,7 +93,7 @@ With these metrics, a Grafana dashboard can show:
 - Cumulative cost per knight (economics)
 - Token usage trends (efficiency)
 - Active tasks vs capacity (utilization)
-- NATS consumer lag (backpressure)
+- NATS reconnects (connection stability; consumer lag comes from the NATS server)
 
 ## 3. Health Checks
 
@@ -109,31 +102,36 @@ HTTP health endpoint for Kubernetes liveness and readiness probes.
 ### Endpoints
 
 #### `GET /health` — Liveness
-Returns 200 if the process is alive. Used by Kubernetes liveness probe.
+Returns 200 while the process is up (also in a degraded state, so the pod is not restarted for a missing credential). Used by Kubernetes liveness probe.
 
 ```json
 {
   "status": "ok",
-  "uptime_seconds": 86400,
+  "uptime": 86400,
   "knight": "galahad"
 }
 ```
 
+`uptime` is in seconds.
+
 #### `GET /ready` — Readiness
-Returns 200 if NATS is connected and the agent is ready to accept tasks. Returns 503 if degraded.
+Returns 200 only when NATS is connected, the knight is not degraded and it is not draining (SIGTERM received). Otherwise returns 503 with `status` set to `draining`, `degraded` or `not_ready`.
 
 ```json
 {
   "status": "ready",
   "nats": "connected",
-  "consumer": "galahad-consumer",
-  "pending_messages": 0,
-  "active_tasks": 1,
-  "max_concurrent": 2,
+  "activeTasks": 1,
+  "skillsLoaded": 8,
   "model": "openrouter/deepseek/deepseek-v3.2",
-  "skills_loaded": 8
+  "knight": "galahad"
 }
 ```
+
+`degradedReason` is present when the knight is degraded. Fields are camelCase; `model` comes from the runtime (`readyExtras`).
+
+#### `GET /introspect` — pi-knight only
+Returns the knight's introspection data (JSON, indented). Not used by the probes.
 
 #### `GET /metrics` — Prometheus
 Prometheus-format metrics scrape endpoint.
@@ -184,22 +182,36 @@ The Prometheus metrics provide rolling totals. Combined with Grafana:
 
 | Alert | Condition | Severity |
 |-------|-----------|----------|
+The alerts below are examples written in PromQL. The operator's chart ships the alert rules the fleet actually uses, in `charts/roundtable-operator/templates/prometheusrule.yaml` (roundtable-k8s/roundtable); prefer those.
+
+| Alert | Condition | Severity |
+|-------|-----------|----------|
 | KnightDown | `roundtable_knight_nats_connected == 0` for 5m | Critical |
 | HighErrorRate | `rate(roundtable_knight_tasks_total{status="error"}[15m]) > 0.3` | Warning |
-| TaskTimeout | `roundtable_knight_tasks_total{status="timeout"}` increases | Warning |
+| TaskPublishFailed | `increase(roundtable_knight_tasks_total{status="publish_failed"}[15m]) > 0` | Warning |
 | TaskLost | `increase(roundtable_knight_tasks_total{status="lost"}[15m]) > 0` | Warning |
 | HighCost | `rate(roundtable_knight_llm_cost_usd_total[1h]) > 5` | Info |
-| ConsumerLag | Pending messages > 10 for 10m | Warning |
 | NoTasks | No tasks completed in 24h | Info |
+
+There is no timeout status: a task that hits its timeout is counted as `error`. Consumer lag is not exported by the knight; take it from the NATS server's metrics.
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `METRICS_PORT` | HTTP port for health/metrics | `3000` |
-| `LOG_LEVEL` | Minimum log level | `info` |
-| `ENABLE_METRICS` | Enable Prometheus metrics | `true` |
+| `METRICS_PORT` | HTTP port for `/health`, `/ready`, `/metrics` | `3000` |
+| `LOG_LEVEL` | Minimum log level (`debug`, `info`, `warn`, `error`) | `info` |
+
+Metrics are always on; there is no switch to disable them.
 
 ## Tracing (OpenTelemetry)
 
 Off by default. Tracing starts when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_TRACES_EXPORTER` is set and `OTEL_SDK_DISABLED` is not `true`; the standard `OTEL_*` variables configure the exporter. Resource attributes: `service.name` (default `pi-knight`), `roundtable.knight`, `roundtable.table` (`ROUNDTABLE_TABLE`, default `none`), unless `OTEL_RESOURCE_ATTRIBUTES` sets them. Each task runs in an `invoke_agent <knight>` span that is a child of the W3C `traceparent`/`tracestate` headers on the NATS task message (a root span when they are missing or malformed), and log lines written inside it carry `trace_id` and `span_id`. The task span carries `roundtable.knight.runtime`, `roundtable.chain` and `roundtable.chain.step` (only for chain tasks, absent otherwise), and on completion `gen_ai.usage.input_tokens` (including cached reads), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `roundtable.cost.usd` and `gen_ai.response.model`. Under it, each LLM turn is a `chat <model>` child span (`gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`) and each tool call an `execute_tool <tool>` child span (`gen_ai.tool.name`, `gen_ai.tool.call.id`, error status when the tool reports `isError`), all carrying `gen_ai.operation.name`, `roundtable.knight` and `roundtable.table`. Content capture is on by default: `chat` spans carry `gen_ai.system_instructions`, `gen_ai.input.messages` (the conversation so far; the newest messages are kept when it is cut) and `gen_ai.output.messages` (text plus any tool calls), both as a `[{role, content}]` JSON list that is simpler than the GenAI semconv message schema, `execute_tool` spans `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`. Every value is passed through `redactSecrets` first and each attribute is capped at 16 KiB (`ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES` changes the cap); a cut value sets `roundtable.content.truncated=true` on the span. `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` (or `0`) records no content attributes at all; names, tokens and cost are unaffected. The operator injects this variable from the chart value or per-table `spec.telemetry.captureContent`. Context compaction and LLM auto-retries are span events on the task span, not child spans: `compaction` (`reason`, `aborted`, `will_retry`) when a compaction ends, and `llm.retry` when a retry starts (`attempt`, `max_attempts`, `delay_ms`, `error`) and when it ends (`attempt`, `success`, `error` on failure). Error text is passed through `redactSecrets` and cut to 500 characters. Spans still open when the task ends or is aborted are ended with it. Spans are flushed on shutdown after the drain. claude-knight also hands the task span to the Claude Code child as `TRACEPARENT`.
+
+## claude-knight differences
+
+claude-knight shares the logger, health endpoints and the core metric set above, with `runtime="claude"` instead of `runtime="pi"`. The differences:
+
+- **Metrics:** the session-health series `roundtable_knight_compactions_total`, `roundtable_knight_llm_retries_total` and `roundtable_knight_session_messages` are pi-only. claude-knight adds `roundtable_knight_plan_utilization{window=…}` (plan usage, from `packages/claude-knight/src/plan-limits.ts`) and `roundtable_knight_usage_limit_hits_total` (tasks that failed on the plan or credit limit, from `packages/claude-knight/src/runtime-metrics.ts`). Its task counter also has `status="refused"` (fast-fail while the plan reserve is reached).
+- **Billing label:** `billing` is `subscription` or `api` (the auth mode). `roundtable_knight_llm_cost_usd_total` is API list-price cost; in subscription mode it is API-equivalent, not billed spend.
+- **Tracing:** the task span is the parent of Claude Code's own spans (`claude_code.interaction`, LLM and tool spans) when an OTLP endpoint is set. The Claude Code child inherits the span as `TRACEPARENT`, and the CLI's own OpenTelemetry export is switched on with `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp` (`packages/claude-knight/src/telemetry-env.ts`). Any of these the pod env already sets is left alone. Content in those CLI spans (prompts, responses, tool input and output) is on by default, and `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` turns it off; the collector's redaction processor is the redaction step for them, since the export runs inside the CLI.
