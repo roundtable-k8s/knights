@@ -14,23 +14,34 @@ export { BLOCKED_BASH_PATTERNS, checkBashCommand } from "@roundtable/knight-core
 /** tool_use_id → start time (ms); filled by PreToolUse, drained by PostToolUse[Failure]. */
 const toolStarts = new Map<string, number>();
 
+/** Tools the guardrail reads; other tools are only timed. */
+const GUARDED_TOOLS = /^(?:Bash|Write|Edit|MultiEdit)$/;
+
+/**
+ * One PreToolUse callback for every tool: the guardrail decides first, and only a
+ * call that is allowed gets a start time. Running both in one callback keeps the
+ * order fixed, so a blocked call never leaves a start time behind for a later
+ * PostToolUse with the same id.
+ */
 async function preToolUse(input: HookInput) {
-  const decision = decidePreToolUse(input);
-  if (!decision) return {};
-  // A blocked call never runs, so no PostToolUse follows to drain its start time.
-  if (input.hook_event_name === "PreToolUse") toolStarts.delete(input.tool_use_id);
-  if (input.hook_event_name === "PreToolUse" && input.tool_name === "Bash") {
+  if (input.hook_event_name !== "PreToolUse") return {};
+  const decision = GUARDED_TOOLS.test(input.tool_name) ? decidePreToolUse(input) : undefined;
+  if (!decision) {
+    toolStarts.set(input.tool_use_id, Date.now());
+    return {};
+  }
+  if (input.tool_name === "Bash") {
     log.warn("Blocked dangerous bash command", { reason: decision.reason, command: decision.command.slice(0, 200) });
   } else {
-    log.warn("Blocked secret write", { tool: "tool_name" in input ? input.tool_name : undefined, reason: decision.reason });
+    log.warn("Blocked secret write", { tool: input.tool_name, reason: decision.reason });
   }
-  toolCallsBlocked.inc({ tool: "tool_name" in input ? input.tool_name : "Bash", reason: decision.reason });
+  toolCallsBlocked.inc({ tool: input.tool_name, reason: decision.reason });
   return decision.output;
 }
 
-async function startTimer(input: HookInput) {
-  if (input.hook_event_name === "PreToolUse") toolStarts.set(input.tool_use_id, Date.now());
-  return {};
+/** Number of tool calls started but not yet finished (test hook). */
+export function pendingToolStarts(): number {
+  return toolStarts.size;
 }
 
 async function postToolUse(input: HookInput) {
@@ -49,7 +60,7 @@ async function postToolUse(input: HookInput) {
 
 export function buildHooks(): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   return {
-    PreToolUse: [{ hooks: [startTimer] }, { matcher: "Bash|Write|Edit|MultiEdit", hooks: [preToolUse] }],
+    PreToolUse: [{ hooks: [preToolUse] }],
     PostToolUse: [{ hooks: [postToolUse] }],
     PostToolUseFailure: [{ hooks: [postToolUse] }],
   };

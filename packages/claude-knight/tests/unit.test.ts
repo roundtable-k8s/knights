@@ -9,7 +9,14 @@ import { buildChildEnv, checkAuth } from "../src/auth.js";
 import { claudeCodeTelemetryEnv } from "../src/telemetry-env.js";
 import { checkBashCommand } from "../src/hooks.js";
 import { discoverSkills, linkSkills } from "../src/skills.js";
-import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, resetPlanLimits } from "../src/plan-limits.js";
+import {
+  checkReserve,
+  checkReserveRefreshing,
+  normalizeEpochMs,
+  normalizeUtilization,
+  recordRateLimit,
+  resetPlanLimits,
+} from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
 import { formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
@@ -385,7 +392,6 @@ test("transcript messages map to dashboard items", () => {
 
 test("refusing knight re-checks usage at an interval and recovers when it drops", async () => {
   resetPlanLimits();
-  const { checkReserveRefreshing } = await import("../src/plan-limits.js");
   let t = 1_800_000_000_000;
   const now = () => t;
   const resetsAt = (t + 3 * 3600_000) / 1000;
@@ -415,9 +421,32 @@ test("refusing knight re-checks usage at an interval and recovers when it drops"
   resetPlanLimits();
 });
 
+test("concurrent waiters on one probe report the cleared reserve once", async () => {
+  resetPlanLimits();
+  const t = 1_800_000_000_000;
+  const resetsAt = (t + 3 * 3600_000) / 1000;
+  recordRateLimit({ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt }, t);
+  let calls = 0;
+  const probe = async () => {
+    calls++;
+    await new Promise((r) => setTimeout(r, 10));
+    recordRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.1, resetsAt }, t);
+  };
+  let cleared = 0;
+  const opts = { now: () => t, intervalMs: 300_000, onCleared: () => cleared++ };
+  const results = await Promise.all([1, 2, 3].map(() => checkReserveRefreshing(0.8, probe, opts)));
+  assert.deepEqual(results.map((r) => r.blocked), [false, false, false]);
+  assert.equal(calls, 1, "the concurrent waiters share one probe");
+  assert.equal(cleared, 1, "onCleared fires once for the clearing");
+
+  // a later check with no block in effect does not report again
+  assert.equal((await checkReserveRefreshing(0.8, probe, opts)).blocked, false);
+  assert.equal(cleared, 1);
+  resetPlanLimits();
+});
+
 test("a failed usage probe keeps the old reading", async () => {
   resetPlanLimits();
-  const { checkReserveRefreshing } = await import("../src/plan-limits.js");
   const t = 1_800_000_000_000;
   recordRateLimit({ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9, resetsAt: (t + 3600_000) / 1000 }, t);
   const r = await checkReserveRefreshing(0.8, async () => { throw new Error("boom"); }, { now: () => t });

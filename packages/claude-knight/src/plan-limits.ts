@@ -87,6 +87,7 @@ export function resetPlanLimits(): void {
   windows.clear();
   lastProbeAtMs = 0;
   probing = null;
+  blockSeen = false;
 }
 
 /** How often a refusing knight re-checks the real usage (ms). */
@@ -94,6 +95,8 @@ export const RECHECK_INTERVAL_MS = 5 * 60_000;
 
 let lastProbeAtMs = 0;
 let probing: Promise<void> | null = null;
+/** True from the first refused check until the reserve clears; `onCleared` fires once for that span. */
+let blockSeen = false;
 
 /**
  * Like checkReserve, but while blocked it refreshes the stored reading with
@@ -111,6 +114,7 @@ export async function checkReserveRefreshing(
   const interval = opts.intervalMs ?? RECHECK_INTERVAL_MS;
   const was = checkReserve(reserve, now());
   if (!was.blocked) return was;
+  blockSeen = true;
   if (probing) await probing;
   else if (now() - lastProbeAtMs >= interval) {
     lastProbeAtMs = now();
@@ -127,6 +131,10 @@ export async function checkReserveRefreshing(
     await probing;
   }
   const check = checkReserve(reserve, now());
-  if (!check.blocked) opts.onCleared?.();
+  // Concurrent waiters all see the cleared reserve; only the first one to get here reports it.
+  if (!check.blocked && blockSeen) {
+    blockSeen = false;
+    opts.onCleared?.();
+  }
   return check;
 }
