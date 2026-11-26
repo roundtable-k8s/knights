@@ -64,19 +64,6 @@ fi
 rt_phase_mark "Phase 2"
 
 # ──────────────────────────────────────────────────────────────────
-# Phase 4: Mise tools (if any per-knight config)
-# ──────────────────────────────────────────────────────────────────
-if [ -f /config/mise.toml ] && command -v mise >/dev/null 2>&1; then
-  log "Phase 4: Mise tools"
-  rt_mise() { /app/scripts/mise-init.sh 2>&1 | sed 's/^/  /'; }
-  rt_run rt_mise || log "  WARNING: mise init failed (non-fatal)"
-else
-  log "Phase 4: No mise config — skipping"
-fi
-
-rt_phase_mark "Phase 4"
-
-# ──────────────────────────────────────────────────────────────────
 # Phase 4.5: Vault write check
 # ──────────────────────────────────────────────────────────────────
 if [ -d "/vault" ]; then

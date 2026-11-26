@@ -50,7 +50,6 @@ COPY --from=builder /app/packages/pi-knight/package.json ./
 COPY packages/pi-knight/defaults/ ./defaults/
 COPY packages/pi-knight/scripts/ ./scripts/
 # Shared start-up scripts (identical for both runtimes).
-COPY packages/core/scripts/mise-init.sh ./scripts/mise-init.sh
 COPY packages/core/scripts/startup-signals.sh ./scripts/startup-signals.sh
 # GitHub token-file support (roundtable-k8s/roundtable#194): a git credential
 # helper and a gh shim that read $GITHUB_TOKEN_FILE on every call. The
