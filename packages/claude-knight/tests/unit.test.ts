@@ -21,6 +21,8 @@ import { classifyResult, isUsageLimitMessage } from "../src/result.js";
 import { formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/session-source.js";
+// Shared with the core telemetry tests; tsx resolves the cross-package relative import.
+import { withCleanOtelEnv } from "../../core/tests/helpers/otel-env.js";
 
 const baseEnv = { KNIGHT_NAME: "Gawain", SUBSCRIBE_TOPICS: "rt.tasks.security.>" };
 
@@ -469,13 +471,7 @@ test("a failed usage probe keeps the old reading", async () => {
 test("buildChildEnv passes the active task span to the child as TRACEPARENT", async () => {
   const { startTelemetry, withTaskSpan } = await import("@roundtable/knight-core");
   const { InMemorySpanExporter, SimpleSpanProcessor } = await import("@opentelemetry/sdk-trace-base");
-  // The NodeSDK reads process.env, so clear ambient OTEL_* (knight pods set OTEL_SDK_DISABLED) for this test only.
-  const ambientOtel = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
-  const clearOtelEnv = () => {
-    for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k];
-  };
-  clearOtelEnv();
-  try {
+  await withCleanOtelEnv(async () => {
     assert.equal(buildChildEnv("api", {}, {})["TRACEPARENT"], undefined);
     const t = await startTelemetry({
       service: "claude-knight",
@@ -489,8 +485,5 @@ test("buildChildEnv passes the active task span to the child as TRACEPARENT", as
     } finally {
       await t.shutdown();
     }
-  } finally {
-    clearOtelEnv();
-    Object.assign(process.env, ambientOtel);
-  }
+  });
 });

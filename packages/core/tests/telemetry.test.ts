@@ -1,38 +1,46 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { Writable } from "node:stream";
 import { trace, metrics } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { initLogger, log, setLogStream } from "../src/logger.js";
-import { startTelemetry, telemetryEnabled, resourceDefaults, withTaskSpan } from "../src/telemetry.js";
+import { startTelemetry, telemetryEnabled, type Telemetry, resourceDefaults, withTaskSpan } from "../src/telemetry.js";
 import { traceparentEnv } from "../src/trace-context.js";
+import { isolateOtelEnv } from "./helpers/otel-env.js";
 
-// Knight pods set OTEL_* variables (OTEL_SDK_DISABLED=true when telemetry is off), and the
-// NodeSDK reads process.env itself. Clear them for every test and restore them afterwards,
-// so these tests pass whatever the surrounding environment sets.
-const ambientOtel = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
-function clearOtelEnv(): void {
-  for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k];
-}
-
-beforeEach(clearOtelEnv);
+let restoreOtelEnv = (): void => {};
+beforeEach(() => {
+  restoreOtelEnv = isolateOtelEnv();
+});
 afterEach(() => {
   trace.disable();
-  clearOtelEnv();
-  Object.assign(process.env, ambientOtel);
+  restoreOtelEnv();
 });
+
+/** Start telemetry, run fn, and always shut down and unregister the global tracer provider. */
+async function withTelemetry<T>(opts: Parameters<typeof startTelemetry>[0], fn: (t: Telemetry) => Promise<T>): Promise<T> {
+  const t = await startTelemetry(opts);
+  try {
+    return await fn(t);
+  } finally {
+    await t.shutdown();
+    trace.disable();
+  }
+}
 
 test("OTEL_SDK_DISABLED=true (as on knight pods) keeps the bootstrap off even with an exporter set", async () => {
   process.env.OTEL_SDK_DISABLED = "true";
   process.env.OTEL_TRACES_EXPORTER = "otlp";
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const t = await startTelemetry({ service: "s", knight: "k", spanProcessors: [processor] });
-  assert.equal(t.enabled, false);
-  await withTaskSpan({ taskId: "t", knight: "k" }, async () => 1);
-  await processor.forceFlush();
-  assert.equal(exporter.getFinishedSpans().length, 0);
-  await t.shutdown();
+  await withTelemetry({ service: "s", knight: "k", spanProcessors: [processor] }, async (t) => {
+    assert.equal(t.enabled, false);
+    await withTaskSpan({ taskId: "t", knight: "k" }, async () => 1);
+    await processor.forceFlush();
+    assert.equal(exporter.getFinishedSpans().length, 0);
+  });
 });
 
 test("telemetry stays off without OTEL_* env, with OTEL_SDK_DISABLED, and registers nothing", async () => {
@@ -41,13 +49,14 @@ test("telemetry stays off without OTEL_* env, with OTEL_SDK_DISABLED, and regist
   assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "otlp" }), true);
   assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }), true);
   assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces", OTEL_SDK_DISABLED: "true" }), false);
-  const t = await startTelemetry({ service: "pi-knight", knight: "k", env: {} });
-  assert.equal(t.enabled, false);
-  await t.shutdown();
-  // The global provider is still the no-op proxy: spans are not recording.
-  const span = trace.getTracer("x").startSpan("s");
-  assert.equal(span.isRecording(), false);
-  assert.deepEqual(traceparentEnv(), {});
+  await withTelemetry({ service: "pi-knight", knight: "k", env: {} }, async (t) => {
+    assert.equal(t.enabled, false);
+    // Nothing is registered: spans are not recording and metrics calls are harmless no-ops.
+    const span = trace.getTracer("x").startSpan("s");
+    assert.equal(span.isRecording(), false);
+    assert.deepEqual(traceparentEnv(), {});
+    assert.doesNotThrow(() => metrics.getMeter("x").createCounter("c").add(1));
+  });
 });
 
 test("resource defaults add knight/table/service unless the env already sets them", () => {
@@ -70,13 +79,15 @@ test("resource defaults add knight/table/service unless the env already sets the
 test("one task yields one invoke_agent root span with attributes; logs inside carry trace_id", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const t = await startTelemetry({
-    service: "pi-knight",
-    knight: "galahad",
-    table: "dev",
-    env: { OTEL_TRACES_EXPORTER: "otlp" },
-    spanProcessors: [processor],
-  });
+  const { finished: spans, lines, tp } = await withTelemetry(
+    {
+      service: "pi-knight",
+      knight: "galahad",
+      table: "dev",
+      env: { OTEL_TRACES_EXPORTER: "otlp" },
+      spanProcessors: [processor],
+    },
+    async (t) => {
   assert.equal(t.enabled, true);
 
   const chunks: string[] = [];
@@ -95,8 +106,11 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
   );
   log.info("outside");
   await processor.forceFlush();
-  const spans = exporter.getFinishedSpans(); // shutdown() resets the exporter
-  await t.shutdown();
+  const finished = exporter.getFinishedSpans(); // shutdown() resets the exporter
+  const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  return { finished, lines, tp };
+    },
+  );
 
   assert.equal(spans.length, 1);
   const s = spans[0]!;
@@ -114,13 +128,10 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
   assert.equal(s.attributes["roundtable.cost.usd"], 0.5);
   assert.equal(s.attributes["roundtable.task.success"], undefined);
   assert.equal(s.resource.attributes["roundtable.knight.runtime"], "pi");
-  // Traces only: no meter provider is registered.
-  assert.equal(metrics.getMeterProvider().constructor.name, "NoopMeterProvider");
   assert.equal(s.resource.attributes["service.name"], "pi-knight");
   assert.equal(s.resource.attributes["roundtable.knight"], "galahad");
   assert.equal(s.resource.attributes["roundtable.table"], "dev");
 
-  const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const inside = lines.find((l) => l.msg === "inside");
   const outside = lines.find((l) => l.msg === "outside");
   assert.equal(inside.trace_id, s.spanContext().traceId);
@@ -132,23 +143,23 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
 test("a throwing task still ends its span with error status", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const t = await startTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] });
-  await assert.rejects(withTaskSpan({ taskId: "t", knight: "k" }, async () => { throw new Error("boom"); }), /boom/);
-  await processor.forceFlush();
-  const [s] = exporter.getFinishedSpans();
-  await t.shutdown();
+  const [s] = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
+    await assert.rejects(withTaskSpan({ taskId: "t", knight: "k" }, async () => { throw new Error("boom"); }), /boom/);
+    await processor.forceFlush();
+    return exporter.getFinishedSpans();
+  });
   assert.equal(s!.status.code, 2);
 });
 
 async function spanWithParent(parent?: { traceparent?: string; tracestate?: string }) {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const t = await startTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] });
   let logged = "";
-  await withTaskSpan({ taskId: "t", knight: "k", parent }, async () => { logged = trace.getActiveSpan()!.spanContext().traceId; return 1; });
-  await processor.forceFlush();
-  const spans = exporter.getFinishedSpans();
-  await t.shutdown();
+  const spans = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
+    await withTaskSpan({ taskId: "t", knight: "k", parent }, async () => { logged = trace.getActiveSpan()!.spanContext().traceId; return 1; });
+    await processor.forceFlush();
+    return exporter.getFinishedSpans();
+  });
   assert.equal(spans.length, 1);
   assert.equal(logged, spans[0]!.spanContext().traceId);
   return spans[0]!;
@@ -172,17 +183,17 @@ test("missing or malformed trace headers give a root span", async () => {
 test("task span carries runtime, chain, step and token usage; absent when unset", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const t = await startTelemetry({ service: "pi-knight", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] });
-  await withTaskSpan(
-    { taskId: "a", knight: "k", runtime: "claude", chain: "c1", step: "s1" },
-    async () => 1,
-    () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50 } }),
-  );
-  await withTaskSpan({ taskId: "b", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 7, output: 3 } }));
-  await withTaskSpan({ taskId: "c", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50, cacheWrite: 30 } }));
-  await processor.forceFlush();
-  const [a, b, c] = exporter.getFinishedSpans();
-  await t.shutdown();
+  const [a, b, c] = await withTelemetry({ service: "pi-knight", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
+    await withTaskSpan(
+      { taskId: "a", knight: "k", runtime: "claude", chain: "c1", step: "s1" },
+      async () => 1,
+      () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50 } }),
+    );
+    await withTaskSpan({ taskId: "b", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 7, output: 3 } }));
+    await withTaskSpan({ taskId: "c", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50, cacheWrite: 30 } }));
+    await processor.forceFlush();
+    return exporter.getFinishedSpans();
+  });
   assert.equal(a!.attributes["roundtable.knight.runtime"], "claude");
   assert.equal(a!.attributes["roundtable.chain"], "c1");
   assert.equal(a!.attributes["roundtable.chain.step"], "s1");
@@ -207,4 +218,36 @@ test("byte cut keeps real U+FFFD and never splits a character", async () => {
   assert.equal(got["k"], "ab�");
   setContentAttribute(span, "k", "ééééé", env);
   assert.equal(got["k"], "ééé");
+});
+
+test("default OTLP path: with only OTEL_EXPORTER_OTLP_ENDPOINT the SDK exports spans to POST /v1/traces", async () => {
+  const requests: { method?: string; url?: string; bytes: number }[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      requests.push({ method: req.method, url: req.url, bytes: Buffer.concat(chunks).length });
+      res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    // No spanProcessors: the SDK builds its own batch processor and OTLP/HTTP exporter. The SDK reads
+    // process.env (not opts.env), so set it there; the afterEach hook restores the ambient values.
+    const env = { OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${port}` };
+    Object.assign(process.env, env);
+    await withTelemetry(
+      { service: "s", knight: "k", env },
+      async (t) => {
+        assert.equal(t.enabled, true);
+        await withTaskSpan({ taskId: "t", knight: "k" }, async () => 1);
+      },
+    );
+    const traces = requests.filter((r) => r.method === "POST" && r.url === "/v1/traces");
+    assert.ok(traces.length >= 1, `expected POST /v1/traces, got ${JSON.stringify(requests)}`);
+    assert.ok(traces[0]!.bytes > 0);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
