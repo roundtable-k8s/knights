@@ -8,7 +8,7 @@
 #
 # Mount requirements:
 #   /nix    → tools image (read-only image volume, optional)
-#   /data   → PVC (workspace, memory, mise tools)
+#   /data   → PVC (workspace, memory, mise tools); $KNIGHT_DATA_DIR overrides
 #   /config → ConfigMap (SOUL.md, mise.toml, etc.)
 
 # First statement: trap SIGTERM/SIGINT so a pod deleted during start-up exits
@@ -24,36 +24,12 @@ log() { echo "[entrypoint] $(date '+%H:%M:%S') $*"; }
 # Phase 1: Workspace seeding (from defaults + ConfigMap)
 # ──────────────────────────────────────────────────────────────────
 log "Phase 1: Workspace"
-mkdir -p /data/memory /data/session-notes /data/scratch
-
-# Seed operational files from image defaults (only if missing on PVC)
-if [ -d /app/defaults ]; then
-  for f in /app/defaults/*.md; do
-    fname=$(basename "$f")
-    [ ! -f "/data/$fname" ] && cp "$f" "/data/$fname" && log "  Seeded $fname"
-  done
-fi
-
-# Sync personality files from ConfigMap → PVC (hash-gated)
-# Only overwrites when ConfigMap content actually changed.
-# Knights can self-modify /data/ files, but CRD-driven changes win.
-mkdir -p /data/.config-hashes
-for f in SOUL.md IDENTITY.md TOOLS.md; do
-  if [ -f "/config/$f" ]; then
-    config_hash=$(md5sum "/config/$f" | cut -d' ' -f1)
-    stored_hash=""
-    [ -f "/data/.config-hashes/$f" ] && stored_hash=$(cat "/data/.config-hashes/$f")
-    if [ "$config_hash" != "$stored_hash" ]; then
-      cp "/config/$f" "/data/$f"
-      echo "$config_hash" > "/data/.config-hashes/$f"
-      if [ -z "$stored_hash" ]; then
-        log "  Seeded $f from ConfigMap"
-      else
-        log "  Updated $f from ConfigMap (hash changed)"
-      fi
-    fi
-  fi
-done
+# Same data root and models path as the runtime's dataPaths().
+DATA_DIR="${KNIGHT_DATA_DIR:-/data}"
+MODELS_JSON="${MODELS_JSON_PATH:-$DATA_DIR/models.json}"
+# shellcheck source=seed-data.sh
+. "$(dirname "$0")/seed-data.sh"
+rt_seed_workspace "$DATA_DIR" /app/defaults /config
 
 rt_phase_mark "Phase 1"
 
@@ -61,20 +37,9 @@ rt_phase_mark "Phase 1"
 # Phase 1.5: Optional Pi model provider bootstrap
 # ──────────────────────────────────────────────────────────────────
 # Allows per-knight native provider configuration (for example Ollama)
-# without baking models.json into the image. Written to /data/models.json —
-# the runtime's agentDir is /data, so that is where ModelRuntime reads it.
-if [ -n "${PI_MODELS_JSON_B64:-}" ] || [ -n "${PI_MODELS_JSON:-}" ]; then
-  mkdir -p /data
-  if [ -n "${PI_MODELS_JSON_B64:-}" ]; then
-    printf '%s' "$PI_MODELS_JSON_B64" | base64 -d > /data/models.json
-    log "Phase 1.5: Wrote /data/models.json from PI_MODELS_JSON_B64"
-  else
-    printf '%s\n' "$PI_MODELS_JSON" > /data/models.json
-    log "Phase 1.5: Wrote /data/models.json from PI_MODELS_JSON"
-  fi
-else
-  log "Phase 1.5: No custom Pi model config — skipping"
-fi
+# without baking models.json into the image. Written to the models path
+# ($MODELS_JSON_PATH, else $DATA_DIR/models.json) — where ModelRuntime reads it.
+rt_write_models_json "$MODELS_JSON"
 
 rt_phase_mark "Phase 1.5"
 
@@ -151,7 +116,7 @@ rt_phase_mark "Phase 4.9"
 # installs its own handlers first thing (a signal before it is ready means it
 # exits without taking a task). exec resets the start-up traps to the default.
 # Set PATH with tool priority
-export PATH="/data/bin:/data/.mise/shims:/app/.mise/shims:$PATH"
+export PATH="$DATA_DIR/bin:$DATA_DIR/.mise/shims:/app/.mise/shims:$PATH"
 # The gh shim goes first so every gh call (including the agent's Bash tool)
 # picks up the current token from GITHUB_TOKEN_FILE.
 if [ -n "${GITHUB_TOKEN_FILE:-}" ]; then
