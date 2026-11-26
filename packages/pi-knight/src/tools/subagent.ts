@@ -126,10 +126,6 @@ export const spawnSubagentTool = defineTool({
       const stats = session.getSessionStats();
       const durationMs = Date.now() - startTime;
 
-      // Attribute sub-agent spend to the parent knight so chains aren't invisible in
-      // fleet metrics. The sub-session is fresh per spawn, so its absolute stats ARE this
-      // spawn's total (no diff needed). Clamp finite/non-negative — same guard as the
-      // parent task accounting — to stay safe with routing/custom models.
       recordSubagentUsage(modelStr, stats, isLocalModel(model));
 
       log.info("Sub-agent completed", {
