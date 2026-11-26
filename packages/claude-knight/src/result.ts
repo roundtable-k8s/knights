@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { invalidTaskResult, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -66,6 +66,11 @@ function primaryModel(result: SDKResultMessage | undefined, fallback: string): s
 
 const DEFAULT_MODEL = "claude-code-default";
 
+/** The model a result reports: the configured Claude model, or Claude Code's default. */
+export function resultModel(config: Pick<KnightConfig, "claudeModel">): string {
+  return config.claudeModel ?? DEFAULT_MODEL;
+}
+
 const safe = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
 export function classifyResult(input: ClassifyInput): TaskResult {
@@ -80,7 +85,7 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       cacheRead: safe(usage?.cache_read_input_tokens),
       cacheWrite: safe(usage?.cache_creation_input_tokens),
     },
-    model: primaryModel(result, config.claudeModel ?? DEFAULT_MODEL),
+    model: primaryModel(result, resultModel(config)),
     turns: result?.num_turns ?? 0,
     ...(input.toolCalls !== undefined ? { toolCalls: input.toolCalls } : {}),
   } satisfies Omit<TaskResult, "result" | "success">;
@@ -155,7 +160,7 @@ export function reserveRefusedOutcome(reason: string | undefined, config: Knight
     cost: 0,
     billing: config.authMode,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    model: config.claudeModel ?? DEFAULT_MODEL,
+    model: resultModel(config),
     turns: 0,
   };
 }
@@ -171,7 +176,7 @@ export function failedOutcome(errMsg: string, config: KnightConfig): TaskResult 
     cost: 0,
     billing: config.authMode,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    model: config.claudeModel ?? DEFAULT_MODEL,
+    model: resultModel(config),
     turns: 0,
   };
 }
@@ -179,6 +184,22 @@ export function failedOutcome(errMsg: string, config: KnightConfig): TaskResult 
 /** Fields every claude-knight result carries on top of the shared contract. */
 export function runtimeFields(config: Pick<KnightConfig, "authMode">): Pick<ResultPayload, "runtime" | "billing"> {
   return { runtime: "claude-knight", billing: config.authMode };
+}
+
+/** Payload for a lost task (delivered, never acked), with the claude-knight runtime fields. */
+export function lostResultPayload(config: KnightConfig, parsed: ParsedTask): ResultPayload {
+  return {
+    ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: resultModel(config), parsed }),
+    ...runtimeFields(config),
+  };
+}
+
+/** Payload for a task whose payload broke the TaskPayload schema, with the claude-knight runtime fields. */
+export function invalidResultPayload(config: KnightConfig, parsed: ParsedTask): ResultPayload {
+  return {
+    ...invalidTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: resultModel(config), invalid: parsed.invalid ?? "invalid" }),
+    ...runtimeFields(config),
+  };
 }
 
 /**
