@@ -9,6 +9,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isLocalModel, resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import { dataPaths, type KnightConfig } from "./config.js";
+import { sessionMessages } from "./runtime-metrics.js";
 import { SessionSpans } from "./spans.js";
 import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
@@ -517,6 +518,7 @@ export async function executeTask(
   // delta. A negative value would throw in prom-client (Counter.inc cannot decrease) and
   // crash the task in the stats layer, so we never let a per-task delta go below zero.
   const statsAfter = sess.getSessionStats();
+  if (Number.isFinite(statsAfter.totalMessages)) sessionMessages.set(statsAfter.totalMessages);
   // Non-negative AND finite: routing/custom models can report missing or non-monotonic
   // usage, yielding a negative or NaN diff — either of which throws in prom-client.
   const delta = (after: number, before: number) => {

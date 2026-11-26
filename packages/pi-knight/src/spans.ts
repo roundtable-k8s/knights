@@ -1,4 +1,5 @@
-import { activeTraceContext, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
+import { trace } from "@opentelemetry/api";
+import { activeTraceContext, boundText, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
 
 /**
  * Turns pi session events into `chat <model>` (one per LLM turn) and `execute_tool <tool>`
@@ -76,6 +77,24 @@ export class SessionSpans {
         this.endChat(a, failed ? String(m.errorMessage ?? m.stopReason) : undefined);
         break;
       }
+      case "compaction_end":
+        this.event("compaction", {
+          reason: String(e.reason),
+          aborted: Boolean(e.aborted),
+          will_retry: Boolean(e.willRetry),
+        });
+        break;
+      case "auto_retry_start":
+        this.event("llm.retry", {
+          attempt: Number(e.attempt),
+          max_attempts: Number(e.maxAttempts),
+          delay_ms: Number(e.delayMs),
+          ...this.errorAttr(e.errorMessage),
+        });
+        break;
+      case "auto_retry_end":
+        this.event("llm.retry", { attempt: Number(e.attempt), success: Boolean(e.success), ...this.errorAttr(e.finalError) });
+        break;
       case "tool_execution_start": {
         const id = String(e.toolCallId);
         const name = String(e.toolName);
@@ -101,6 +120,17 @@ export class SessionSpans {
         break;
       }
     }
+  }
+
+  /** Add an event to the task span; a no-op without an SDK. */
+  private event(name: string, attributes: Record<string, string | number | boolean>): void {
+    trace.getSpan(this.parent)?.addEvent(name, attributes);
+  }
+
+  /** Error text goes on the event redacted and cut to 500 chars; empty when absent. */
+  private errorAttr(err: unknown): { error?: string } {
+    if (typeof err !== "string" || !err) return {};
+    return { error: boundText(err, 500).text };
   }
 
   /** End every span still open (task finished or aborted). Idempotent. */

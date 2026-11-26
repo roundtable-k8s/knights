@@ -184,3 +184,35 @@ test("input history keeps the newest messages when over the cap", async () => {
   assert.ok(!input.includes("OLDEST"));
   assert.equal(chat.attributes["roundtable.content.truncated"], true);
 });
+
+test("compaction and retry events land on the task span with redacted, bounded error text", async () => {
+  const { exporter, t, processor } = await setup();
+  await withTaskSpan({ taskId: "t1", knight: "k", table: "tbl" }, async () => {
+    const s = new SessionSpans("p/m", { knight: "k", table: "tbl" });
+    s.handle({ type: "compaction_start", reason: "threshold" });
+    s.handle({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: true });
+    s.handle({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "boom ghp_" + "a".repeat(36) + " " + "x".repeat(2000) });
+    s.handle({ type: "auto_retry_end", success: false, attempt: 3, finalError: "gave up" });
+    s.endAll();
+  });
+  await processor.forceFlush();
+  const root = exporter.getFinishedSpans().find((s) => s.name === "invoke_agent k")!;
+  const ev = root.events;
+  assert.deepEqual(ev.map((e) => e.name), ["compaction", "llm.retry", "llm.retry"]);
+  assert.deepEqual(ev[0].attributes, { reason: "threshold", aborted: false, will_retry: true });
+  assert.equal(ev[1].attributes!["attempt"], 1);
+  assert.equal(ev[1].attributes!["max_attempts"], 3);
+  assert.equal(ev[1].attributes!["delay_ms"], 2000);
+  const err = String(ev[1].attributes!["error"]);
+  assert.ok(!err.includes("ghp_"));
+  assert.ok(err.length <= 500);
+  assert.deepEqual(ev[2].attributes, { attempt: 3, success: false, error: "gave up" });
+  await t.shutdown?.();
+});
+
+test("compaction and retry events are no-ops without an SDK", () => {
+  const s = new SessionSpans("p/m", { knight: "k" });
+  s.handle({ type: "compaction_end", reason: "threshold", aborted: false });
+  s.handle({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "x" });
+  s.handle({ type: "auto_retry_end", success: true, attempt: 1 });
+});

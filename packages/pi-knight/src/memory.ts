@@ -12,6 +12,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { dataPaths, type KnightConfig } from "./config.js";
+import { compactionsTotal, llmRetriesTotal } from "./runtime-metrics.js";
 import { log, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
@@ -38,6 +39,7 @@ export function setupCompactionHook(session: AgentSession, config: KnightConfig)
       });
     }
     if (event.type === "compaction_end") {
+      compactionsTotal.inc({ reason: String(event.reason), outcome: event.aborted ? "aborted" : "completed" });
       log.info("Context compaction complete", {
         knight: config.knightName,
         reason: event.reason,
@@ -56,6 +58,7 @@ export function setupCompactionHook(session: AgentSession, config: KnightConfig)
       });
     }
     if (event.type === "auto_retry_end") {
+      llmRetriesTotal.inc({ outcome: event.success ? "succeeded" : "exhausted" });
       if (event.success) {
         log.info("LLM auto-retry succeeded", { knight: config.knightName, attempt: event.attempt });
       } else {
