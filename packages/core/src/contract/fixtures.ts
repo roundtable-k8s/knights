@@ -40,8 +40,9 @@ export function readFixture<T = Record<string, unknown>>(name: FixtureName): T {
 }
 
 /**
- * Result fields only one runtime sends (pi-knight `tool_calls`; claude-knight `turns`,
- * `runtime`, `billing`). The result fixtures hold the shared contract fields only.
+ * Result fields that are runtime-specific (`tool_calls` is sent by both pi-knight and
+ * claude-knight, but the fixtures omit it; `turns`, `runtime`, `billing` are claude-knight only).
+ * The result fixtures hold the shared contract fields only.
  */
 export const RUNTIME_RESULT_FIELDS = ["tool_calls", "turns", "runtime", "billing"] as const;
 

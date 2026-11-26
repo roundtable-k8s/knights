@@ -123,7 +123,7 @@ export const TaskResult = Type.Object(
       cacheWrite: Type.Optional(count("Cached input tokens written.")),
     }),
     model: Type.String({ description: "The model actually used, whether or not the task carried an override." }),
-    tool_calls: Type.Optional(count("pi-knight: tool calls the agent made.")),
+    tool_calls: Type.Optional(count("Tool calls the agent made (pi-knight and claude-knight).")),
     turns: Type.Optional(count("claude-knight: agent turns.")),
     runtime: Type.Optional(Type.String({ description: "claude-knight: `claude-knight`." })),
     billing: Type.Optional(Type.Enum(["subscription", "api", "local"], {

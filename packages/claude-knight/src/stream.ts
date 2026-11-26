@@ -31,10 +31,12 @@ export interface StreamState {
   prCommands: Map<string, string>;
   /** PRs opened or updated by the agent's gh/git commands, in order. */
   prs: PRRef[];
+  /** tool_use blocks seen in the stream (both runtimes, independent of countTools). */
+  toolCalls: number;
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map(), toolStarts: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [] };
+  return { lastAssistantText: "", toolNames: new Map(), toolStarts: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [], toolCalls: 0 };
 }
 
 export interface StreamContext {
@@ -98,6 +100,9 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
           }
         }
       }
+      // Subagent messages (parent_tool_use_id) are counted too, as the tool metrics already do:
+      // every tool_result is counted, whoever made the call.
+      if (Array.isArray(content)) state.toolCalls += content.filter((b) => b?.type === "tool_use").length;
       const act = getActivity(taskId);
       if (act && Array.isArray(content)) {
         for (const b of content) {

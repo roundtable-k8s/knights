@@ -16,8 +16,10 @@ export interface TaskResult {
   billing: "subscription" | "api";
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   model: string;
-  /** Agent turns (Claude Code does not report a tool-call count). */
+  /** Agent turns. */
   turns: number;
+  /** Tool calls the agent made (0 when none). */
+  toolCalls?: number;
   /** True when the failure was a plan/credit limit, so callers can back off. Published as `refused: "quota"`. */
   usageLimited?: boolean;
   /** Set when the final failure was a transient provider error (HTTP 529/5xx, connection reset or timeout). */
@@ -38,6 +40,8 @@ export interface ClassifyInput {
   durationMs: number;
   /** PRs found from the agent's gh/git commands (StreamState.prs). */
   prs?: PRRef[];
+  /** Tool calls seen in the stream (StreamState.toolCalls). */
+  toolCalls?: number;
 }
 
 export function isUsageLimitMessage(text: string | undefined): boolean {
@@ -78,6 +82,7 @@ export function classifyResult(input: ClassifyInput): TaskResult {
     },
     model: primaryModel(result, config.claudeModel ?? DEFAULT_MODEL),
     turns: result?.num_turns ?? 0,
+    ...(input.toolCalls !== undefined ? { toolCalls: input.toolCalls } : {}),
   } satisfies Omit<TaskResult, "result" | "success">;
 
   const fail = (error: string, extra: Partial<TaskResult> = {}): TaskResult => ({
@@ -201,6 +206,7 @@ export function buildResultPayload(
     tokens: outcome.tokens,
     model: outcome.model,
     turns: outcome.turns,
+    ...(outcome.toolCalls !== undefined ? { tool_calls: outcome.toolCalls } : {}),
     runtime: "claude-knight",
     billing: outcome.billing,
     ...taskResultFields(meta.parsed, outcome.success),
