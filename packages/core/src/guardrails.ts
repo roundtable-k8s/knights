@@ -3,6 +3,7 @@
  * SDK and CLI hooks): blocked bash commands and writes that carry a secret.
  */
 import { containsSecret } from "./activity.js";
+import { isGitPush } from "./structured.js";
 
 /** Bash commands that should be blocked outright. */
 export const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
@@ -24,9 +25,41 @@ export const BLOCK_REASON_PREFIX = "Blocked by knight safety policy: ";
 /** Reason `secret_in_content` for writes that carry a token-shaped secret. */
 export const SECRET_IN_CONTENT = "secret_in_content";
 
+const LONG_FORCE_REASON = "Force push without lease (use --force-with-lease or new commits)";
+const SHORT_FORCE_REASON = "Force push (use new commits instead)";
+const ROOT_DELETE_REASON = "Recursive delete at root level";
+
+/** Reason a bash segment is a force push, or undefined. Token-level, so flag order and `git -C dir` do not matter. */
+function forcePushReason(segment: string): string | undefined {
+  if (!isGitPush(segment)) return undefined;
+  const tokens = segment.trim().split(/\s+/);
+  const at = tokens.findIndex((t) => /^push(?![\w.-])/.test(t));
+  const args = tokens.slice(at + 1);
+  if (args.includes("--force")) return LONG_FORCE_REASON;
+  // A short-flag cluster containing `f` (`-f`, `-uf`) or a `+refspec` (`+main`, `+HEAD:main`) also forces.
+  if (args.some((t) => /^-[a-zA-Z]*f[a-zA-Z]*$/.test(t) || (t.startsWith("+") && t.length > 1))) return SHORT_FORCE_REASON;
+  return undefined;
+}
+
+/** True when a bash segment is `rm` with a recursive flag whose target is exactly `/` or `/*`. */
+function isRootDeleteSegment(segment: string): boolean {
+  const tokens = segment.trim().split(/\s+/);
+  if (!tokens.includes("rm")) return false;
+  const recursive = tokens.some((t) => t === "--recursive" || /^-[a-zA-Z]*[rR][a-zA-Z]*$/.test(t));
+  return recursive && tokens.some((t) => t === "/" || t === "/*");
+}
+
 /** Reason a bash command must be blocked, or undefined when it is allowed. */
 export function checkBashCommand(command: string): string | undefined {
-  return BLOCKED_BASH_PATTERNS.find(({ pattern }) => pattern.test(command))?.reason;
+  const pattern = BLOCKED_BASH_PATTERNS.find(({ pattern }) => pattern.test(command));
+  if (pattern) return pattern.reason;
+  // Split on the same separators as prsFromBash so each simple command is checked on its own.
+  const segments = command.split(/&&|\|\||;|\||\n/);
+  for (const segment of segments) {
+    const reason = forcePushReason(segment) ?? (isRootDeleteSegment(segment) ? ROOT_DELETE_REASON : undefined);
+    if (reason) return reason;
+  }
+  return undefined;
 }
 
 /**
