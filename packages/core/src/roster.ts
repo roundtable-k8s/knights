@@ -10,6 +10,7 @@
  */
 import type { NatsConnection } from "@nats-io/transport-node";
 import { Kvm, type KV } from "@nats-io/kv";
+import { cardsBucketFromEnv } from "./config.js";
 import { log } from "./logger.js";
 import { SERVICE_NAME } from "./service.js";
 
@@ -158,9 +159,14 @@ export interface CardSource {
   readAll(): Promise<KnightCard[]>;
   /**
    * Watch the table's cards: `apply(knight, card | null, revision)` for every current value and
-   * every change (null = deleted), `ready()` once the current values are in. Returns a stop function.
+   * every change (null = deleted), `ready()` once the current values are in, `ended(err?)` when the
+   * watch stops on its own (iterator finished or threw). Returns a stop function.
    */
-  watch?(apply: (knight: string, card: KnightCard | null, revision: number) => void, ready: () => void): Promise<() => void>;
+  watch?(
+    apply: (knight: string, card: KnightCard | null, revision: number) => void,
+    ready: () => void,
+    ended: (err?: unknown) => void,
+  ): Promise<() => void>;
   /** Knight names (lower case) at this table with a pod answering the micro service PING. */
   ping?(): Promise<Set<string>>;
 }
@@ -172,38 +178,87 @@ export interface RosterOptions {
 
 export type ResolvedTarget = { knight: string; domain: string } | { error: string };
 
+/** Back-off between attempts to restart an ended watch: 5 s doubling to 60 s. */
+export const ROSTER_RETRY_MIN_MS = 5_000;
+export const ROSTER_RETRY_MAX_MS = 60_000;
+
 export class Roster {
   private readonly cache = new Map<string, { card: KnightCard | null; revision: number }>();
   private watching = false;
   private stopWatch: (() => void) | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private retryMs = ROSTER_RETRY_MIN_MS;
+  private stopped = false;
+  /** Bumped per watch attempt so a late callback from an old watch is ignored. */
+  private generation = 0;
 
   constructor(private readonly opts: RosterOptions) {}
 
-  /** Start the KV watch. Lookups read directly until it has loaded; a failure leaves that fallback in place. */
+  /** Start the KV watch. Lookups read directly until it has loaded; if it ends or fails they go back to direct reads and the watch is retried with back-off. */
   async start(): Promise<void> {
     if (!this.opts.source.watch) return;
+    this.stopped = false;
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    const gen = ++this.generation;
     try {
-      this.stopWatch = await this.opts.source.watch(
+      const stop = await this.opts.source.watch(
         (knight, card, revision) => {
+          if (gen !== this.generation) return;
           const key = lc(knight);
           const prev = this.cache.get(key);
           if (prev && prev.revision > revision) return;
           this.cache.set(key, { card, revision });
         },
         () => {
+          if (gen !== this.generation) return;
           this.watching = true;
+          this.retryMs = ROSTER_RETRY_MIN_MS;
           log.info("Roster watch loaded", { knights: this.cachedCards().length });
         },
+        (err) => {
+          if (gen !== this.generation) return;
+          this.onEnded(err);
+        },
       );
+      if (gen !== this.generation) stop();
+      else this.stopWatch = stop;
     } catch (e) {
-      log.warn("Roster watch failed — reading cards directly", { error: String(e) });
+      if (gen !== this.generation) return;
+      this.onEnded(e);
     }
   }
 
+  private onEnded(err?: unknown): void {
+    if (this.stopped) return;
+    const wasWatching = this.watching;
+    this.watching = false;
+    this.cache.clear();
+    this.generation++; // drop callbacks from the dead watch
+    this.stopWatch = null;
+    if (wasWatching) log.warn("Roster watch ended — reading cards directly", { error: err === undefined ? undefined : String(err) });
+    if (this.retryTimer) return;
+    const delay = this.retryMs;
+    this.retryMs = Math.min(this.retryMs * 2, ROSTER_RETRY_MAX_MS);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.start();
+    }, delay);
+    this.retryTimer.unref();
+  }
+
   stop(): void {
+    this.stopped = true;
+    this.generation++;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.retryMs = ROSTER_RETRY_MIN_MS;
     this.stopWatch?.();
     this.stopWatch = null;
     this.watching = false;
+    this.cache.clear();
   }
 
   /** Whether lookups are served from the watch cache. */
@@ -251,7 +306,7 @@ export class Roster {
 
 /** The KV bucket and table from the pod env; null when the operator did not set them (older operator). */
 export function rosterConfigFromEnv(env: NodeJS.ProcessEnv): { bucket: string; table: string } | null {
-  const bucket = env["KNIGHT_CARDS_BUCKET"]?.trim();
+  const bucket = cardsBucketFromEnv(env);
   const table = env["ROUNDTABLE_TABLE"]?.trim();
   if (!bucket || !table || table === "none") return null;
   return { bucket, table };
@@ -301,7 +356,7 @@ export function natsCardSource(getConnection: () => NatsConnection | null, bucke
       return cards;
     },
 
-    async watch(apply, ready) {
+    async watch(apply, ready, ended) {
       const store = await kv();
       const iter = await store.watch({ key: filter });
       let loaded = false;
@@ -317,7 +372,8 @@ export function natsCardSource(getConnection: () => NatsConnection | null, bucke
           apply(knight, e.operation === "PUT" ? parseCard(() => e.json<KnightCard>()) : null, e.revision);
           if (e.isUpdate || e.delta === 0) markLoaded();
         }
-      })().catch((err) => log.warn("Roster watch stopped", { error: String(err) }));
+        ended();
+      })().catch((err) => ended(err));
       // Seed with a direct read too, so an empty table (no watch entries) still counts as loaded;
       // revisions keep the newer of the two when both report a key.
       void (async () => {

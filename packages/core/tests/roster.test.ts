@@ -3,7 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, afterEach, before, describe, it } from "node:test";
+import { after, afterEach, before, describe, it, mock } from "node:test";
 import { connect, type NatsConnection } from "@nats-io/transport-node";
 import { Kvm, type KV } from "@nats-io/kv";
 import {
@@ -17,10 +17,12 @@ import {
   resetRoster,
   resolveRequestTarget,
   Roster,
+  ROSTER_RETRY_MIN_MS,
   rosterConfigFromEnv,
   type CardSource,
   type KnightCard,
 } from "../src/roster.ts";
+import { cardsBucketFromEnv } from "../src/config.ts";
 import { startKnightService } from "../src/service.ts";
 
 const card = (name: string, domain: string, extra: Partial<KnightCard> = {}, rt: NonNullable<KnightCard["roundtable"]> = {}): KnightCard => ({
@@ -187,6 +189,104 @@ describe("Roster", () => {
     const r = await findKnightsText({});
     assert.equal(r.isError, true);
     assert.match(r.text, /no bucket/);
+  });
+});
+
+describe("Roster when the watch ends", () => {
+  afterEach(() => {
+    resetRoster();
+    mock.timers.reset();
+  });
+
+  /** A source whose watch can be ended by the test; each start() sees the current bucket. */
+  function endable(bucket: KnightCard[]) {
+    const st = { readAll: 0, watches: 0, stopped: 0, end: (_e?: unknown) => {}, failNext: false };
+    const source: CardSource = {
+      async readAll() {
+        st.readAll++;
+        return bucket;
+      },
+      async watch(apply, ready, ended) {
+        st.watches++;
+        if (st.failNext) throw new Error("bucket gone");
+        bucket.forEach((c, i) => apply(c.name, c, i + 1));
+        ready();
+        st.end = ended;
+        return () => {
+          st.stopped++;
+        };
+      },
+    };
+    return { source, st };
+  }
+
+  it("falls back to readAll() and sees changed cards, then a restart repopulates the cache", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const bucket = [card("galahad", "security")];
+    const { source, st } = endable(bucket);
+    const roster = new Roster({ self: "lancelot", source });
+    await roster.start();
+    assert.equal(roster.cached, true);
+    assert.deepEqual(names(await roster.find({})), ["galahad"]);
+    assert.equal(st.readAll, 0);
+
+    bucket.push(card("bors", "security")); // the cache can no longer see this
+    st.end(new Error("connection lost"));
+    assert.equal(roster.cached, false);
+    assert.deepEqual(names(await roster.find({})), ["bors", "galahad"]);
+    assert.equal(st.readAll, 1);
+
+    mock.timers.tick(ROSTER_RETRY_MIN_MS);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 2);
+    assert.equal(roster.cached, true);
+    assert.deepEqual(names(await roster.find({})), ["bors", "galahad"]);
+    assert.equal(st.readAll, 1, "served from the cache again");
+  });
+
+  it("retries with a doubling, capped back-off and stop() cancels the retry", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const { source, st } = endable([card("galahad", "security")]);
+    const roster = new Roster({ self: "lancelot", source });
+    st.failNext = true;
+    await roster.start();
+    assert.equal(st.watches, 1);
+    mock.timers.tick(ROSTER_RETRY_MIN_MS - 1);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 1);
+    mock.timers.tick(1);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 2, "first retry after 5 s");
+    mock.timers.tick(ROSTER_RETRY_MIN_MS * 2);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 3, "second retry after 10 s");
+
+    roster.stop();
+    mock.timers.tick(10 * 60_000);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 3, "no retry after stop()");
+  });
+
+  it("stop() while watching does not schedule a retry", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const { source, st } = endable([card("galahad", "security")]);
+    const roster = new Roster({ self: "lancelot", source });
+    await roster.start();
+    const end = st.end;
+    roster.stop();
+    end(); // the iterator ending because of stop()
+    mock.timers.tick(10 * 60_000);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 1);
+    assert.equal(st.stopped, 1);
+  });
+});
+
+describe("cardsBucketFromEnv", () => {
+  it("trims and treats blank as unset", () => {
+    assert.equal(cardsBucketFromEnv({ KNIGHT_CARDS_BUCKET: " cards " }), "cards");
+    assert.equal(cardsBucketFromEnv({ KNIGHT_CARDS_BUCKET: "  " }), undefined);
+    assert.equal(cardsBucketFromEnv({}), undefined);
   });
 });
 

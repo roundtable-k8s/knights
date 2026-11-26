@@ -123,6 +123,11 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     drainTimeoutMs: positiveIntEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
     ...(env["KNIGHT_MEMORY_DIR"] ? { memoryDir: env["KNIGHT_MEMORY_DIR"] } : {}),
     ...(env["KNIGHT_MEMORY_ROOT"] ? { memoryRoot: env["KNIGHT_MEMORY_ROOT"] } : {}),
-    ...(env["KNIGHT_CARDS_BUCKET"]?.trim() ? { cardsBucket: env["KNIGHT_CARDS_BUCKET"].trim() } : {}),
+    ...(cardsBucketFromEnv(env) ? { cardsBucket: cardsBucketFromEnv(env) } : {}),
   };
+}
+
+/** KNIGHT_CARDS_BUCKET, trimmed; undefined when unset or blank. The one place the variable is parsed. */
+export function cardsBucketFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  return env["KNIGHT_CARDS_BUCKET"]?.trim() || undefined;
 }
