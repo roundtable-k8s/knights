@@ -9,48 +9,16 @@
  * (no shell, so page text or selectors can't inject commands), and screenshots
  * come back as an image Claude can see, not just a file path.
  */
-import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import { log } from "@roundtable/knight-core";
+import { log, browserEnabled, runBrowser } from "@roundtable/knight-core";
 
-export function browserEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env["BROWSER_ENABLED"] === "true";
-}
+export { browserEnabled, runBrowser, setBrowserExec } from "@roundtable/knight-core";
+export type { ExecFn } from "@roundtable/knight-core";
 
-const CDP_URL = () => process.env["BROWSER_CDP_URL"] || "http://localhost:9222";
-const BIN = () => process.env["AGENT_BROWSER_BIN"] || "agent-browser";
-const MAX_OUTPUT = 100_000;
 const MAX_IMAGE_BYTES = 4_500_000;
-
-export type ExecFn = (bin: string, args: string[], timeoutMs: number) => Promise<string>;
-
-const defaultExec: ExecFn = (bin, args, timeoutMs) =>
-  new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: timeoutMs, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || stdout || err.message).trim()));
-      else resolve(stdout.trim());
-    });
-  });
-
-let exec: ExecFn = defaultExec;
-/** Test hook. */
-export function setBrowserExec(fn: ExecFn | null): void {
-  exec = fn ?? defaultExec;
-}
-
-/** Reconnect first: the agent-browser daemon can die between calls; connect is idempotent. */
-export async function runBrowser(args: string[], timeoutMs = 30_000): Promise<string> {
-  try {
-    await exec(BIN(), ["connect", CDP_URL()], 10_000);
-  } catch {
-    // best effort — the command may still work through an existing daemon
-  }
-  const out = await exec(BIN(), args, timeoutMs);
-  return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}\n…[truncated ${out.length - MAX_OUTPUT} chars]` : out;
-}
 
 type Content = Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
 const text = (t: string, isError = false) => ({ content: [{ type: "text" as const, text: t }] as Content, ...(isError ? { isError: true } : {}) });

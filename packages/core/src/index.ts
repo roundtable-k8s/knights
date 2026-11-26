@@ -24,3 +24,4 @@ export * from "./slots.js";
 export * from "./knight-request.js";
 export * from "./workdirs.js";
 export * from "./skill-wait.js";
+export * from "./browser.js";
