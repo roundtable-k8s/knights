@@ -20,3 +20,16 @@ export class SlotPool {
     return this.used.size;
   }
 }
+
+/**
+ * Runs `fn` holding a slot and always frees it, however `fn` ends (return or throw).
+ * Everything that happens after the slot is taken belongs inside `fn`.
+ */
+export async function withSlot<T>(slots: SlotPool, fn: (slot: number) => Promise<T>): Promise<T> {
+  const slot = slots.acquire();
+  try {
+    return await fn(slot);
+  } finally {
+    slots.release(slot);
+  }
+}

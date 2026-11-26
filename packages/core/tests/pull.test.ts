@@ -149,6 +149,28 @@ describe("TaskTracker (#75)", () => {
   });
 });
 
+describe("TaskTracker active expiry (#118)", () => {
+  it("treats an active id as unknown once activeTtlMs has passed without finished", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 4999;
+    assert.equal(t.state("a"), "active");
+    now = 5001;
+    assert.equal(t.state("a"), undefined, "a missed finished must not hide a lost task forever");
+  });
+
+  it("restarts the bound when an expired id is started again", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 6000;
+    t.started("a");
+    t.finished("a");
+    assert.equal(t.state("a"), "finished", "stale count is not carried over");
+  });
+});
+
 const NATS_BIN = process.env["NATS_SERVER_BIN"] ?? ["/usr/local/bin/nats-server", "/usr/bin/nats-server"].find(existsSync) ?? "nats-server";
 
 describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) && "nats-server not found (set NATS_SERVER_BIN)" }, () => {

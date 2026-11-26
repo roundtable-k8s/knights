@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -141,46 +141,52 @@ async function main(): Promise<void> {
   const slots = new SlotPool();
 
   // Process a single task
-  async function processTask(delivery: TaskDelivery): Promise<void> {
+  async function processTask(delivery: TaskDelivery, slot: number): Promise<void> {
     // Skills may have changed (git-sync): re-read and re-register the service if so.
     // Not awaited: the slot must be counted synchronously so the next fetch sees it.
     void knightService?.refreshSkills();
     const { taskId, runId, model, chainName, stepName, timestamp, attempt } = delivery.task;
     const taskText = promptWithRetryContext(delivery.task);
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
-    const slot = slots.acquire();
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
-    const activity = new TaskActivity({
-      knight: config.knightName,
-      table: config.table,
-      prefix: natsPrefix(config),
-      taskId,
-      identity: podIdentity(process.env, hostname()),
-      runId,
-      chainName,
-      stepName,
-      model: model ?? config.knightModel,
-      slot,
-      attempt,
-      concurrency: config.maxConcurrentTasks,
-      ...(Number.isFinite(sentAt) ? { queuedFor: Math.max(0, Date.now() - sentAt) } : {}),
-      content: config.activityContent,
-    });
-    // Keep the message un-acked but alive while the task runs; ack only when it finishes.
-    const heartbeat = setInterval(() => {
-      delivery.working();
-      activity.heartbeat();
-    }, HEARTBEAT_MS);
-    activeCount++;
-    activity.started();
-    setActiveTaskCount(activeCount);
-    metrics.activeTasks.labels().set(activeCount);
-
     const startTime = Date.now();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    // Everything taken after the slot is released in the finally below, even when a step throws part-way.
+    let activity: TaskActivity | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let counted = false;
 
     try {
+      activity = new TaskActivity({
+        knight: config.knightName,
+        table: config.table,
+        prefix: natsPrefix(config),
+        taskId,
+        identity: podIdentity(process.env, hostname()),
+        runId,
+        chainName,
+        stepName,
+        model: model ?? config.knightModel,
+        slot,
+        attempt,
+        concurrency: config.maxConcurrentTasks,
+        ...(Number.isFinite(sentAt) ? { queuedFor: Math.max(0, Date.now() - sentAt) } : {}),
+        content: config.activityContent,
+      });
+      const act = activity;
+      // Keep the message un-acked but alive while the task runs; ack only when it finishes.
+      heartbeat = setInterval(() => {
+        delivery.working();
+        act.heartbeat();
+      }, HEARTBEAT_MS);
+      activeCount++;
+      counted = true;
+      activity.started();
+      setActiveTaskCount(activeCount);
+      metrics.activeTasks.labels().set(activeCount);
+      timeout = setTimeout(() => controller.abort(), timeoutMs);
+
       const result = await withTaskSpan(
         { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel },
         () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
@@ -209,7 +215,7 @@ async function main(): Promise<void> {
       const durationMs = Date.now() - startTime;
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error("Task failed", { taskId, error: errMsg });
-      activity.finished({ success: false, error: errMsg });
+      activity?.finished({ success: false, error: errMsg });
 
       await publishResult(taskId, buildResultPayload(
         failedTaskResult(errMsg, config.knightModel),
@@ -221,13 +227,14 @@ async function main(): Promise<void> {
     } finally {
       clearTimeout(timeout);
       clearInterval(heartbeat);
-      activity.close();
+      activity?.close();
       knightService?.markTaskFinished();
-      slots.release(slot);
       delivery.ack();
-      activeCount--;
-      setActiveTaskCount(activeCount);
-      metrics.activeTasks.labels().set(activeCount);
+      if (counted) {
+        activeCount--;
+        setActiveTaskCount(activeCount);
+        metrics.activeTasks.labels().set(activeCount);
+      }
       puller?.wake();
     }
   }
@@ -275,7 +282,11 @@ async function main(): Promise<void> {
       return !self;
     },
     onTask: (delivery) => {
-      void processTask(delivery);
+      // withSlot frees the slot on any throw; the catch makes sure the delivery is acked and the error logged.
+      void withSlot(slots, (slot) => processTask(delivery, slot)).catch((e) => {
+        log.error("Task handler crashed", { taskId: delivery.task.taskId, error: e instanceof Error ? e.message : String(e) });
+        delivery.ack();
+      });
     },
     onLost: async (parsed) => {
       metrics.recordLostTask();
