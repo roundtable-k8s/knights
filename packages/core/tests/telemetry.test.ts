@@ -79,6 +79,7 @@ test("resource defaults add knight/table/service unless the env already sets the
 test("one task yields one invoke_agent root span with attributes; logs inside carry trace_id", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
+  const meterProviderBefore = metrics.getMeterProvider();
   const { finished: spans, lines, tp } = await withTelemetry(
     {
       service: "pi-knight",
@@ -88,27 +89,29 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
       spanProcessors: [processor],
     },
     async (t) => {
-  assert.equal(t.enabled, true);
+      assert.equal(t.enabled, true);
+      // Traces only: starting the SDK must not swap in a meter provider.
+      assert.equal(metrics.getMeterProvider(), meterProviderBefore);
 
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
-  initLogger("galahad", "info", "dev");
+      const chunks: string[] = [];
+      setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+      initLogger("galahad", "info", "dev");
 
-  let tp: Record<string, string> = {};
-  await withTaskSpan(
-    { taskId: "t1", runId: "r1", attempt: 2, knight: "galahad", table: "dev", model: "m" },
-    async () => {
-      log.info("inside");
-      tp = traceparentEnv();
-      return { ok: true, cost: 0.5 };
-    },
-    (r) => ({ success: r.ok, cost: r.cost, model: "m2" }),
-  );
-  log.info("outside");
-  await processor.forceFlush();
-  const finished = exporter.getFinishedSpans(); // shutdown() resets the exporter
-  const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  return { finished, lines, tp };
+      let tp: Record<string, string> = {};
+      await withTaskSpan(
+        { taskId: "t1", runId: "r1", attempt: 2, knight: "galahad", table: "dev", model: "m" },
+        async () => {
+          log.info("inside");
+          tp = traceparentEnv();
+          return { ok: true, cost: 0.5 };
+        },
+        (r) => ({ success: r.ok, cost: r.cost, model: "m2" }),
+      );
+      log.info("outside");
+      await processor.forceFlush();
+      const finished = exporter.getFinishedSpans(); // shutdown() resets the exporter
+      const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      return { finished, lines, tp };
     },
   );
 
