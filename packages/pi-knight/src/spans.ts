@@ -1,4 +1,4 @@
-import { activeTraceContext, captureContent, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
+import { activeTraceContext, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
 
 /**
  * Turns pi session events into `chat <model>` (one per LLM turn) and `execute_tool <tool>`
@@ -28,8 +28,10 @@ export class SessionSpans {
   private chat?: ReturnType<typeof startChildSpan>;
   private tools = new Map<string, ReturnType<typeof startChildSpan>>();
   private readonly attrs: Record<string, string>;
-  /** Messages seen so far, as `{role, content}`: the input of the next chat turn. */
+  /** Newest messages as `{role, content}`, bounded to the content cap: the input of the next chat turn. */
   private history: { role: string; content: string }[] = [];
+  private historyBytes = 0;
+  private historyDropped = false;
 
   constructor(
     private readonly model: string,
@@ -51,17 +53,21 @@ export class SessionSpans {
           { parent: this.parent },
         );
         this.setContent(this.chat, "gen_ai.system_instructions", () => this.systemPrompt?.() ?? "");
-        this.setContent(this.chat, "gen_ai.input.messages", () => JSON.stringify(this.history));
         break;
       case "message_end": {
         const m = e.message;
         if (m?.role !== "assistant") {
-          if (m?.role === "user" || m?.role === "toolResult") this.history.push({ role: m.role, content: textOf(m.content) });
+          if (m?.role === "user" || m?.role === "toolResult") this.remember(m.role, textOf(m.content));
           break;
         }
-        const out = textOf(m.content);
-        this.history.push({ role: "assistant", content: out });
-        if (this.chat) this.setContent(this.chat, "gen_ai.output.messages", () => JSON.stringify([{ role: "assistant", content: out }]));
+        // The prompt's message_end arrives after turn_start, so the input is only complete here.
+        if (this.chat) {
+          const chat = this.chat;
+          this.setContent(chat, "gen_ai.input.messages", () => JSON.stringify(this.history));
+          if (this.historyDropped && captureContent()) chat.setAttribute("roundtable.content.truncated", true);
+          this.setContent(chat, "gen_ai.output.messages", () => JSON.stringify([this.outputMessage(m)]));
+        }
+        this.remember("assistant", textOf(m.content));
         const a: Record<string, string | number> = {};
         if (typeof m.model === "string" && m.model) a["gen_ai.response.model"] = m.model;
         if (Number.isFinite(m.usage?.input)) a["gen_ai.usage.input_tokens"] = m.usage.input;
@@ -102,6 +108,31 @@ export class SessionSpans {
     this.endChat();
     for (const s of this.tools.values()) s.end();
     this.tools.clear();
+  }
+
+  /** Append to the history, dropping the oldest messages once it exceeds the content cap. */
+  private remember(role: string, content: string): void {
+    if (!captureContent()) return;
+    const max = contentMaxBytes();
+    if (content.length > max) {
+      content = content.slice(0, max);
+      this.historyDropped = true;
+    }
+    this.history.push({ role, content });
+    this.historyBytes += Buffer.byteLength(content);
+    while (this.historyBytes > max && this.history.length > 1) {
+      this.historyBytes -= Buffer.byteLength(this.history.shift()!.content);
+      this.historyDropped = true;
+    }
+  }
+
+  private outputMessage(m: any): { role: string; content: string; tool_calls?: unknown[] } {
+    const calls = Array.isArray(m.content)
+      ? m.content
+          .filter((b: any) => b && b.type === "toolCall")
+          .map((b: any) => ({ id: b.id, name: b.name, arguments: b.arguments }))
+      : [];
+    return { role: "assistant", content: textOf(m.content), ...(calls.length ? { tool_calls: calls } : {}) };
   }
 
   /** Value is computed lazily so nothing is built when capture is off. */

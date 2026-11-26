@@ -233,7 +233,10 @@ export function setContentAttribute(span: Span, key: string, value: string, env:
   let { text, truncated } = boundText(value, max);
   if (Buffer.byteLength(text) > max) {
     // Cut on a byte boundary without leaving a split multi-byte character behind.
-    text = Buffer.from(text).subarray(0, max).toString("utf8").replace(/\uFFFD+$/, "");
+    const buf = Buffer.from(text);
+    let end = max;
+    while (end > 0 && (buf[end]! & 0xc0) === 0x80) end--; // back off to a character start
+    text = buf.subarray(0, end).toString("utf8");
     truncated = true;
   }
   span.setAttribute(key, text);

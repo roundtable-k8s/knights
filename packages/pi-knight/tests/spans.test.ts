@@ -149,3 +149,38 @@ test("ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false leaves content unset but keeps 
   assert.equal(chat.attributes["gen_ai.usage.input_tokens"], 10);
   assert.ok(spans.some((s) => s.attributes["gen_ai.tool.name"] === "bash"));
 });
+
+test("the first chat span records the prompt (real event order: turn_start precedes the prompt)", async () => {
+  const spans = await run({}, [
+    { type: "agent_start" },
+    { type: "turn_start" },
+    { type: "message_start", message: { role: "user" } },
+    { type: "message_end", message: { role: "user", content: [{ type: "text", text: "please fix the bug" }] } },
+    msg({ content: [{ type: "text", text: "ok" }, { type: "toolCall", id: "c1", name: "bash", arguments: { cmd: "ls" } }] }),
+    { type: "turn_start" },
+    { type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "file.txt" }] } },
+    msg(),
+  ]);
+  const chats = spans.filter((s) => s.name === "chat p/m");
+  assert.deepEqual(JSON.parse(String(chats[0].attributes["gen_ai.input.messages"])), [{ role: "user", content: "please fix the bug" }]);
+  const second = JSON.parse(String(chats[1].attributes["gen_ai.input.messages"]));
+  assert.deepEqual(second.map((m: any) => m.role), ["user", "assistant", "toolResult"]);
+  const out = JSON.parse(String(chats[0].attributes["gen_ai.output.messages"]));
+  assert.deepEqual(out[0].tool_calls, [{ id: "c1", name: "bash", arguments: { cmd: "ls" } }]);
+});
+
+test("input history keeps the newest messages when over the cap", async () => {
+  const spans = await run({ ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES: "200" }, [
+    { type: "turn_start" },
+    { type: "message_end", message: { role: "user", content: "OLDEST " + "x".repeat(150) } },
+    msg(),
+    { type: "turn_start" },
+    { type: "message_end", message: { role: "user", content: "NEWEST " + "y".repeat(100) } },
+    msg(),
+  ]);
+  const chat = spans.filter((s) => s.name === "chat p/m")[1];
+  const input = String(chat.attributes["gen_ai.input.messages"]);
+  assert.match(input, /NEWEST/);
+  assert.ok(!input.includes("OLDEST"));
+  assert.equal(chat.attributes["roundtable.content.truncated"], true);
+});
