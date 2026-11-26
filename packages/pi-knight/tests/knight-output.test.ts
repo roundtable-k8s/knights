@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  describeAbortedTask,
   describeSessionFailure,
   extractTextFromAssistantContent,
   getBestAssistantResult,
@@ -206,4 +207,29 @@ test("refusalCode detects OpenRouter 402 credit/max_tokens refusals (#79)", () =
   assert.equal(refusalCode("LLM call failed: 429 rate limited"), undefined, "429 is not a refusal");
   assert.equal(refusalCode("Agent produced no deliverable output"), undefined, "no 402, no refusal");
   assert.equal(refusalCode(undefined), undefined);
+});
+
+test("getBestAssistantResult with fromIndex ignores an earlier step's text", () => {
+  const messages = [
+    { role: "user", content: "step 1" },
+    { role: "assistant", content: [{ type: "text", text: "step 1 answer" }] },
+    { role: "user", content: "step 2" },
+    { role: "assistant", content: [], stopReason: "error", errorMessage: "boom" },
+  ];
+  assert.equal(getBestAssistantResult(session(messages) as any), "step 1 answer");
+  assert.equal(getBestAssistantResult(session(messages) as any, 2), undefined);
+  assert.equal(describeSessionFailure(session(messages) as any, false, 2), "LLM call failed: boom");
+  assert.equal(summarizeSessionTail(session(messages) as any, 6, 2).length, 2);
+});
+
+test("describeAbortedTask reports timeout/error with partial output, and nothing for a normal stop", () => {
+  const aborted = session([
+    { role: "assistant", content: [{ type: "text", text: "narration" }] },
+    { role: "assistant", content: [], stopReason: "aborted" },
+  ]);
+  assert.equal(describeAbortedTask(aborted as any, true, "narration"), "Task timed out. Partial output: narration");
+  const errored = session([{ role: "assistant", content: [], stopReason: "error", errorMessage: "429" }]);
+  assert.equal(describeAbortedTask(errored as any, false, "narration"), "LLM call failed: 429. Partial output: narration");
+  const ok = session([{ role: "assistant", content: [{ type: "text", text: "fine" }], stopReason: "stop" }]);
+  assert.equal(describeAbortedTask(ok as any, false, "fine"), undefined);
 });

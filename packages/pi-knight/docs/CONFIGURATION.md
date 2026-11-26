@@ -85,6 +85,7 @@ file under `$KNIGHT_DATA_DIR/sessions` (default `/data/sessions`); old files are
 |----------|-------------|---------|
 | `SESSION_RETENTION_MAX_FILES` | Max persisted session files kept on the PVC (`0` = no cap) | `100` |
 | `SESSION_RETENTION_DAYS` | Delete session files not modified for this many days (`0` = no cap) | `30` |
+| `ABORTED_TASK_IS_FAILURE` | `true`: a task whose last assistant message ended aborted or in an LLM error is published `success: false`, with `Task timed out. Partial output: ...` / `LLM call failed: ...` and any partial text, instead of succeeding with its earlier narration | `false` |
 | `ACTIVITY_CONTENT` | `preview` publishes tool output / message previews in activity events; `none` omits them | `preview` |
 | `POD_NAME`, `NODE_NAME` | Pod identity stamped on activity events and introspect replies (downward API); falls back to hostname / unset | — |
 
