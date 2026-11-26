@@ -166,3 +166,28 @@ test("missing or malformed trace headers give a root span", async () => {
     assert.equal(s.parentSpanContext, undefined);
   }
 });
+
+test("task span carries runtime, chain, step and token usage; absent when unset", async () => {
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const t = await startTelemetry({ service: "pi-knight", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] });
+  await withTaskSpan(
+    { taskId: "a", knight: "k", runtime: "claude", chain: "c1", step: "s1" },
+    async () => 1,
+    () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50 } }),
+  );
+  await withTaskSpan({ taskId: "b", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 7, output: 3 } }));
+  await processor.forceFlush();
+  const [a, b] = exporter.getFinishedSpans();
+  await t.shutdown();
+  assert.equal(a!.attributes["roundtable.knight.runtime"], "claude");
+  assert.equal(a!.attributes["roundtable.chain"], "c1");
+  assert.equal(a!.attributes["roundtable.chain.step"], "s1");
+  assert.equal(a!.attributes["gen_ai.usage.input_tokens"], 150);
+  assert.equal(a!.attributes["gen_ai.usage.output_tokens"], 20);
+  assert.equal(a!.attributes["gen_ai.usage.cache_read.input_tokens"], 50);
+  for (const k of ["roundtable.chain", "roundtable.chain.step", "roundtable.knight.runtime", "gen_ai.usage.cache_read.input_tokens"]) {
+    assert.equal(k in b!.attributes, false, k);
+  }
+  assert.equal(b!.attributes["gen_ai.usage.input_tokens"], 7);
+});
