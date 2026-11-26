@@ -83,6 +83,13 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Install nats-server
+        env:
+          NATS_VERSION: v2.15.3
+        run: |
+          curl -fsSL -o /tmp/nats.tgz "https://github.com/nats-io/nats-server/releases/download/${NATS_VERSION}/nats-server-${NATS_VERSION}-linux-amd64.tar.gz"
+          tar -xzf /tmp/nats.tgz -C /tmp
+          echo "NATS_SERVER_BIN=/tmp/nats-server-${NATS_VERSION}-linux-amd64/nats-server" >> "$GITHUB_ENV"
       - run: npm run typecheck --workspace packages/core
       - run: npm test --workspace packages/core
 
