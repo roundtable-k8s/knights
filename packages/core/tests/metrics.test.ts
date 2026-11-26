@@ -38,6 +38,7 @@ test("metric names and labels are the shared roundtable_knight_* scheme", async 
   m.toolCallsTotal.labels("t", "ok").inc();
   m.toolCallDuration.labels("t").observe(1);
   m.toolCallsBlocked.labels("t", "r").inc();
+  m.usageLimitHits.labels().inc();
   const text = await m.registry.metrics();
   assert.deepEqual(metricNames(text), [
     "roundtable_knight_active_tasks",
@@ -50,12 +51,14 @@ test("metric names and labels are the shared roundtable_knight_* scheme", async 
     "roundtable_knight_tool_call_duration_seconds",
     "roundtable_knight_tool_calls_blocked_total",
     "roundtable_knight_tool_calls_total",
+    "roundtable_knight_usage_limit_hits_total",
   ]);
   assert.doesNotMatch(text, /pi_knight_|claude_knight_/);
   assert.match(text, /roundtable_knight_llm_cost_usd_total\{model="m",billing="api",table="none",knight="galahad",runtime="pi"\} 1/);
   for (const [type, n] of [["input", 1], ["output", 2], ["cache_read", 3], ["cache_write", 4]] as const) {
     assert.match(text, new RegExp(`roundtable_knight_llm_tokens_total\\{model="m",type="${type}",table="none",knight="galahad",runtime="pi"\\} ${n}`));
   }
+  assert.match(text, /roundtable_knight_usage_limit_hits_total\{table="none",knight="galahad",runtime="pi"\} 1/);
   assert.match(text, /roundtable_knight_tool_calls_blocked_total\{tool="t",reason="r",table="none",knight="galahad",runtime="pi"\} 1/);
 });
 

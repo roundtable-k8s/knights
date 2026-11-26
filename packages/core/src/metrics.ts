@@ -23,7 +23,7 @@ export type KnightMetrics = ReturnType<typeof createKnightMetrics>;
 
 /**
  * The shared registry plus the metrics every runtime has, including tool call
- * duration. Runtime-only metrics (claude: usage limit hits) are registered by the
+ * duration. Runtime-only metrics are registered by the
  * runtime on `registry`.
  */
 export function createKnightMetrics(opts: KnightMetricsOptions) {
@@ -92,6 +92,12 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     registers: [registry],
   });
 
+  const usageLimitHits = new client.Counter({
+    name: `${prefix}_usage_limit_hits_total`,
+    help: "Tasks that failed because the Claude plan or credit limit was reached",
+    registers: [registry],
+  });
+
   /** Pass to connectNats as onStatus: sets the connection gauge and counts a reconnect (back up after being down). */
   let natsWasDown = false;
   function setNatsConnected(up: boolean): void {
@@ -116,5 +122,5 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     for (const [type, n] of types) if (n !== undefined) tokensTotal.labels(model, type).inc(n);
   }
 
-  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, recordLostTask, recordTokens, setNatsConnected };
+  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, usageLimitHits, recordLostTask, recordTokens, setNatsConnected };
 }

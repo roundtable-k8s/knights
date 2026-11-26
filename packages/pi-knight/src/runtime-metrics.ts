@@ -20,6 +20,7 @@ export const {
   toolCallDuration,
   toolCallsTotal,
   toolCallsBlocked,
+  usageLimitHits,
   recordLostTask,
   recordTokens,
 } = metrics;
@@ -45,3 +46,8 @@ export const sessionMessages = new client.Gauge({
   help: "Message count of the session the last task ran in",
   registers: [registry],
 });
+
+/** Count a credit refusal (`refused` set on the published result); the task status label stays `error`. */
+export function recordRefusal(refused: string | undefined): void {
+  if (refused) usageLimitHits.labels().inc();
+}
