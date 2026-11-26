@@ -90,6 +90,13 @@ test("invalidTaskResult names the field and is a valid failure result", () => {
   assert.equal(r.error, "Invalid task payload: runId: must be string");
 });
 
+test("invalidTaskResult for an empty task is a valid failure result (#139)", () => {
+  const r = invalidTaskResult({ taskId: "t", knight: "k", model: "m", invalid: "task: must not be empty" });
+  assertTaskResult(r);
+  assert.equal(r.success, false);
+  assert.equal(r.error, "Invalid task payload: task: must not be empty");
+});
+
 test("resultFixtureDiff reports schema errors, missing, extra and changed fields", () => {
   const ok = readFixture("result.success");
   assert.deepEqual(resultFixtureDiff({ ...ok, tool_calls: 3, tokens: { ...(ok.tokens as object), cacheRead: 9 } }, "result.success"), []);

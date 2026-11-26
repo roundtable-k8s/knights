@@ -30,7 +30,9 @@ and commit the result. `npm test` fails when the committed files are stale.
 - Both runtimes' activity events validate against the activity schema.
 - `parseTask` checks every JSON task against `TaskPayload`. A task that does not match is not run: the
   knight answers with a failure result whose error names the field (`Invalid task payload: runId: must be
-  string`). Text that is not a JSON object is still read as plain task text.
+  string`). An empty or whitespace-only task text is answered the same way (`Invalid task payload:
+  task: must not be empty`), so the dispatcher does not wait for its timeout. Text that is not a JSON
+  object is still read as plain task text.
 - `publishResult` checks every outgoing result against `TaskResult` under `node --test` only, never in
   production.
 

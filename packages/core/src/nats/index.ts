@@ -213,7 +213,12 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
     const raw = decoder.decode(msg.data);
     const subject = msg.subject;
     const subjectTaskId = subject.split(".").pop() || "unknown";
-    const parsed = parseTask(raw, subjectTaskId);
+    let parsed = parseTask(raw, subjectTaskId);
+    // An empty/missing task text is answered like an invalid payload, so the dispatcher gets a failure
+    // result instead of waiting for its timeout. No LLM call is made.
+    if (!parsed.invalid && (!parsed.task || parsed.task.trim().length === 0)) {
+      parsed = { ...parsed, invalid: "task: must not be empty" };
+    }
 
     if (parsed.invalid) {
       log.warn("Invalid task payload", { taskId: parsed.taskId, subject, error: parsed.invalid });
@@ -232,12 +237,6 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
       return;
     }
 
-    // Reject empty/missing task text — don't waste an LLM call on nothing
-    if (!parsed.task || parsed.task.trim().length === 0) {
-      log.warn("Empty task payload — skipping", { taskId: parsed.taskId, subject, rawLength: raw.length });
-      msg.term("empty task payload");
-      return;
-    }
     if (opts.accept && !opts.accept(parsed)) {
       msg.ack();
       return;
