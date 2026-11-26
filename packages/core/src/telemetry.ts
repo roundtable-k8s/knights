@@ -39,7 +39,15 @@ function parseResourceAttributes(raw: string | undefined): Record<string, string
     const i = pair.indexOf("=");
     if (i <= 0) continue;
     const key = pair.slice(0, i).trim();
-    if (key) out[key] = decodeURIComponent(pair.slice(i + 1).trim());
+    if (!key) continue;
+    const raw = pair.slice(i + 1).trim();
+    try {
+      out[key] = decodeURIComponent(raw);
+    } catch {
+      // A stray percent sign (`50%`) is not valid escaping; keep the value as written rather than fail startup.
+      log.warn("Invalid OTEL_RESOURCE_ATTRIBUTES entry, using it undecoded", { key });
+      out[key] = raw;
+    }
   }
   return out;
 }
@@ -67,16 +75,23 @@ const DISABLED: Telemetry = { enabled: false, shutdown: async () => {} };
 export async function startTelemetry(opts: TelemetryOptions): Promise<Telemetry> {
   const env = opts.env ?? process.env;
   if (!telemetryEnabled(env)) return DISABLED;
-  // Loaded on demand so a knight with telemetry off never pays for the SDK.
-  const { NodeSDK } = await import("@opentelemetry/sdk-node");
-  const sdk = new NodeSDK({
-    // Traces only: no OTLP metrics (prom-client stays) or logs exporters.
-    metricReaders: [],
-    logRecordProcessors: [],
-    resource: resourceFromAttributes(resourceDefaults(opts)),
-    ...(opts.spanProcessors ? { spanProcessors: opts.spanProcessors } : {}),
-  });
-  sdk.start();
+  let sdk: { start(): void; shutdown(): Promise<void> };
+  try {
+    // Loaded on demand so a knight with telemetry off never pays for the SDK.
+    const { NodeSDK } = await import("@opentelemetry/sdk-node");
+    sdk = new NodeSDK({
+      // Traces only: no OTLP metrics (prom-client stays) or logs exporters.
+      metricReaders: [],
+      logRecordProcessors: [],
+      resource: resourceFromAttributes(resourceDefaults(opts)),
+      ...(opts.spanProcessors ? { spanProcessors: opts.spanProcessors } : {}),
+    });
+    sdk.start();
+  } catch (error) {
+    // Tracing is never fatal: the knight runs on without it.
+    log.warn("OpenTelemetry could not start", { error: String(error) });
+    return DISABLED;
+  }
   log.info("OpenTelemetry tracing started", { service: env["OTEL_SERVICE_NAME"] || opts.service });
   return {
     enabled: true,
@@ -111,6 +126,16 @@ export interface TaskSpanOutcome {
   /** Token usage; `input` excludes cached input (task contract). */
   tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   error?: string;
+}
+
+/** Span outcome extraction must not fail a task that already succeeded: a throw is logged and dropped. */
+function safeOutcome<T>(outcome: (result: T) => TaskSpanOutcome, result: T): TaskSpanOutcome | undefined {
+  try {
+    return outcome(result);
+  } catch (error) {
+    log.warn("Task span outcome could not be recorded", { error: String(error) });
+    return undefined;
+  }
 }
 
 /**
@@ -152,8 +177,8 @@ export function withTaskSpan<T>(
   return tracer.startActiveSpan(`invoke_agent ${attrs.knight}`, { ...(root ? { root: true } : {}), attributes }, parentCtx, async (span: Span) => {
     try {
       const result = await fn();
-      if (outcome) {
-        const o = outcome(result);
+      const o = outcome && safeOutcome(outcome, result);
+      if (o) {
         if (o.cost !== undefined) span.setAttribute("roundtable.cost.usd", o.cost);
         if (o.model) span.setAttribute("gen_ai.response.model", o.model);
         if (o.tokens) {

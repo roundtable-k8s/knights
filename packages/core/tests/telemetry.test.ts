@@ -254,3 +254,47 @@ test("default OTLP path: with only OTEL_EXPORTER_OTLP_ENDPOINT the SDK exports s
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("a stray percent sign in OTEL_RESOURCE_ATTRIBUTES does not stop telemetry; the value is kept as written and only the key is logged", async () => {
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const chunks: string[] = [];
+  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  initLogger("galahad", "info", "dev");
+  const env = { OTEL_TRACES_EXPORTER: "otlp", OTEL_RESOURCE_ATTRIBUTES: "a=50%,b=ok,c=x%zz" };
+  Object.assign(process.env, env);
+  const spans = await withTelemetry({ service: "s", knight: "k", env, spanProcessors: [processor] }, async (t) => {
+    assert.equal(t.enabled, true);
+    await withTaskSpan({ taskId: "t", knight: "k" }, async () => 1);
+    await processor.forceFlush();
+    return exporter.getFinishedSpans();
+  });
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0]!.resource.attributes["roundtable.knight"], "k");
+  const logged = chunks.join("");
+  assert.match(logged, /Invalid OTEL_RESOURCE_ATTRIBUTES entry, using it undecoded/);
+  assert.doesNotMatch(logged, /50%|x%zz/);
+  assert.deepEqual(resourceDefaults({ service: "s", knight: "k", env: { OTEL_RESOURCE_ATTRIBUTES: "a=50%" } }), {
+    "service.name": "s",
+    "roundtable.knight": "k",
+    "roundtable.knight.runtime": "s",
+    "roundtable.table": "none",
+  });
+});
+
+test("a throwing span outcome still resolves to the task result, and the span ends without error status", async () => {
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const [result, spans] = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
+    const r = await withTaskSpan(
+      { taskId: "t", knight: "k" },
+      async () => ({ ok: true }),
+      () => { throw new Error("outcome broke"); },
+    );
+    await processor.forceFlush();
+    return [r, exporter.getFinishedSpans()] as const;
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(spans.length, 1);
+  assert.notEqual(spans[0]!.status.code, 2);
+});
