@@ -11,7 +11,7 @@ import { checkBashCommand } from "../src/hooks.js";
 import { discoverSkills, linkSkills } from "../src/skills.js";
 import { checkReserve, normalizeEpochMs, normalizeUtilization, recordRateLimit, resetPlanLimits } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
-import { formatRequestResponse } from "../src/tools.js";
+import { formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/session-source.js";
 
@@ -248,12 +248,12 @@ test("missing skills dir is not an error", () => {
 
 test("nats_request formats knight responses", () => {
   const ok = formatRequestResponse("galahad", JSON.stringify({ success: true, result: "all clear", cost: 0.0123, duration_ms: 4200 }));
-  assert.match(ok.content[0]!.text, /Response from galahad \(4s, \$0\.0123\):\n\nall clear/);
-  assert.equal(ok.isError, undefined);
+  assert.match(ok.text, /Response from galahad \(4s, \$0\.0123\):\n\nall clear/);
+  assert.equal(ok.ok, true);
   const bad = formatRequestResponse("galahad", JSON.stringify({ success: false, error: "boom" }));
-  assert.equal(bad.isError, true);
-  assert.match(bad.content[0]!.text, /reported failure: boom/);
-  assert.match(formatRequestResponse("kay", "not json").content[0]!.text, /Raw response from kay/);
+  assert.equal(bad.ok, false);
+  assert.match(bad.text, /reported failure: boom/);
+  assert.match(formatRequestResponse("kay", "not json").text, /Raw response from kay/);
 });
 
 // ── plan limits ────────────────────────────────────────────────────
