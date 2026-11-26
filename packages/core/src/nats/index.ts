@@ -350,6 +350,27 @@ export async function bindConsumer(
   return "created";
 }
 
+/**
+ * The settings of a knight's durable task consumer (`<knight>-consumer`), in NATS wire names. The operator
+ * creates the same consumer; `contract/fixtures/consumer.knight-tasks.json` pins these values for it to vendor.
+ */
+export function taskConsumerConfig(
+  knightName: string,
+  filterSubjects: string[],
+  ackWaitMs: number = ACK_WAIT_MS,
+): Partial<ConsumerConfig> & { durable_name: string } {
+  return {
+    durable_name: `${knightName}-consumer`,
+    filter_subjects: filterSubjects,
+    ack_policy: AckPolicy.Explicit,
+    deliver_policy: DeliverPolicy.All,
+    // A task that crashed mid-run is NOT re-run silently; it is reported as a failure (see watchLostTasks).
+    max_deliver: 1,
+    // Heartbeat window, not the task timeout: running tasks send working() every HEARTBEAT_MS.
+    ack_wait: ackWaitMs * 1_000_000, // nanoseconds
+  };
+}
+
 /** Bind to the operator-owned durable pull consumer, start the pull loop and the lost-task watcher. */
 export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOptions): Promise<TaskPuller> {
   const conn = opts.connection ?? nc;
@@ -361,16 +382,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
 
   const durableName = `${config.knightName}-consumer`;
   const ackWaitMs = opts.ackWaitMs ?? ACK_WAIT_MS;
-  await bindConsumer(jsm, config.natsTasksStream, {
-    durable_name: durableName,
-    filter_subjects: config.subscribeTopics,
-    ack_policy: AckPolicy.Explicit,
-    deliver_policy: DeliverPolicy.All,
-    // A task that crashed mid-run is NOT re-run silently; it is reported as a failure (see watchLostTasks).
-    max_deliver: 1,
-    // Heartbeat window, not the task timeout: running tasks send working() every HEARTBEAT_MS.
-    ack_wait: ackWaitMs * 1_000_000, // nanoseconds
-  });
+  await bindConsumer(jsm, config.natsTasksStream, taskConsumerConfig(config.knightName, config.subscribeTopics, ackWaitMs));
 
   const pullConsumer = await client.consumers.get(config.natsTasksStream, durableName);
   const tracker = new TaskTracker(undefined, undefined, undefined, (config.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS) + ackWaitMs);

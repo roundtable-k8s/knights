@@ -11,6 +11,7 @@ against them.
 | `task-result.schema.json` | A result on `<prefix>.results.<taskId>` (`TaskResult`). |
 | `task-activity-events.schema.json` | A live activity event on `<prefix>.activity.<Knight>.<taskId>` (v1). |
 | `fixtures/*.json` | Golden payloads: two tasks, six results, one activity event per event type. |
+| `fixtures/consumer.knight-tasks.json` | The knight's durable task consumer (`<knight>-consumer`, from `taskConsumerConfig` in `src/nats`), in NATS wire names. The operator vendors it and checks its consumer against it. |
 
 The schemas are JSON Schema 2020-12. Do not edit them by hand: change `schema.ts`, then run
 
@@ -28,6 +29,8 @@ and commit the result. `npm test` fails when the committed files are stale.
   fields only; runtime-specific fields (`tool_calls` — sent by pi-knight and claude-knight — `turns`, `runtime`, `billing`) and extra token counters are
   left out of the comparison.
 - Both runtimes' activity events validate against the activity schema.
+- `taskConsumerConfig` deep-equals `fixtures/consumer.knight-tasks.json` (`tests/consumer-config.test.ts`), so a
+  change to a consumer setting fails the core tests until the fixture is updated.
 - `parseTask` checks every JSON task against `TaskPayload`. A task that does not match is not run: the
   knight answers with a failure result whose error names the field (`Invalid task payload: runId: must be
   string`). An empty or whitespace-only task text is answered the same way (`Invalid task payload:
