@@ -75,7 +75,7 @@ async function main(): Promise<void> {
       const { skills, diagnostics } = loadSkills({
         cwd: dataPaths().dataDir,
         agentDir: "/config",
-        skillPaths: ["/skills"],
+        skillPaths: [process.env["KNIGHT_SKILLS_DIR"] ?? "/skills"], // same override as claude-knight
         includeDefaults: true,
       });
       if (skills.length > 0) {
