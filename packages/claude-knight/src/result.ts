@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { invalidTaskResult, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -42,6 +42,15 @@ export interface ClassifyInput {
   prs?: PRRef[];
   /** Tool calls seen in the stream (StreamState.toolCalls). */
   toolCalls?: number;
+  /** Background tasks still live at the end of the stream (StreamState.backgroundTasks). */
+  backgroundTasks?: ReadonlyMap<string, { description: string }>;
+}
+
+/** The final line added to a successful result when background jobs were cut off with the turn. */
+export function backgroundJobsNote(tasks: ReadonlyMap<string, { description: string }>): string {
+  const cut = (d: string) => (d.length > 80 ? `${d.slice(0, 77)}...` : d);
+  const descriptions = [...tasks.values()].map((t) => cut(t.description)).join("; ");
+  return `Note: ${tasks.size} background job(s) were still running when this turn ended and were stopped: ${descriptions}. Their output is not in this result.`;
 }
 
 export function isUsageLimitMessage(text: string | undefined): boolean {
@@ -106,7 +115,13 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       if (declared) return fail(declared, { result: text });
       const prs = resolvePrs(input.prs ?? [], text);
       const verdict = parseVerdict(text);
-      return { ...base, result: text, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };
+      const pending = input.backgroundTasks;
+      let finalText = text;
+      if (pending?.size) {
+        log.warn("Turn ended with background jobs still running", { taskIds: [...pending.keys()] });
+        finalText = `${text}\n\n${backgroundJobsNote(pending)}`;
+      }
+      return { ...base, result: finalText, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };
     }
     return fail("Agent produced no deliverable output");
   }

@@ -33,10 +33,12 @@ export interface StreamState {
   prs: PRRef[];
   /** tool_use blocks seen in the stream (both runtimes, independent of countTools). */
   toolCalls: number;
+  /** Live (non-ambient) background tasks, task_id → description. Replaced on every background_tasks_changed. */
+  backgroundTasks: Map<string, { description: string }>;
 }
 
 export function newStreamState(): StreamState {
-  return { lastAssistantText: "", toolNames: new Map(), toolStarts: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [], toolCalls: 0 };
+  return { lastAssistantText: "", toolNames: new Map(), toolStarts: new Map(), activityTools: new Map(), bashCommands: new Map(), prCommands: new Map(), prs: [], toolCalls: 0, backgroundTasks: new Map() };
 }
 
 export interface StreamContext {
@@ -88,6 +90,10 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
         if (config.authMode === "subscription" && API_KEY_SOURCES.includes(msg.apiKeySource)) {
           throw new ApiKeyAuthError(`Refusing to run: subscription mode but Claude Code authenticated via ${msg.apiKeySource}`);
         }
+      } else if (msg.subtype === "background_tasks_changed") {
+        state.backgroundTasks = new Map(msg.tasks.filter((t) => !t.ambient).map((t) => [t.task_id, { description: t.description }]));
+      } else if (msg.subtype === "task_notification") {
+        state.backgroundTasks.delete(msg.task_id);
       }
       break;
     case "assistant": {
