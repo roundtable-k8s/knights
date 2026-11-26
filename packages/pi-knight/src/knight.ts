@@ -17,7 +17,7 @@ import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
-import { LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail } from "./result-extraction.js";
+import { LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
 
 
 export interface TaskResult {
@@ -92,6 +92,11 @@ export function findSession(sel: { runId?: string; sessionId?: string }): AgentS
 /** All live sessions, for shutdown. */
 export function getActiveSessions(): AgentSession[] {
   return [...slots.values()].flatMap((s) => (s.session ? [s.session] : []));
+}
+
+/** @internal test-only: keys of every slot, including ones whose session was dropped. */
+export function __slotKeysForTests(): string[] {
+  return [...slots.keys()];
 }
 
 /**
@@ -329,6 +334,11 @@ export function onSessionEvent(activity: TaskActivity, e: any): void {
   }
 }
 
+/** `provider/id` of a session model, or the requested string when the model doesn't expose both. */
+function resolvedModelName(m: { provider?: string; id?: string } | undefined, requested: string): string {
+  return m?.provider && m?.id ? `${m.provider}/${m.id}` : requested;
+}
+
 /**
  * Execute a task on its run's session (see SessionSlot).
  *
@@ -337,11 +347,6 @@ export function onSessionEvent(activity: TaskActivity, e: any): void {
  * session and runs concurrently (#53) — cross-task memory lives in files on the PVC. Pi SDK auto-compacts when
  * context grows too large.
  */
-/** `provider/id` of a session model, or the requested string when the model doesn't expose both. */
-function resolvedModelName(m: { provider?: string; id?: string } | undefined, requested: string): string {
-  return m?.provider && m?.id ? `${m.provider}/${m.id}` : requested;
-}
-
 export async function executeTask(
   task: string,
   config: KnightConfig,
@@ -470,6 +475,8 @@ export async function executeTask(
     // Must finish before the lock is released, or it would delete the next step's fresh dir.
     if (!(promptFailed && process.env.DEBUG)) await rm(workDir, { recursive: true, force: true }).catch(() => {});
     slot.pending--;
+    // Nothing left to wait for on a dropped session: free the slot now, not at LRU eviction.
+    if (!slot.session && slot.pending === 0) slots.delete(slot.key);
     // Dispose right away only when the result below will not read this session.
     if (promptFailed) disposeStale();
     releaseLock();
@@ -534,11 +541,16 @@ export async function executeTask(
     });
   }
 
-  disposeStale();
-
   // Structured prs/verdict, from only this task's messages (the session is shared per run).
-  const taskMessages = ((sess as unknown as { messages?: unknown[] }).messages ?? []).slice(messagesBefore);
-  const structured = success ? extractStructured(taskMessages, resultText) : { prs: [] as PRRef[] };
+  // Read before the stale session is disposed, and dispose in finally so a throw while
+  // reading or extracting still releases it.
+  let structured: Structured;
+  try {
+    const taskMessages = ((sess as unknown as { messages?: unknown[] }).messages ?? []).slice(messagesBefore);
+    structured = success ? extractStructured(taskMessages, resultText) : { prs: [] as PRRef[] };
+  } finally {
+    disposeStale();
+  }
 
   // Update session notes after each task (fire-and-forget)
   updateSessionNotes(config.knightName, task, resultText).catch((err) => {
