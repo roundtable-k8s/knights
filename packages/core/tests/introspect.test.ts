@@ -252,5 +252,6 @@ describe("startIntrospect", () => {
   it("podSubjectToken keeps NATS-safe names and replaces the rest", () => {
     assert.equal(podSubjectToken("pi-knight-gawain-7d9f-x2"), "pi-knight-gawain-7d9f-x2");
     assert.equal(podSubjectToken("a.b*c>d"), "a_b_c_d");
+    assert.equal(podSubjectToken(""), "_");
   });
 });

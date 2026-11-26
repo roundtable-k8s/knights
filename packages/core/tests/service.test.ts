@@ -179,7 +179,7 @@ describe("refreshSkills with an injected Svcm", () => {
   };
   /** A fake registry: each add() yields a service whose stop() is recorded; `gate` can hold or fail add(). */
   const fake = () => {
-    const state = { adds: 0, live: 0, failNext: false, gate: null as Promise<void> | null };
+    const state = { adds: 0, live: 0, failNext: false, failEndpoint: false, gate: null as Promise<void> | null };
     const createSvcm = () => ({
       async add() {
         state.adds++;
@@ -197,7 +197,9 @@ describe("refreshSkills with an injected Svcm", () => {
             return null;
           },
           info: () => ({ id: `svc-${state.adds}` }),
-          addEndpoint: () => {},
+          addEndpoint: () => {
+            if (state.failEndpoint) throw new Error("endpoint failed");
+          },
         } as unknown as Awaited<ReturnType<import("@nats-io/services").Svcm["add"]>>;
       },
     });
@@ -250,5 +252,40 @@ describe("refreshSkills with an injected Svcm", () => {
     release();
     await refreshing;
     assert.equal(state.live, 0, "the late service was stopped");
+  });
+
+  it("overlapping refreshes leave exactly one live service", async () => {
+    const dir = mkSkills();
+    const { state, createSvcm } = fake();
+    const svc = await start(dir, createSvcm);
+    addSkill(dir, "one");
+    let release!: () => void;
+    state.gate = new Promise<void>((r) => (release = r));
+    const first = svc.refreshSkills();
+    await sleep(10);
+    addSkill(dir, "two");
+    const second = svc.refreshSkills();
+    await sleep(10);
+    release();
+    assert.deepEqual(await Promise.all([first, second]), [true, true]);
+    assert.equal(state.live, 1);
+    assert.equal(state.adds, 3, "initial + one per refresh, run in sequence");
+    assert.match(svc.metadata()["skills"]!, /two/);
+    await svc.stop();
+    assert.equal(state.live, 0);
+  });
+
+  it("a throwing addEndpoint leaves no live service and the next refresh retries", async () => {
+    const dir = mkSkills();
+    const { state, createSvcm } = fake();
+    const svc = await start(dir, createSvcm);
+    addSkill(dir, "extra");
+    state.failEndpoint = true;
+    await svc.refreshSkills();
+    assert.equal(state.live, 0, "created service was stopped");
+    state.failEndpoint = false;
+    assert.equal(await svc.refreshSkills(), true);
+    assert.equal(state.live, 1);
+    await svc.stop();
   });
 });

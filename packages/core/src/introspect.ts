@@ -13,6 +13,7 @@
 import type { NatsConnection, Subscription } from "@nats-io/transport-node";
 import { log } from "./logger.js";
 import { getConnection } from "./nats/index.js";
+import { subjectToken } from "./activity.js";
 
 export type IntrospectType = "stats" | "recent" | "tree" | "history" | "session";
 export const INTROSPECT_TYPES: readonly IntrospectType[] = ["stats", "recent", "tree", "history", "session"];
@@ -225,7 +226,7 @@ export function introspectRequestFromQuery(params: URLSearchParams): IntrospectR
 
 /** The per-pod subject token: the pod name with anything NATS-unsafe replaced by `_`. */
 export function podSubjectToken(pod: string): string {
-  return pod.replace(/[^A-Za-z0-9_-]/g, "_");
+  return subjectToken(pod);
 }
 
 export interface StartIntrospectOptions<E = unknown> extends IntrospectOptions<E> {
@@ -248,7 +249,7 @@ export function startIntrospect<E>(opts: StartIntrospectOptions<E>): Subscriptio
     log.warn("Cannot start introspect — NATS not connected");
     return null;
   }
-  const base = `${opts.prefix}.introspect.${opts.knight}`;
+  const base = `${opts.prefix}.introspect.${subjectToken(opts.knight)}`;
   const podSubject = `${base}.${podSubjectToken(opts.identity.pod)}`;
   const subs = [nc.subscribe(base, { queue: "introspect" }), nc.subscribe(podSubject)];
   log.info("Introspect responder started", { subjects: [base, podSubject], pod: opts.identity.pod });
