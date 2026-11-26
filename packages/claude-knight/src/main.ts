@@ -88,7 +88,8 @@ export async function main(): Promise<void> {
   await connectNats(config, `claude-knight-${config.knightName}`, metrics.setNatsConnected);
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
   // Agent-card roster for find_knights / nats_request by name: a KV watch on <table>.* (none without KNIGHT_CARDS_BUCKET).
-  void initRoster(process.env, config.knightName, getConnection)?.start();
+  // Only the sdk runtime runs the tools in this process; the cli runtime's stdio MCP child starts its own roster.
+  if (config.runtime === "sdk") void initRoster(process.env, config.knightName, getConnection)?.start();
 
   let activeCount = 0;
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
