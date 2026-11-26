@@ -4,8 +4,8 @@ import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { waitForSkills } from "./skills.js";
@@ -301,20 +301,12 @@ export async function main(): Promise<void> {
     },
     onLost: async (parsed) => {
       metrics.recordLostTask();
-      const model = config.claudeModel ?? "claude-code-default";
-      await publishResult(parsed.taskId, {
-        ...lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model, parsed }),
-        ...runtimeFields(config),
-      });
+      await publishResult(parsed.taskId, lostResultPayload(config, parsed));
     },
     // A payload that breaks the TaskPayload schema: answer with a failure naming the field.
     onInvalid: async (parsed) => {
       metrics.tasksTotal.labels("error").inc();
-      const model = config.claudeModel ?? "claude-code-default";
-      await publishResult(parsed.taskId, {
-        ...invalidTaskResult({ taskId: parsed.taskId, knight: config.knightName, model, invalid: parsed.invalid ?? "invalid" }),
-        ...runtimeFields(config),
-      });
+      await publishResult(parsed.taskId, invalidResultPayload(config, parsed));
     },
   });
 

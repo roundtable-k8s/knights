@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { lostTaskResult } from "@roundtable/knight-core";
+import { lostTaskResult, taskResultErrors } from "@roundtable/knight-core";
 import { readFixture, resultFixtureDiff } from "@roundtable/knight-core/contract/fixtures";
 import { loadConfig } from "../src/config.js";
-import { buildResultPayload, classifyResult, failedOutcome, reserveRefusedOutcome, runtimeFields, type TaskResult } from "../src/result.js";
+import { buildResultPayload, classifyResult, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome, type TaskResult } from "../src/result.js";
 
 // Golden fixtures (packages/core/contract/fixtures, roundtable-k8s/knights#6).
 const config = loadConfig({ KNIGHT_NAME: "galahad", SUBSCRIBE_TOPICS: "rt.tasks.security.>", CLAUDE_MODEL: "claude-opus-5-5" });
@@ -70,9 +70,42 @@ test("a thrown error is a plain failure with no refused field", () => {
 });
 
 test("fixture result.lost: the lost-task result with claude-knight runtime fields matches", () => {
-  const p = { ...lostTaskResult({ taskId: "t-1", knight: "galahad", model: "claude-opus-5-5", timestamp: meta.timestamp }), ...runtimeFields(config) };
+  const p = lostResultPayload(config, { task: "Do it", taskId: "t-1" });
   assert.equal(p.runtime, "claude-knight");
-  assert.deepEqual(resultFixtureDiff(p, "result.lost"), []);
+  assert.equal(p.billing, "subscription");
+  assert.equal(p.lost, true);
+  assert.deepEqual(taskResultErrors(p), []);
+  // The fixture is a lost result without an echoed task; the echo itself is asserted below.
+  const { task: _echo, ...withoutEcho } = p;
+  assert.deepEqual(resultFixtureDiff({ ...withoutEcho, timestamp: meta.timestamp }, "result.lost"), []);
+  assert.deepEqual(p.task, { taskId: "t-1", task: "Do it" });
+});
+
+test("lost result bytes: the builder output is the core lost result plus runtime fields, unchanged", () => {
+  const parsed = { task: "Do it", taskId: "t-1", attempt: 2, retryOf: "t-0" };
+  const expected = { ...lostTaskResult({ taskId: "t-1", knight: "galahad", model: "claude-opus-5-5", parsed }), runtime: "claude-knight", billing: "subscription" } as Record<string, unknown>;
+  // Both sides stamp their own timestamp; compare everything else.
+  const { timestamp: _got, ...got } = lostResultPayload(config, parsed);
+  const { timestamp: _want, ...want } = expected;
+  assert.deepEqual(got, want);
+});
+
+test("lost result falls back to the default model when no Claude model is configured", () => {
+  const bare = loadConfig({ KNIGHT_NAME: "galahad", SUBSCRIBE_TOPICS: "rt.tasks.security.>" });
+  assert.equal(lostResultPayload(bare, { task: "x", taskId: "t-1" }).model, "claude-code-default");
+});
+
+test("invalid result: names the bad field, is a valid failure, carries runtime fields", () => {
+  const p = invalidResultPayload(config, { task: "", taskId: "t-1", invalid: "task: Required" });
+  assert.deepEqual(taskResultErrors(p), []);
+  assert.equal(p.success, false);
+  assert.equal(p.error, "Invalid task payload: task: Required");
+  assert.ok(p.result.startsWith("Task failed: Invalid task payload:"));
+  assert.equal(p.runtime, "claude-knight");
+  assert.equal(p.billing, "subscription");
+  assert.equal(p.model, "claude-opus-5-5");
+  assert.equal("task" in p, false);
+  assert.equal("lost" in p, false);
 });
 
 test("retry attempt: result carries attempt/retry_of; only a failure carries the task (#36)", () => {
