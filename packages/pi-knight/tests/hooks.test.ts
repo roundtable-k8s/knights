@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -107,6 +107,34 @@ test("tool hooks extension blocks a secret write and a dangerous bash call end-t
         assert.equal(r.isError, true);
         assert.match(r.content[0].text, /Blocked/);
       }
+    } finally {
+      session.dispose();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tool hooks extension blocks an edit that adds a secret and lets a plain edit through", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hooks-"));
+  try {
+    const target = join(dir, "f.txt");
+    writeFileSync(target, "alpha beta\n");
+    const session = await runWithHooks(dir, [
+      fauxAssistantMessage([
+        fauxToolCall("edit", { path: target, edits: [{ oldText: "alpha", newText: `ghp_${"d".repeat(36)}` }] }, { id: "e1" }),
+      ]),
+      fauxAssistantMessage([fauxToolCall("edit", { path: target, edits: [{ oldText: "alpha", newText: "gamma" }] }, { id: "e2" })]),
+      fauxAssistantMessage(fauxText("done")),
+    ]);
+    try {
+      await session.prompt("go");
+      const results = session.messages.filter((m) => m.role === "toolResult") as any[];
+      assert.equal(results.length, 2);
+      assert.equal(results[0].isError, true);
+      assert.match(results[0].content[0].text, /Blocked/);
+      assert.notEqual(results[1].isError, true);
+      assert.equal(readFileSync(target, "utf8"), "gamma beta\n");
     } finally {
       session.dispose();
     }

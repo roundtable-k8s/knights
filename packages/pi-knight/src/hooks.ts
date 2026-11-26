@@ -7,7 +7,7 @@
  * runner, so extensions are the supported way to intercept tool execution.
  */
 import { isToolCallEventType, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
-import { checkBashCommand, isTokenSecret, log, redactSecrets } from "@roundtable/knight-core";
+import { checkBashCommand, checkWriteContent, isTokenSecret, log, redactSecrets } from "@roundtable/knight-core";
 import { toolCallsTotal, toolCallDuration, toolCallsBlocked } from "./runtime-metrics.js";
 
 // ─── Pure helpers ──────────────────────────────────────────────────
@@ -54,7 +54,7 @@ export const toolHooksExtension: ExtensionFactory = (pi) => {
       }
     }
 
-    if (isToolCallEventType("write", event) && isTokenSecret(event.input.content ?? "")) {
+    if (checkWriteContent(event.toolName, event.input)) {
       log.warn("Blocked secret write", { tool: event.toolName, toolCallId: event.toolCallId });
       toolCallsBlocked.inc({ tool: event.toolName, reason: "secret_in_content" });
       return {

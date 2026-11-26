@@ -33,3 +33,13 @@ test("checkWriteContent allows ordinary code and other tools", () => {
   assert.equal(checkWriteContent("Read", { content: TOKEN }), undefined);
   assert.equal(checkWriteContent("Write", undefined), undefined);
 });
+
+test("checkWriteContent understands pi write and edit (both edit shapes)", () => {
+  assert.equal(checkWriteContent("write", { path: "a", content: `x=${TOKEN}` }), "secret_in_content");
+  assert.equal(checkWriteContent("edit", { path: "a", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: TOKEN }] }), "secret_in_content");
+  assert.equal(checkWriteContent("edit", { path: "a", oldText: "o", newText: TOKEN }), "secret_in_content");
+  assert.equal(checkWriteContent("edit", { path: "a", edits: [{ oldText: TOKEN, newText: "redacted" }] }), undefined);
+  assert.equal(checkWriteContent("edit", { path: "a", oldText: "o", newText: "plain" }), undefined);
+  assert.equal(checkWriteContent("edit", { path: "a", edits: [null, {}] }), undefined);
+  assert.equal(checkWriteContent("write", { path: "a", content: "hello" }), undefined);
+});
