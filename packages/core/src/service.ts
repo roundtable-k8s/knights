@@ -215,27 +215,31 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
       metadata: metadata(),
       statsHandler: async () => stats(),
     });
-    const cardSubject = `$RT.${subjectToken(opts.table)}.${subjectToken(opts.knightName)}.card`;
-    s.addEndpoint("card", {
-      subject: cardSubject,
-      // Per knight (replicas share this subject); read-only. It must never take tasks.
-      handler: (err, msg) => {
-        if (err) return;
-        msg.respond(JSON.stringify(metadata()));
-      },
-    });
+    try {
+      const cardSubject = `$RT.${subjectToken(opts.table)}.${subjectToken(opts.knightName)}.card`;
+      s.addEndpoint("card", {
+        subject: cardSubject,
+        // Per knight (replicas share this subject); read-only. It must never take tasks.
+        handler: (err, msg) => {
+          if (err) return;
+          msg.respond(JSON.stringify(metadata()));
+        },
+      });
+    } catch (e) {
+      // Don't leak a registered service that has no card endpoint.
+      await s.stop().catch((se) => log.warn("NATS micro service stop failed", { error: String(se) }));
+      throw e;
+    }
     return s;
   }
 
   svc = await add();
   log.info("NATS micro service registered", { name: SERVICE_NAME, id: svc.info().id });
 
-  return {
-    metadata,
-    markTaskFinished() {
-      lastTaskAt = new Date().toISOString();
-    },
-    async refreshSkills() {
+  // Refreshes run one at a time: each waits for the previous one, so two never register a service each.
+  let refreshChain: Promise<unknown> = Promise.resolve();
+
+  async function refresh(): Promise<boolean> {
       if (stopped) return false;
       let next: string;
       try {
@@ -265,6 +269,17 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
         log.warn("NATS micro service re-register failed", { error: String(e) });
       }
       return true;
+  }
+
+  return {
+    metadata,
+    markTaskFinished() {
+      lastTaskAt = new Date().toISOString();
+    },
+    refreshSkills() {
+      const run = refreshChain.then(refresh);
+      refreshChain = run.catch(() => undefined);
+      return run;
     },
     async stop() {
       if (stopped) return;
