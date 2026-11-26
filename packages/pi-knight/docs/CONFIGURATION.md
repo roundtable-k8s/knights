@@ -56,8 +56,8 @@ Knights can evolve their own files over time — ConfigMap seeds the initial sta
 | `KNIGHT_MODEL_BASE_URL` | Base URL of a local OpenAI-compatible endpoint (see [Local models](LOCAL-MODELS.md)) | unset |
 | `MODEL_REQUEST_TIMEOUT_MS` | HTTP timeout for a model call | `600000` |
 | `MODEL_CONTEXT_WINDOW` | Context-size hint for models not in the catalogue | `131072` |
-| `PI_MODELS_JSON` | Raw `/data/models.json` content to write at startup | unset |
-| `PI_MODELS_JSON_B64` | Base64-encoded `/data/models.json` content | unset |
+| `PI_MODELS_JSON` | Raw models-file content to write at startup (to the models path) | unset |
+| `PI_MODELS_JSON_B64` | Base64-encoded models-file content (written to the models path) | unset |
 | `OPENROUTER_API_KEY` | OpenRouter key — covers the default + most upgrade models | From ExternalSecret |
 | `ANTHROPIC_API_KEY` | Anthropic API key (only for native `anthropic/...` models) | From ExternalSecret |
 | `OPENAI_API_KEY` | OpenAI API key (only for native `openai/...` models) | From ExternalSecret |
@@ -272,10 +272,10 @@ env:
 At startup, `entrypoint.sh` writes the provided content to:
 
 ```text
-/data/models.json
+$MODELS_JSON_PATH, else $KNIGHT_DATA_DIR/models.json (default /data/models.json)
 ```
 
-This is the runtime's `agentDir`, so the pi `ModelRuntime` loads it automatically.
+This is the path the runtime reads, so the pi `ModelRuntime` loads it automatically. If `MODELS_JSON_PATH` points at a read-only location (for example a ConfigMap mount) the entrypoint logs a warning and skips the write.
 It is intended for canary deployments such as native Ollama experiments,
 without changing the default fleet path.
 

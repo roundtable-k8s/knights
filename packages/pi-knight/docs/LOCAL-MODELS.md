@@ -12,7 +12,7 @@ pi-knight uses the SDK's own mechanisms; there is no second one.
 |------|-----|
 | Model | `spec.model` / `KNIGHT_MODEL` = `ollama/<tag>` (for example `ollama/qwen3:14b`). Any provider name that is not in the SDK catalogue or `models.json` is treated as an OpenAI-compatible endpoint. |
 | Base URL | `KNIGHT_MODEL_BASE_URL`, else `OPENAI_BASE_URL`, else `OPENAI_API_BASE`. The `ollama` provider defaults to `http://localhost:11434/v1`. The URL must end in `/v1`. |
-| Several models or exact limits | A `models.json` catalogue (`MODELS_JSON_PATH`, default `/data/models.json`) instead of env. |
+| Several models or exact limits | A `models.json` catalogue (the models path: `MODELS_JSON_PATH`, default `$KNIGHT_DATA_DIR/models.json`) instead of env. |
 | API key | None needed. A placeholder is set when no auth exists for the provider. |
 
 Optional tuning (all per knight, from env):

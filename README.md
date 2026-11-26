@@ -71,13 +71,13 @@ No cluster needed: Node 22 and a [`nats-server`](https://docs.nats.io/running-a-
 
    The fake binary replays `FAKE_CLAUDE_FIXTURE` (that one answers `pong`). For a real Claude Code run, drop `CLAUDE_BIN` and the `FAKE_CLAUDE_*` and `ANTHROPIC_API_KEY=fake` variables and set a real `ANTHROPIC_API_KEY`, or `CLAUDE_AUTH_MODE=subscription` with `CLAUDE_CODE_OAUTH_TOKEN`. `KNIGHT_SKILLS_DIR` points at a one-skill placeholder so the knight does not wait a minute for git-sync. Unset any knight env your shell already has (`CLAUDE_CONFIG_DIR`, `NATS_TASKS_STREAM`, ...): it overrides these defaults.
 
-   **pi-knight** needs a model key (for example `OPENROUTER_API_KEY`, see [CONFIGURATION](packages/pi-knight/docs/CONFIGURATION.md)). The overrides below move sessions, models and task work dirs off `/data`. The Pi SDK's `cwd` and agent dir are still `/data` (and skills `/skills`, config `/config`), so it needs a writable `/data` for now:
+   **pi-knight** needs a model key (for example `OPENROUTER_API_KEY`, see [CONFIGURATION](packages/pi-knight/docs/CONFIGURATION.md)). `KNIGHT_DATA_DIR` is its data root (the Pi SDK `cwd` and agent dir, and the default for the sessions, models and work dirs), so it needs no writable `/data`; only skills (`/skills`) and config (`/config`) are still fixed paths. The overrides below place sessions, models and task work dirs explicitly under a temp dir:
 
    ```bash
    export KNIGHT_TMP=$(mktemp -d)
    KNIGHT_NAME=dev SUBSCRIBE_TOPICS='fleet-a.tasks.dev.>' NATS_URL=nats://127.0.0.1:4222 \
    KNIGHT_MODEL=openrouter/deepseek/deepseek-v3.2 OPENROUTER_API_KEY=... \
-   KNIGHT_WORK_ROOT=$KNIGHT_TMP/work KNIGHT_SESSIONS_ROOT=$KNIGHT_TMP/sessions MODELS_JSON_PATH=$KNIGHT_TMP/models.json \
+   KNIGHT_DATA_DIR=$KNIGHT_TMP KNIGHT_WORK_ROOT=$KNIGHT_TMP/work KNIGHT_SESSIONS_ROOT=$KNIGHT_TMP/sessions MODELS_JSON_PATH=$KNIGHT_TMP/models.json \
      npm run dev -w pi-knight
    ```
 
