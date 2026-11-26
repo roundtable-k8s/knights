@@ -128,9 +128,9 @@ Returns 200 only when NATS is connected, the knight is not degraded and it is no
 }
 ```
 
-`degradedReason` is present when the knight is degraded. Fields are camelCase; `model` comes from the runtime (`readyExtras`).
+`degradedReason` is present when the knight is degraded. Fields are camelCase; `model` comes from the runtime (`readyExtras`). claude-knight's `/ready` also returns `runtime`, `claudeRuntime` and `billing`.
 
-#### `GET /introspect` — pi-knight only
+#### `GET /introspect`
 Returns the knight's introspection data (JSON, indented). Not used by the probes.
 
 #### `GET /metrics` — Prometheus
@@ -180,8 +180,6 @@ The Prometheus metrics provide rolling totals. Combined with Grafana:
 
 ### Recommended Alerts (via Prometheus/Alertmanager)
 
-| Alert | Condition | Severity |
-|-------|-----------|----------|
 The alerts below are examples written in PromQL. The operator's chart ships the alert rules the fleet actually uses, in `charts/roundtable-operator/templates/prometheusrule.yaml` (roundtable-k8s/roundtable); prefer those.
 
 | Alert | Condition | Severity |
