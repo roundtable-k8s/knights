@@ -88,7 +88,7 @@ describe("pull loop (fake fetch)", () => {
     assert.equal(fetches, 1, "no new pull request after stop()");
   });
 
-  it("terms empty payloads and acks filtered ones without running them", async () => {
+  it("acks filtered tasks without running them, and drops a self-echo even when empty", async () => {
     const calls: string[] = [];
     const mk = (body: string): PulledMsg => ({
       data: new TextEncoder().encode(body), subject: "fleet-a.tasks.x.1",
@@ -96,21 +96,57 @@ describe("pull loop (fake fetch)", () => {
     });
     let served = false;
     const ran: string[] = [];
+    const invalid: string[] = [];
     const puller = startPullLoop({
       freeSlots: () => 5,
       fetch: async () => {
-        const batch = served ? [] : [mk(JSON.stringify({ task: "  " })), mk(JSON.stringify({ task: "hi", from: "me" }))];
+        const batch = served ? [] : [mk(JSON.stringify({ task: "", from: "me" })), mk(JSON.stringify({ task: "hi", from: "me" }))];
         served = true;
         if (batch.length === 0) await sleep(50);
         return (async function* () { yield* batch; })();
       },
       accept: (t) => t.from !== "me",
       onTask: (d) => ran.push(d.task.task),
+      onInvalid: async (t) => { invalid.push(t.invalid ?? ""); },
     });
     await waitFor(() => calls.length === 2);
-    assert.deepEqual(calls, ["term", "ack"]);
+    assert.deepEqual(calls, ["ack", "ack"]);
     assert.deepEqual(ran, []);
+    assert.deepEqual(invalid, []);
     await puller.stop();
+  });
+
+  it("answers an empty, missing or whitespace-only task through onInvalid, then acks; terms it without onInvalid (#139)", async () => {
+    const bodies = [JSON.stringify({ taskId: "t1", task: "" }), JSON.stringify({ taskId: "t2" }), "   "];
+    const run = async (onInvalid?: (t: TaskDelivery["task"]) => Promise<void>) => {
+      const calls: string[] = [];
+      const mk = (body: string): PulledMsg => ({
+        data: new TextEncoder().encode(body), subject: "fleet-a.tasks.x.subj",
+        ack: () => calls.push("ack"), working() {}, term: () => calls.push("term"),
+      });
+      let served = false;
+      const ran: string[] = [];
+      const puller = startPullLoop({
+        freeSlots: () => 5,
+        fetch: async () => {
+          const batch = served ? [] : bodies.map(mk);
+          served = true;
+          if (batch.length === 0) await sleep(50);
+          return (async function* () { yield* batch; })();
+        },
+        onTask: (d) => ran.push(d.task.task),
+        onInvalid,
+      });
+      await waitFor(() => calls.filter((c) => c === "ack" || c === "term").length === 3);
+      await puller.stop();
+      assert.deepEqual(ran, [], "an empty task never runs");
+      return calls;
+    };
+    const answered: string[] = [];
+    const calls = await run(async (t) => { answered.push(`${t.taskId}: ${t.invalid}`); });
+    assert.deepEqual(answered, ["t1: task: must not be empty", "t2: task: required", "subj: task: must not be empty"]);
+    assert.deepEqual(calls, ["ack", "ack", "ack"]);
+    assert.deepEqual(await run(), ["term", "term", "term"]);
   });
 
   it("answers a payload that breaks the schema through onInvalid, then acks it; terms it without onInvalid (#6)", async () => {
