@@ -68,10 +68,11 @@ export const LOCAL_NO_TOOL_CALLS_REASON =
 export function describeSessionFailure(
   sess: AgentSession,
   taskAborted: boolean,
+  fromIndex = 0,
 ): string | undefined {
   const messages = (sess as AgentSession & { messages?: Array<{ role?: string; stopReason?: string; errorMessage?: string }> }).messages;
   if (Array.isArray(messages)) {
-    for (let i = messages.length - 1; i >= 0; i--) {
+    for (let i = messages.length - 1; i >= fromIndex; i--) {
       const msg = messages[i];
       if (msg?.role !== "assistant") continue;
       if (msg.stopReason === "error") {
@@ -120,10 +121,10 @@ export function resolveTaskOutcome(
  * and content part-type counts (never content itself). Enough to tell "model emitted only
  * tool calls" from "thinking-only reply" from "stream died" without dumping transcripts.
  */
-export function summarizeSessionTail(sess: AgentSession, limit = 6): Array<Record<string, unknown>> {
+export function summarizeSessionTail(sess: AgentSession, limit = 6, fromIndex = 0): Array<Record<string, unknown>> {
   const messages = (sess as unknown as { messages?: Array<{ role?: string; content?: unknown; stopReason?: string; errorMessage?: string }> }).messages;
   if (!Array.isArray(messages)) return [];
-  return messages.slice(-limit).map((msg) => {
+  return messages.slice(Math.max(fromIndex, messages.length - limit)).map((msg) => {
     const parts: Record<string, number> = {};
     if (Array.isArray(msg?.content)) {
       for (const part of msg.content) {
@@ -142,7 +143,11 @@ export function summarizeSessionTail(sess: AgentSession, limit = 6): Array<Recor
   });
 }
 
-export function getBestAssistantResult(sess: AgentSession): string | undefined {
+/**
+ * @param fromIndex only messages at or after this index count: the steps of a chain run
+ * share one session, and a step with no text of its own must not publish an earlier step's.
+ */
+export function getBestAssistantResult(sess: AgentSession, fromIndex = 0): string | undefined {
   const messages = (sess as AgentSession & { messages?: Array<{ role?: string; content?: unknown; stopReason?: string }> }).messages;
   if (!Array.isArray(messages)) {
     const fallback = sess.getLastAssistantText();
@@ -151,7 +156,7 @@ export function getBestAssistantResult(sess: AgentSession): string | undefined {
 
   let suspiciousFallback: string | undefined;
 
-  for (let i = messages.length - 1; i >= 0; i--) {
+  for (let i = messages.length - 1; i >= fromIndex; i--) {
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
     if (msg.stopReason === "aborted" && extractTextFromAssistantContent(msg.content).length === 0) continue;
@@ -163,6 +168,32 @@ export function getBestAssistantResult(sess: AgentSession): string | undefined {
   }
 
   return suspiciousFallback;
+}
+
+/**
+ * Opt-in (ABORTED_TASK_IS_FAILURE): when the task's last assistant message ended in an
+ * abort or LLM error, return the failure to publish — the reason plus any partial output.
+ */
+export function describeAbortedTask(
+  sess: AgentSession,
+  taskAborted: boolean,
+  partial: string | undefined,
+  fromIndex = 0,
+): string | undefined {
+  const messages = (sess as AgentSession & { messages?: Array<{ role?: string; stopReason?: string }> }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  for (let i = messages.length - 1; i >= fromIndex; i--) {
+    const msg = messages[i];
+    if (msg?.role !== "assistant") continue;
+    if (msg.stopReason !== "error" && msg.stopReason !== "aborted") return undefined;
+    const reason = msg.stopReason === "aborted" && taskAborted
+      ? "Task timed out"
+      : describeSessionFailure(sess, taskAborted, fromIndex) ?? "Task aborted";
+    // "before producing output" contradicts the partial output that follows.
+    if (partial && reason.startsWith("Task aborted before producing output")) return `Task aborted. Partial output: ${partial}`;
+    return partial ? `${reason}. Partial output: ${partial}` : reason;
+  }
+  return undefined;
 }
 
 /** Structured TaskResult fields `prs` and `verdict` (omitted by the caller when empty). */
@@ -213,4 +244,18 @@ export function extractStructured(messages: unknown[], finalText: string): Struc
   let prs = resolvePrs(fromCommands, finalText);
   if (!fromCommands.length && pushed) prs = prs.map((p) => ({ ...p, action: "updated" as const }));
   return { prs, verdict: parseVerdict(finalText) };
+}
+
+/**
+ * Index of the first message of the current task. Anchored on the last message that
+ * existed before the task, not a raw length: auto-compaction replaces the messages with
+ * a shorter array, which would make a length-based index skip the final answer. If the
+ * anchor was compacted away, fall back to 0 so the answer is never skipped.
+ */
+export function taskStartIndex(sess: AgentSession, anchor: unknown): number {
+  if (anchor === undefined) return 0;
+  const messages = (sess as AgentSession & { messages?: unknown[] }).messages;
+  if (!Array.isArray(messages)) return 0;
+  const i = messages.lastIndexOf(anchor);
+  return i < 0 ? 0 : i + 1;
 }

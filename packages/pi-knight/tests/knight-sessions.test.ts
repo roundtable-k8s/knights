@@ -346,3 +346,64 @@ test("executeTask: TaskResult.model reports the resolved provider/id, not the re
   __setTaskModelResolverForTests(null);
   __setSessionFactoryForTests(null);
 });
+
+function scriptedSession(id: number, scripts: Array<(m: any[]) => void>) {
+  const s = fakeSession(id, []) as any;
+  s.messages = [] as any[];
+  s.getSessionStats = () => ({ sessionId: `s${id}`, totalMessages: s.messages.length, cost: 0, toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+  s.getLastAssistantText = () => undefined;
+  s.prompt = async () => scripts.shift()!(s.messages);
+  return s;
+}
+const say = (text: string) => (m: any[]) => m.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop" });
+const fail = (m: any[]) => m.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "boom" });
+
+test("executeTask: a chain step with no text of its own does not publish the previous step's text", async () => {
+  __setSessionFactoryForTests(async () => scriptedSession(1, [say("one"), fail]));
+  const r1 = await executeTask("s1", config, undefined, "run-leak");
+  const r2 = await executeTask("s2", config, undefined, "run-leak");
+  assert.equal(r1.result, "one");
+  assert.equal(r1.success, true);
+  assert.equal(r2.success, false);
+  assert.equal(r2.result, "LLM call failed: boom");
+  __setSessionFactoryForTests(null);
+});
+
+test("executeTask: two normal steps each return their own text", async () => {
+  __setSessionFactoryForTests(async () => scriptedSession(1, [say("one"), say("two")]));
+  assert.equal((await executeTask("s1", config, undefined, "run-ok")).result, "one");
+  assert.equal((await executeTask("s2", config, undefined, "run-ok")).result, "two");
+  __setSessionFactoryForTests(null);
+});
+
+test("executeTask: ABORTED_TASK_IS_FAILURE turns an errored task with narration into a failure", async () => {
+  const script = (m: any[]) => { say("partial")(m); fail(m); };
+  __setSessionFactoryForTests(async () => scriptedSession(1, [script, script]));
+  const off = await executeTask("a", config);
+  assert.equal(off.success, true);
+  assert.equal(off.result, "partial");
+  process.env.ABORTED_TASK_IS_FAILURE = "true";
+  try {
+    const on = await executeTask("b", config);
+    assert.equal(on.success, false);
+    assert.equal(on.result, "LLM call failed: boom. Partial output: partial");
+  } finally {
+    delete process.env.ABORTED_TASK_IS_FAILURE;
+    __setSessionFactoryForTests(null);
+  }
+});
+
+test("executeTask: a step whose auto-compaction shrinks the messages still succeeds with its answer", async () => {
+  const s = scriptedSession(1, [say("one")]) as any;
+  for (let i = 0; i < 20; i++) s.messages.push({ role: "user", content: `old ${i}` });
+  s.prompt = async () => {
+    // compaction replaces the array with a summary plus a few recent messages
+    s.messages = [{ role: "user", content: "summary" }, { role: "user", content: "recent" }];
+    s.messages.push({ role: "assistant", content: [{ type: "text", text: "final" }], stopReason: "stop" });
+  };
+  __setSessionFactoryForTests(async () => s);
+  const r = await executeTask("s", config, undefined, "run-compact");
+  assert.equal(r.success, true);
+  assert.equal(r.result, "final");
+  __setSessionFactoryForTests(null);
+});

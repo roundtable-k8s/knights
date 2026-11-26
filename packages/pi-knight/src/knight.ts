@@ -18,7 +18,7 @@ import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
-import { LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
+import { describeAbortedTask, taskStartIndex, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
 
 
 export interface TaskResult {
@@ -405,7 +405,8 @@ export async function executeTask(
 
   // Snapshot stats before this task
   const statsBefore = sess.getSessionStats();
-  const messagesBefore = (sess as unknown as { messages?: unknown[] }).messages?.length ?? 0;
+  const priorMessages = (sess as unknown as { messages?: unknown[] }).messages;
+  const lastMessageBefore = priorMessages && priorMessages.length > 0 ? priorMessages[priorMessages.length - 1] : undefined;
   const costBefore = statsBefore.cost;
   const toolCallsBefore = statsBefore.toolCalls;
   const tokensBefore = {
@@ -535,7 +536,13 @@ export async function executeTask(
   // A silent LLM error or abort (the Pi loop records those on the final assistant
   // message and resolves prompt() normally) is surfaced as the failure reason rather
   // than being masked by the generic no-output message.
-  let deliverable = getBestAssistantResult(sess);
+  const messagesBefore = taskStartIndex(sess, lastMessageBefore);
+  let deliverable = getBestAssistantResult(sess, messagesBefore);
+  // Opt-in: an aborted or errored task is a failure even when it narrated before dying.
+  const abortedReason = process.env.ABORTED_TASK_IS_FAILURE === "true" && deliverable != null
+    ? describeAbortedTask(sess, signal?.aborted ?? false, deliverable, messagesBefore)
+    : undefined;
+  if (abortedReason) deliverable = undefined;
   // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
   // (typical of local models whose endpoint lacks tool support, #27). Fail loudly, not
   // as a success with no work done.
@@ -544,10 +551,12 @@ export async function executeTask(
   const toolCallsAsText = local && deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
   if (toolCallsAsText) deliverable = undefined;
   let failureReason: string | undefined;
-  if (toolCallsAsText) {
+  if (abortedReason) {
+    failureReason = abortedReason;
+  } else if (toolCallsAsText) {
     failureReason = TOOL_CALLS_AS_TEXT_REASON;
   } else if (deliverable == null) {
-    failureReason = describeSessionFailure(sess, signal?.aborted ?? false) ??
+    failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore) ??
       (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
   }
   const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
@@ -560,7 +569,7 @@ export async function executeTask(
       refused: refused ?? null,
       taskLength: task.length,
       runId: runId ?? null,
-      sessionTail: summarizeSessionTail(sess),
+      sessionTail: summarizeSessionTail(sess, 6, messagesBefore),
     });
   }
 
