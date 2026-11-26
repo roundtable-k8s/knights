@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -92,6 +92,8 @@ export function classifyResult(input: ClassifyInput): TaskResult {
   if (result && result.subtype === "success" && !result.is_error) {
     const text = (result.result ?? "").trim() || lastAssistantText;
     if (text) {
+      const declared = parseTaskFailure(text);
+      if (declared) return fail(declared, { result: text });
       const prs = resolvePrs(input.prs ?? [], text);
       const verdict = parseVerdict(text);
       return { ...base, result: text, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };

@@ -31,6 +31,22 @@ export function parseVerdict(text: string): Verdict | undefined {
   return last ? normalizeVerdict(last) : undefined;
 }
 
+/** Only ever applied to the last non-empty line, so no `m` flag. */
+const TASK_FAILURE_RE = /^[\s>*_#-]*outcome[\s*_]*[:=-][\s*_`]*failed\b[\s*_`:=.-]*(.*?)[\s*_`]*$/i;
+
+/**
+ * `Outcome: failed <reason>` as the LAST non-empty line declares the task failed.
+ * Returns the reason, or the whole line when there is none; undefined otherwise.
+ */
+export function parseTaskFailure(text: string): string | undefined {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return undefined;
+  const m = TASK_FAILURE_RE.exec(last);
+  if (!m) return undefined;
+  return m[1] || last;
+}
+
 function refFromUrl(url: string, action?: PRAction): PRRef {
   const m = new RegExp(PR_URL_RE.source).exec(url)!;
   return { repo: m[1], number: Number(m[2]), url: m[0], action };

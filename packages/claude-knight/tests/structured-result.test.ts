@@ -43,3 +43,15 @@ test("classifyResult: falls back to message URLs; omits fields when none", () =>
   assert.equal("prs" in b, false);
   assert.equal("verdict" in b, false);
 });
+
+test("classifyResult: a final Outcome: failed line records failure, keeping the text", () => {
+  const text = "Tried twice.\nOutcome: failed - the filing script rejected the answer";
+  const r = classifyResult({ result: ok(text), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
+  assert.equal(r.success, false);
+  assert.equal(r.error, "the filing script rejected the answer");
+  assert.equal(r.result, text);
+  const mid = classifyResult({ result: ok("Outcome: failed earlier\nFixed it, all good."), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
+  assert.equal(mid.success, true);
+  const plain = classifyResult({ result: ok("All done"), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
+  assert.equal(plain.success, true);
+});

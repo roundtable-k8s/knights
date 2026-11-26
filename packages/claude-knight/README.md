@@ -64,6 +64,10 @@ that differs from the SDK's bundled CLI is installed on its own, and the build c
 - **Personality.** `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `TOOLS.md` (PVC copy, else `/config`) are appended to
   Claude Code's system prompt each task.
 
+### Declaring a task failed
+
+If the final non-empty line of the agent's answer is `Outcome: failed <reason>` (case-insensitive, with the same tolerant markdown and `:`/`=`/`-` separators as the `Verdict:` line), the result is published with `success: false` and `error` set to the reason (the whole line when there is none). The agent's full text stays in `result`. The phrase anywhere but the last non-empty line is ignored. Use it when a scheduled task's script check rejects the answer and the knight cannot fix it, so the firing is recorded as failed.
+
 ## Live activity events
 
 While a task runs the pod publishes core-NATS events (never JetStream) on
