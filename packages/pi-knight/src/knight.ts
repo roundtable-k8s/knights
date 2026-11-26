@@ -10,7 +10,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isLocalModel, resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import { dataPaths, type KnightConfig } from "./config.js";
 import { SessionSpans } from "./spans.js";
-import { log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
+import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
@@ -188,6 +188,11 @@ export function __setSessionFactoryForTests(
   sessionFactory = f ?? ((c, cwd) => createSession(c, cwd));
   slots.clear();
   lastActive = null;
+}
+
+/** Remove a task workspace, read-only trees included; a failure is logged, never thrown. */
+export async function removeWorkDir(workDir: string): Promise<void> {
+  await forceRemoveTree(workDir).catch((err) => log.warn("Failed to remove task workspace", { workDir, error: String(err) }));
 }
 
 /**
@@ -394,7 +399,7 @@ export async function executeTask(
   } catch (err) {
     // Session creation failed. Remove the directory before releasing the lock, or a queued
     // step of this run could recreate it and have its fresh workspace deleted underneath it.
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    await removeWorkDir(workDir);
     slot.pending--;
     releaseLock();
     if (!slot.session && slot.pending === 0) slots.delete(slot.key);
@@ -497,7 +502,7 @@ export async function executeTask(
     }
     // Removed after each task (a run's next step recreates it); kept on failure only with DEBUG.
     // Must finish before the lock is released, or it would delete the next step's fresh dir.
-    if (!(promptFailed && process.env.DEBUG)) await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    if (!(promptFailed && process.env.DEBUG)) await removeWorkDir(workDir);
     slot.pending--;
     // Nothing left to wait for on a dropped session: free the slot now, not at LRU eviction.
     if (!slot.session && slot.pending === 0) slots.delete(slot.key);

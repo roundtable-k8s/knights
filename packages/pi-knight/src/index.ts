@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, sweepStaleDirs, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -48,6 +48,9 @@ async function main(): Promise<void> {
     routes: { "/introspect": (url) => handleIntrospect(introspectRequestFromQuery(url.searchParams), introspectOptions(config)) },
   });
   log.info("Health server started", { port: config.metricsPort });
+
+  // Workspaces left by a pod killed mid-task would otherwise fill the PVC; no task runs yet, so none is active.
+  await sweepStaleDirs(dataPaths().workRoot, { skip: [".warm"] });
 
   // Preflight the model endpoint before doing anything else. For local endpoints
   // (Ollama/LM Studio/LiteLLM) this catches an unreachable endpoint or missing
