@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -162,6 +162,7 @@ async function main(): Promise<void> {
       activity = new TaskActivity({
         knight: config.knightName,
         table: config.table,
+        traceId: traceIdFromTraceparent(delivery.traceContext?.traceparent),
         prefix: natsPrefix(config),
         taskId,
         identity: podIdentity(process.env, hostname()),
@@ -183,14 +184,17 @@ async function main(): Promise<void> {
       }, HEARTBEAT_MS);
       activeCount++;
       counted = true;
-      activity.started();
       setActiveTaskCount(activeCount);
       metrics.activeTasks.labels().set(activeCount);
       timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       const result = await withTaskSpan(
         { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
-        () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
+        () => {
+          act.setTraceId(activeTraceId());
+          act.started(); // after the trace id is known, so task.started carries it
+          return executeTask(taskText, config, controller.signal, runId, taskId, { model, activity });
+        },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );
       const durationMs = Date.now() - startTime;

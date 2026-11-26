@@ -34,6 +34,8 @@ export interface ActivityEvent {
   knight: string;
   /** The table the knight belongs to; optional on the wire (older pods omit it). */
   table?: string;
+  /** Trace id (32 lowercase hex) of the task's trace; omitted when there is none. */
+  traceId?: string;
   pod: string;
   node?: string;
   taskId: string;
@@ -226,10 +228,15 @@ export const natsActivityPublish: ActivityPublish = (subject, payload) => {
   getConnection()?.publish(subject, payload);
 };
 
+const TRACE_ID_RE = /^[0-9a-f]{32}$/;
+const validTraceId = (id: string | undefined): string | undefined => (id && TRACE_ID_RE.test(id) && !/^0+$/.test(id) ? id : undefined);
+
 export interface TaskActivityInit {
   knight: string;
   /** The table the knight belongs to (ROUNDTABLE_TABLE); reported on every event. */
   table?: string;
+  /** Trace id of the task (from its incoming `traceparent`); can also be set later with `setTraceId`. */
+  traceId?: string;
   /** `<prefix>` of the table (see `natsPrefix`). */
   prefix: string;
   taskId: string;
@@ -308,7 +315,11 @@ export class TaskActivity {
   private readonly publish: ActivityPublish;
   private unsub: (() => void) | undefined;
 
+  /** Set once; every later event carries it. */
+  private traceId: string | undefined;
+
   constructor(private readonly init: TaskActivityInit) {
+    this.traceId = validTraceId(init.traceId);
     this.taskId = init.taskId;
     this.subject = activitySubject(init.prefix, init.knight, init.taskId);
     this.now = init.now ?? Date.now;
@@ -322,6 +333,11 @@ export class TaskActivity {
     return this.init.content !== "none";
   }
 
+  /** Adopt a trace id (e.g. from the task span) when none was given at construction; ignored once set or invalid. */
+  setTraceId(id: string | undefined): void {
+    this.traceId ??= validTraceId(id);
+  }
+
   private emit(type: ActivityType, fields: Record<string, unknown>, droppable: boolean): void {
     try {
       // Sampled events consume no seq: a seq gap always means loss in transit.
@@ -333,6 +349,7 @@ export class TaskActivity {
         ts: new Date(this.now()).toISOString(),
         knight: i.knight,
         ...(i.table ? { table: i.table } : {}),
+        ...(this.traceId ? { traceId: this.traceId } : {}),
         pod: i.identity.pod,
         ...(i.identity.node ? { node: i.identity.node } : {}),
         taskId: i.taskId,

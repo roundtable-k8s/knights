@@ -26,3 +26,17 @@ export function traceHeaders(): Record<string, string> {
   if (state) out.tracestate = state;
   return out;
 }
+
+// Same rules as the OpenTelemetry propagator: lowercase hex only, version ff is invalid.
+const TRACEPARENT_RE = /^(?!ff)[0-9a-f]{2}-((?!0{32})[0-9a-f]{32})-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}(?:-.*)?$/;
+
+/** Trace id of a W3C `traceparent` header; undefined when it is missing, malformed or all zeros. */
+export function traceIdFromTraceparent(traceparent: string | undefined): string | undefined {
+  return traceparent ? TRACEPARENT_RE.exec(traceparent.trim())?.[1] : undefined;
+}
+
+/** Trace id of the active span, when there is a valid one (an SDK is registered). */
+export function activeTraceId(): string | undefined {
+  const sc = trace.getSpanContext(context.active());
+  return sc && trace.isSpanContextValid(sc) ? sc.traceId : undefined;
+}
