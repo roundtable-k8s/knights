@@ -314,6 +314,32 @@ test("executeTask: a failed model restore drops the run's session and slot; the 
   __setSessionFactoryForTests(null);
 });
 
+test("executeTask: a stale session is disposed once when reading the result throws before the structured read", async () => {
+  setup();
+  __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));
+  const disposed: number[] = [];
+  __setSessionFactoryForTests(async () => {
+    const s = fakeSession(1, disposed);
+    s.setModel = async function (m: any) {
+      if (m.id === "default") throw new Error("restore boom");
+      this.model = m;
+    };
+    // Call 1 is the pre-task snapshot, call 2 the post-task diff: the read after the lock is released.
+    let calls = 0;
+    const realStats = s.getSessionStats;
+    s.getSessionStats = () => {
+      if (++calls === 2) throw new Error("stats boom");
+      return realStats();
+    };
+    return s as any;
+  });
+  await assert.rejects(executeTask("c2", config, undefined, "run-rf5", "rf5", { model: "m/opus" }), /stats boom/);
+  assert.deepEqual(disposed, [1], "disposed exactly once after the throw");
+  assert.equal(__slotKeysForTests().includes("run:run-rf5"), false, "the slot is gone");
+  __setTaskModelResolverForTests(null);
+  __setSessionFactoryForTests(null);
+});
+
 test("executeTask: a stale session is disposed exactly once even when reading the task's messages throws", async () => {
   setup();
   __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));

@@ -467,7 +467,8 @@ export async function executeTask(
     spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table }, undefined, () => (sess as any).systemPrompt);
     const sp = spans;
     try {
-      unsubSpans = (sess as any).subscribe?.((e: any) => {
+      // Typed view of the SDK session's event subscription (same shape TaskActivity.attach takes).
+      unsubSpans = (sess as { subscribe?: (listener: (e: unknown) => void) => () => void }).subscribe?.((e) => {
         try {
           sp.handle(e);
         } catch (err) {
@@ -512,118 +513,118 @@ export async function executeTask(
     releaseLock();
   }
 
-  // Diff stats to get this task's contribution. Clamp at 0: session-cumulative stats
-  // are normally monotonic, but routing models (e.g. openrouter/auto) can switch the
-  // underlying model between turns and report usage non-monotonically, yielding a negative
-  // delta. A negative value would throw in prom-client (Counter.inc cannot decrease) and
-  // crash the task in the stats layer, so we never let a per-task delta go below zero.
-  const statsAfter = sess.getSessionStats();
-  if (Number.isFinite(statsAfter.totalMessages)) sessionMessages.set(statsAfter.totalMessages);
-  // Non-negative AND finite: routing/custom models can report missing or non-monotonic
-  // usage, yielding a negative or NaN diff — either of which throws in prom-client.
-  const delta = (after: number, before: number) => {
-    const d = after - before;
-    return Number.isFinite(d) ? Math.max(0, d) : 0;
-  };
-  const ranModelObj = override?.model ?? defaultModel ?? sess.model;
-  const local = ranModelObj ? isLocalModel(ranModelObj) : false;
-  // Local endpoints cost nothing per token whatever a catalog entry says.
-  const taskCost = local ? 0 : delta(statsAfter.cost, costBefore);
-  const taskToolCalls = delta(statsAfter.toolCalls, toolCallsBefore);
-  const taskTokens = {
-    input: delta(statsAfter.tokens.input, tokensBefore.input),
-    output: delta(statsAfter.tokens.output, tokensBefore.output),
-    cacheRead: delta(statsAfter.tokens.cacheRead, tokensBefore.cacheRead),
-    cacheWrite: delta(statsAfter.tokens.cacheWrite, tokensBefore.cacheWrite),
-  };
-
-  // Extract the most recent real deliverable, not an intermediate tool-call payload.
-  // When the agent yields nothing deliverable, report an explicit failure instead of
-  // publishing a sentinel as a successful result, so consumers see the failure. (#31)
-  // A silent LLM error or abort (the Pi loop records those on the final assistant
-  // message and resolves prompt() normally) is surfaced as the failure reason rather
-  // than being masked by the generic no-output message.
-  const messagesBefore = taskStartIndex(sess, lastMessageBefore);
-  let deliverable = getBestAssistantResult(sess, messagesBefore);
-  // Opt-in: an aborted or errored task is a failure even when it narrated before dying.
-  const abortedReason = process.env.ABORTED_TASK_IS_FAILURE === "true" && deliverable != null
-    ? describeAbortedTask(sess, signal?.aborted ?? false, deliverable, messagesBefore)
-    : undefined;
-  if (abortedReason) deliverable = undefined;
-  // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
-  // (typical of local models whose endpoint lacks tool support, #27). Fail loudly, not
-  // as a success with no work done.
-  // Local models only: a hosted model that answers in prose that merely mentions
-  // "tool_calls": keeps its old behaviour.
-  const toolCallsAsText = local && deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
-  if (toolCallsAsText) deliverable = undefined;
-  let failureReason: string | undefined;
-  if (abortedReason) {
-    failureReason = abortedReason;
-  } else if (toolCallsAsText) {
-    failureReason = TOOL_CALLS_AS_TEXT_REASON;
-  } else if (deliverable == null) {
-    failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore) ??
-      (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
-  }
-  const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
-  const refused = success ? undefined : refusalCode(error);
-  // Only an LLM call failure is a provider error; never the agent's own output or a task timeout.
-  const transient = !success && !refused && failureReason?.startsWith("LLM call failed") ? transientFailure(failureReason) : undefined;
-  if (!success) {
-    log.warn("Task produced no deliverable", {
-      error,
-      refused: refused ?? null,
-      taskLength: task.length,
-      runId: runId ?? null,
-      sessionTail: summarizeSessionTail(sess, 6, messagesBefore),
-    });
-  }
-
-  // Structured prs/verdict, from only this task's messages (the session is shared per run).
-  // Read before the stale session is disposed, and dispose in finally so a throw while
-  // reading or extracting still releases it.
-  let structured: Structured;
+  // Everything below reads the session (stats, messages, deliverable, failure reason, structured
+  // extraction). The stale session is disposed after all of it, on every exit path, including a
+  // throw while reading; the dispose in the lock's finally above covers a failed prompt.
   try {
+    // Diff stats to get this task's contribution. Clamp at 0: session-cumulative stats
+    // are normally monotonic, but routing models (e.g. openrouter/auto) can switch the
+    // underlying model between turns and report usage non-monotonically, yielding a negative
+    // delta. A negative value would throw in prom-client (Counter.inc cannot decrease) and
+    // crash the task in the stats layer, so we never let a per-task delta go below zero.
+    const statsAfter = sess.getSessionStats();
+    if (Number.isFinite(statsAfter.totalMessages)) sessionMessages.set(statsAfter.totalMessages);
+    // Non-negative AND finite: routing/custom models can report missing or non-monotonic
+    // usage, yielding a negative or NaN diff — either of which throws in prom-client.
+    const delta = (after: number, before: number) => {
+      const d = after - before;
+      return Number.isFinite(d) ? Math.max(0, d) : 0;
+    };
+    const ranModelObj = override?.model ?? defaultModel ?? sess.model;
+    const local = ranModelObj ? isLocalModel(ranModelObj) : false;
+    // Local endpoints cost nothing per token whatever a catalog entry says.
+    const taskCost = local ? 0 : delta(statsAfter.cost, costBefore);
+    const taskToolCalls = delta(statsAfter.toolCalls, toolCallsBefore);
+    const taskTokens = {
+      input: delta(statsAfter.tokens.input, tokensBefore.input),
+      output: delta(statsAfter.tokens.output, tokensBefore.output),
+      cacheRead: delta(statsAfter.tokens.cacheRead, tokensBefore.cacheRead),
+      cacheWrite: delta(statsAfter.tokens.cacheWrite, tokensBefore.cacheWrite),
+    };
+
+    // Extract the most recent real deliverable, not an intermediate tool-call payload.
+    // When the agent yields nothing deliverable, report an explicit failure instead of
+    // publishing a sentinel as a successful result, so consumers see the failure. (#31)
+    // A silent LLM error or abort (the Pi loop records those on the final assistant
+    // message and resolves prompt() normally) is surfaced as the failure reason rather
+    // than being masked by the generic no-output message.
+    const messagesBefore = taskStartIndex(sess, lastMessageBefore);
+    let deliverable = getBestAssistantResult(sess, messagesBefore);
+    // Opt-in: an aborted or errored task is a failure even when it narrated before dying.
+    const abortedReason = process.env.ABORTED_TASK_IS_FAILURE === "true" && deliverable != null
+      ? describeAbortedTask(sess, signal?.aborted ?? false, deliverable, messagesBefore)
+      : undefined;
+    if (abortedReason) deliverable = undefined;
+    // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
+    // (typical of local models whose endpoint lacks tool support, #27). Fail loudly, not
+    // as a success with no work done.
+    // Local models only: a hosted model that answers in prose that merely mentions
+    // "tool_calls": keeps its old behaviour.
+    const toolCallsAsText = local && deliverable != null && taskToolCalls === 0 && !isDeliverableAssistantText(deliverable);
+    if (toolCallsAsText) deliverable = undefined;
+    let failureReason: string | undefined;
+    if (abortedReason) {
+      failureReason = abortedReason;
+    } else if (toolCallsAsText) {
+      failureReason = TOOL_CALLS_AS_TEXT_REASON;
+    } else if (deliverable == null) {
+      failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore) ??
+        (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
+    }
+    const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
+    const refused = success ? undefined : refusalCode(error);
+    // Only an LLM call failure is a provider error; never the agent's own output or a task timeout.
+    const transient = !success && !refused && failureReason?.startsWith("LLM call failed") ? transientFailure(failureReason) : undefined;
+    if (!success) {
+      log.warn("Task produced no deliverable", {
+        error,
+        refused: refused ?? null,
+        taskLength: task.length,
+        runId: runId ?? null,
+        sessionTail: summarizeSessionTail(sess, 6, messagesBefore),
+      });
+    }
+
+    // Structured prs/verdict, from only this task's messages (the session is shared per run).
     const taskMessages = ((sess as unknown as { messages?: unknown[] }).messages ?? []).slice(messagesBefore);
-    structured = success ? extractStructured(taskMessages, resultText) : { prs: [] as PRRef[] };
+    const structured: Structured = success ? extractStructured(taskMessages, resultText) : { prs: [] as PRRef[] };
+
+    // Update session notes after each task (fire-and-forget)
+    updateSessionNotes(config.knightName, task, resultText).catch((err) => {
+      log.warn("Failed to update session notes", { error: String(err) });
+    });
+
+    // Prompt-cache hit rate = cached / (fresh input + cached). Surfaces whether the
+    // stable prefix is actually being reused (the main cost lever for these sessions).
+    const billedInput = taskTokens.input + taskTokens.cacheRead;
+    const cacheHitRate = billedInput > 0 ? taskTokens.cacheRead / billedInput : 0;
+
+    log.info("Task completed", {
+      inputTokens: taskTokens.input,
+      cachedInputTokens: taskTokens.cacheRead,
+      cacheHitRate: Number(cacheHitRate.toFixed(2)),
+      outputTokens: taskTokens.output,
+      cost: taskCost,
+      toolCalls: taskToolCalls,
+    });
+
+    return {
+      result: resultText,
+      success,
+      error,
+      cost: taskCost,
+      ...(local ? { billing: "local" as const } : {}),
+      tokens: taskTokens,
+      model: ranModel,
+      toolCalls: taskToolCalls,
+      ...(structured.prs.length > 0 ? { prs: structured.prs } : {}),
+      ...(structured.verdict ? { verdict: structured.verdict } : {}),
+      ...(refused ? { refused } : {}),
+      ...(transient ? { transient } : {}),
+    };
   } finally {
     disposeStale();
   }
-
-  // Update session notes after each task (fire-and-forget)
-  updateSessionNotes(config.knightName, task, resultText).catch((err) => {
-    log.warn("Failed to update session notes", { error: String(err) });
-  });
-
-  // Prompt-cache hit rate = cached / (fresh input + cached). Surfaces whether the
-  // stable prefix is actually being reused (the main cost lever for these sessions).
-  const billedInput = taskTokens.input + taskTokens.cacheRead;
-  const cacheHitRate = billedInput > 0 ? taskTokens.cacheRead / billedInput : 0;
-
-  log.info("Task completed", {
-    inputTokens: taskTokens.input,
-    cachedInputTokens: taskTokens.cacheRead,
-    cacheHitRate: Number(cacheHitRate.toFixed(2)),
-    outputTokens: taskTokens.output,
-    cost: taskCost,
-    toolCalls: taskToolCalls,
-  });
-
-  return {
-    result: resultText,
-    success,
-    error,
-    cost: taskCost,
-    ...(local ? { billing: "local" as const } : {}),
-    tokens: taskTokens,
-    model: ranModel,
-    toolCalls: taskToolCalls,
-    ...(structured.prs.length > 0 ? { prs: structured.prs } : {}),
-    ...(structured.verdict ? { verdict: structured.verdict } : {}),
-    ...(refused ? { refused } : {}),
-    ...(transient ? { transient } : {}),
-  };
 }
 
 /**
