@@ -191,3 +191,14 @@ test("task span carries runtime, chain, step and token usage; absent when unset"
   }
   assert.equal(b!.attributes["gen_ai.usage.input_tokens"], 7);
 });
+
+test("byte cut keeps real U+FFFD and never splits a character", async () => {
+  const { setContentAttribute } = await import("../src/telemetry.js");
+  const got: Record<string, unknown> = {};
+  const span: any = { setAttribute: (k: string, v: unknown) => { got[k] = v; } };
+  const env = { ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES: "6" };
+  setContentAttribute(span, "k", "ab��zzz", env);
+  assert.equal(got["k"], "ab�");
+  setContentAttribute(span, "k", "ééééé", env);
+  assert.equal(got["k"], "ééé");
+});
