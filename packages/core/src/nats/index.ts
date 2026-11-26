@@ -636,13 +636,16 @@ function capForPayload(taskId: string, result: TaskResult, opts: PublishResultOp
   budget = Math.max(budget, 256);
   let capped = capResultText(result, budget);
   // JSON escaping grows the text (newline/quote 2x, control chars 6x), so measure the encoded
-  // payload and cut again with a smaller budget until it fits.
+  // payload and cut again until it fits. Each step keeps the share of maxPayload that the text
+  // can use: the escaped text must fit in what the other fields leave of maxPayload.
   if (maxPayload && maxPayload > 0) {
     while (budget > 256 && Buffer.byteLength(encodeResult(capped)) > maxPayload) {
-      const excess = Buffer.byteLength(encodeResult(capped)) - maxPayload;
       const keptBytes = Buffer.byteLength(capped.result);
-      // Shrink by the excess, and at least by a ratio so heavy escaping converges quickly.
-      const next = Math.min(keptBytes - excess - 64, Math.floor(keptBytes * 0.9));
+      const encodedText = Buffer.byteLength(JSON.stringify(capped.result));
+      const rest = Buffer.byteLength(encodeResult(capped)) - encodedText;
+      const room = maxPayload - rest;
+      const next = Math.floor((keptBytes * room) / encodedText);
+      // Always shrink, so the loop ends even when the estimate does not move.
       budget = Math.max(256, Math.min(budget - 1, next));
       capped = capResultText(result, budget);
     }
