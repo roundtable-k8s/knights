@@ -36,16 +36,19 @@ export function checkBashCommand(command: string): string | undefined {
 export const isTokenSecret = (text: string): boolean => containsSecret(text, "tokens");
 
 /**
- * Block Claude Code Write (`content`), Edit (`new_string`) and MultiEdit (each edit's
- * `new_string`) whose new text contains a token-shaped secret. Returns the reason or undefined.
+ * Block file writes whose new text contains a token-shaped secret. Understands Claude Code
+ * Write (`content`), Edit (`new_string`) and MultiEdit (each edit's `new_string`), and pi's
+ * `write` (`content`) and `edit` (each `edits[].newText`, plus the legacy top-level `newText`).
+ * Returns the reason or undefined.
  */
 export function checkWriteContent(toolName: string, input: unknown): string | undefined {
-  const i = (input ?? {}) as { content?: unknown; new_string?: unknown; edits?: unknown };
+  const i = (input ?? {}) as { content?: unknown; new_string?: unknown; newText?: unknown; edits?: unknown };
+  const field = (e: unknown, key: string): unknown => (e as Record<string, unknown> | null)?.[key];
+  const editTexts = (key: string): unknown[] => (Array.isArray(i.edits) ? i.edits.map((e) => field(e, key)) : []);
   let texts: unknown[] = [];
-  if (toolName === "Write") texts = [i.content];
+  if (toolName === "Write" || toolName === "write") texts = [i.content];
   else if (toolName === "Edit") texts = [i.new_string];
-  else if (toolName === "MultiEdit" && Array.isArray(i.edits)) {
-    texts = i.edits.map((e) => (e as { new_string?: unknown } | null)?.new_string);
-  }
+  else if (toolName === "MultiEdit") texts = editTexts("new_string");
+  else if (toolName === "edit") texts = [i.newText, ...editTexts("newText")];
   return texts.some((t) => typeof t === "string" && isTokenSecret(t)) ? SECRET_IN_CONTENT : undefined;
 }
