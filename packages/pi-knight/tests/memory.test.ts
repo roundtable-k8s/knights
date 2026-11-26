@@ -100,3 +100,22 @@ test("notes without a section yield the empty placeholder for it", async () => {
   assert.match(text, /# Errors & Corrections\n_None recorded yet._/);
   assert.match(text, /# Learnings\n_None recorded yet._/);
 });
+
+test("setupCompactionHook counts compactions and retry sequences", async () => {
+  const { setupCompactionHook } = await import("../src/memory.ts");
+  const { registry } = await import("../src/runtime-metrics.ts");
+  let listener: (e: any) => void = () => {};
+  setupCompactionHook({ subscribe: (l: any) => { listener = l; return () => {}; } } as any, { knightName: "k" } as any);
+  const value = async (name: string, labels: Record<string, string>) =>
+    (await registry.getMetricsAsJSON()).find((m) => m.name === name)?.values.find((v) => Object.entries(labels).every(([k, x]) => v.labels[k] === x))?.value ?? 0;
+  listener({ type: "compaction_start", reason: "threshold" });
+  listener({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+  listener({ type: "compaction_end", reason: "overflow", aborted: true, willRetry: false });
+  listener({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "e" });
+  listener({ type: "auto_retry_end", success: true, attempt: 1 });
+  listener({ type: "auto_retry_end", success: false, attempt: 3, finalError: "e" });
+  assert.equal(await value("roundtable_knight_compactions_total", { reason: "threshold", outcome: "completed" }), 1);
+  assert.equal(await value("roundtable_knight_compactions_total", { reason: "overflow", outcome: "aborted" }), 1);
+  assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "succeeded" }), 1);
+  assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "exhausted" }), 1);
+});
