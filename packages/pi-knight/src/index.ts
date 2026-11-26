@@ -184,7 +184,6 @@ async function main(): Promise<void> {
       }, HEARTBEAT_MS);
       activeCount++;
       counted = true;
-      activity.started();
       setActiveTaskCount(activeCount);
       metrics.activeTasks.labels().set(activeCount);
       timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -193,6 +192,7 @@ async function main(): Promise<void> {
         { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
         () => {
           act.setTraceId(activeTraceId());
+          act.started(); // after the trace id is known, so task.started carries it
           return executeTask(taskText, config, controller.signal, runId, taskId, { model, activity });
         },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
