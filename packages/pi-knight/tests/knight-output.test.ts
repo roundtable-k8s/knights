@@ -233,3 +233,8 @@ test("describeAbortedTask reports timeout/error with partial output, and nothing
   const ok = session([{ role: "assistant", content: [{ type: "text", text: "fine" }], stopReason: "stop" }]);
   assert.equal(describeAbortedTask(ok as any, false, "fine"), undefined);
 });
+
+test("describeAbortedTask does not claim 'before producing output' next to partial output", () => {
+  const s = session([{ role: "assistant", content: [], stopReason: "aborted" }]);
+  assert.equal(describeAbortedTask(s as any, false, "narration"), "Task aborted. Partial output: narration");
+});

@@ -392,3 +392,18 @@ test("executeTask: ABORTED_TASK_IS_FAILURE turns an errored task with narration 
     __setSessionFactoryForTests(null);
   }
 });
+
+test("executeTask: a step whose auto-compaction shrinks the messages still succeeds with its answer", async () => {
+  const s = scriptedSession(1, [say("one")]) as any;
+  for (let i = 0; i < 20; i++) s.messages.push({ role: "user", content: `old ${i}` });
+  s.prompt = async () => {
+    // compaction replaces the array with a summary plus a few recent messages
+    s.messages = [{ role: "user", content: "summary" }, { role: "user", content: "recent" }];
+    s.messages.push({ role: "assistant", content: [{ type: "text", text: "final" }], stopReason: "stop" });
+  };
+  __setSessionFactoryForTests(async () => s);
+  const r = await executeTask("s", config, undefined, "run-compact");
+  assert.equal(r.success, true);
+  assert.equal(r.result, "final");
+  __setSessionFactoryForTests(null);
+});

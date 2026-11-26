@@ -18,7 +18,7 @@ import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
-import { describeAbortedTask, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
+import { describeAbortedTask, taskStartIndex, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
 
 
 export interface TaskResult {
@@ -405,7 +405,8 @@ export async function executeTask(
 
   // Snapshot stats before this task
   const statsBefore = sess.getSessionStats();
-  const messagesBefore = (sess as unknown as { messages?: unknown[] }).messages?.length ?? 0;
+  const priorMessages = (sess as unknown as { messages?: unknown[] }).messages;
+  const lastMessageBefore = priorMessages && priorMessages.length > 0 ? priorMessages[priorMessages.length - 1] : undefined;
   const costBefore = statsBefore.cost;
   const toolCallsBefore = statsBefore.toolCalls;
   const tokensBefore = {
@@ -535,6 +536,7 @@ export async function executeTask(
   // A silent LLM error or abort (the Pi loop records those on the final assistant
   // message and resolves prompt() normally) is surfaced as the failure reason rather
   // than being masked by the generic no-output message.
+  const messagesBefore = taskStartIndex(sess, lastMessageBefore);
   let deliverable = getBestAssistantResult(sess, messagesBefore);
   // Opt-in: an aborted or errored task is a failure even when it narrated before dying.
   const abortedReason = process.env.ABORTED_TASK_IS_FAILURE === "true" && deliverable != null

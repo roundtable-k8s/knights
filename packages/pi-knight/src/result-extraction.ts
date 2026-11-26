@@ -189,6 +189,8 @@ export function describeAbortedTask(
     const reason = msg.stopReason === "aborted" && taskAborted
       ? "Task timed out"
       : describeSessionFailure(sess, taskAborted, fromIndex) ?? "Task aborted";
+    // "before producing output" contradicts the partial output that follows.
+    if (partial && reason.startsWith("Task aborted before producing output")) return `Task aborted. Partial output: ${partial}`;
     return partial ? `${reason}. Partial output: ${partial}` : reason;
   }
   return undefined;
@@ -242,4 +244,18 @@ export function extractStructured(messages: unknown[], finalText: string): Struc
   let prs = resolvePrs(fromCommands, finalText);
   if (!fromCommands.length && pushed) prs = prs.map((p) => ({ ...p, action: "updated" as const }));
   return { prs, verdict: parseVerdict(finalText) };
+}
+
+/**
+ * Index of the first message of the current task. Anchored on the last message that
+ * existed before the task, not a raw length: auto-compaction replaces the messages with
+ * a shorter array, which would make a length-based index skip the final answer. If the
+ * anchor was compacted away, fall back to 0 so the answer is never skipped.
+ */
+export function taskStartIndex(sess: AgentSession, anchor: unknown): number {
+  if (anchor === undefined) return 0;
+  const messages = (sess as AgentSession & { messages?: unknown[] }).messages;
+  if (!Array.isArray(messages)) return 0;
+  const i = messages.lastIndexOf(anchor);
+  return i < 0 ? 0 : i + 1;
 }
