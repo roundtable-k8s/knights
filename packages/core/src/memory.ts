@@ -115,9 +115,14 @@ export function migrateMemory(opts: { memoryDir?: string; dataDir?: string }): b
   if (existsSync(sourceLogs)) {
     cpSync(sourceLogs, join(memoryDir, "memory"), { recursive: true, force: false, errorOnExist: false });
   }
-  const tmp = `${target}.${process.pid}.migrate.tmp`;
-  cpSync(source, tmp);
-  renameSync(tmp, target);
+  const tmp = `${target}.${hostname()}.${process.pid}.${Math.random().toString(36).slice(2, 8)}.migrate.tmp`;
+  try {
+    cpSync(source, tmp);
+    renameSync(tmp, target);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
   log.info("Migrated long-term memory to the memory volume", { from: dataDir, to: memoryDir });
   return true;
 }
@@ -125,4 +130,29 @@ export function migrateMemory(opts: { memoryDir?: string; dataDir?: string }): b
 /** Create the memory directories on the volume (no-op without one). */
 export function ensureMemoryDirs(paths: MemoryPaths): void {
   if (paths.volume) mkdirSync(paths.dailyLogDir, { recursive: true });
+}
+
+/**
+ * Start-up memory setup for a runtime: migrate and create the directories. A failure (EACCES,
+ * read-only mount) must not crash start-up: it is logged, reported through `onError` (callers
+ * mark the knight degraded) and memory falls back to the `/data` layout by clearing
+ * `memoryDir`/`memoryRoot` on `config`. Returns the error text, or null on success.
+ */
+export function setupMemory(
+  config: { memoryDir?: string; memoryRoot?: string },
+  dataDir: string,
+  onError?: (reason: string) => void,
+): string | null {
+  try {
+    migrateMemory({ memoryDir: config.memoryDir, dataDir });
+    ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir }));
+    return null;
+  } catch (e) {
+    const reason = `memory volume unusable, falling back to ${dataDir}: ${String(e)}`;
+    log.error("Memory setup failed", { error: String(e), memoryDir: config.memoryDir });
+    delete config.memoryDir;
+    delete config.memoryRoot;
+    onError?.(reason);
+    return reason;
+  }
 }

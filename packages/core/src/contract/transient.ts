@@ -18,7 +18,7 @@ export function transientFailure(text: string | undefined): TransientFailure | u
   if (/\b(?:50[0234])\b/.test(text) && /\b(?:status|http|api error|error|unavailable|bad gateway|gateway time-?out|server error)\b/i.test(text)) {
     return { transient: true, transientReason: "provider_5xx" };
   }
-  if (/\b(?:ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT)\b|socket hang up|connection (?:was )?reset|\bfetch failed\b|connection error/i.test(text)) {
+  if (/\b(?:ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT)\b|socket hang up|connection (?:was )?reset|\bfetch failed\b|connection error|request timed out|APIConnectionTimeoutError/i.test(text)) {
     return { transient: true, transientReason: "network" };
   }
   return undefined;

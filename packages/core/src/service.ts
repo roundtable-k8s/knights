@@ -142,6 +142,8 @@ export interface KnightServiceOptions {
   getActive(): number;
   /** Counters since start: all finished tasks and those that failed (error or lost). */
   getCounts(): Promise<{ total: number; failed: number }> | { total: number; failed: number };
+  /** Test seam: builds the micro service registry. Defaults to `new Svcm(nc)`. */
+  createSvcm?: (nc: NatsConnection) => Pick<Svcm, "add">;
 }
 
 export interface KnightService {
@@ -206,7 +208,7 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
   }
 
   async function add(): Promise<Service> {
-    const s = await new Svcm(opts.nc).add({
+    const s = await (opts.createSvcm?.(opts.nc) ?? new Svcm(opts.nc)).add({
       name: SERVICE_NAME,
       version: opts.version,
       description: `${opts.knightName}${opts.domain ? ` (${opts.domain})` : ""}`,
@@ -216,7 +218,7 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
     const cardSubject = `$RT.${subjectToken(opts.table)}.${subjectToken(opts.knightName)}.card`;
     s.addEndpoint("card", {
       subject: cardSubject,
-      // Unique per pod name; read-only. It must never take tasks.
+      // Per knight (replicas share this subject); read-only. It must never take tasks.
       handler: (err, msg) => {
         if (err) return;
         msg.respond(JSON.stringify(metadata()));
@@ -243,12 +245,23 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
         return false;
       }
       if (next === skillsJson) return false;
+      // Commit the new list only once add() succeeded, so a failure is retried on the next call.
+      const previous = skillsJson;
       skillsJson = next;
       try {
         await svc?.stop();
-        if (!stopped) svc = await add();
+        svc = null;
+        if (stopped) return true;
+        const added = await add();
+        if (stopped) {
+          // stop() ran while add() was pending: don't leave a service answering after shutdown.
+          await added.stop().catch((e) => log.warn("NATS micro service stop failed", { error: String(e) }));
+          return true;
+        }
+        svc = added;
         log.info("NATS micro service re-registered: skills changed");
       } catch (e) {
+        skillsJson = previous;
         log.warn("NATS micro service re-register failed", { error: String(e) });
       }
       return true;

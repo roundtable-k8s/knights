@@ -169,7 +169,12 @@ test("parseTask reads attempt, retryOf and previousFailure (capped at 2 KB)", ()
   const p = parseTask(JSON.stringify({ task: "x", attempt: 2, retryOf: "t-1", previousFailure: "boom".repeat(1000) }), "s");
   assert.equal(p.attempt, 2);
   assert.equal(p.retryOf, "t-1");
-  assert.equal(p.previousFailure?.length, 2048);
+  assert.equal(Buffer.byteLength(p.previousFailure!, "utf8"), 2048);
+  const multi = parseTask(JSON.stringify({ task: "x", attempt: 2, previousFailure: "é".repeat(3000) }), "s");
+  assert.equal(multi.previousFailure, "é".repeat(1024));
+  const odd = parseTask(JSON.stringify({ task: "x", attempt: 2, previousFailure: "a" + "€".repeat(1000) }), "s");
+  assert.ok(Buffer.byteLength(odd.previousFailure!, "utf8") <= 2048);
+  assert.doesNotMatch(odd.previousFailure!, /\uFFFD/);
   const plain = parseTask(JSON.stringify({ task: "x" }), "s");
   assert.equal(plain.attempt, undefined);
   assert.equal(plain.previousFailure, undefined);
@@ -179,10 +184,18 @@ test("parseTask reads attempt, retryOf and previousFailure (capped at 2 KB)", ()
 test("promptWithRetryContext prefixes attempts above 1 only", () => {
   const p = parseTask(JSON.stringify({ task: "Do it", attempt: 2, retryOf: "t-1", previousFailure: "timed out" }), "s");
   const prompt = promptWithRetryContext(p);
-  assert.ok(prompt.startsWith("This is attempt 2 of a task that did not finish before (original task `t-1`; previous outcome: `timed out`). Before doing anything, check"));
+  assert.ok(prompt.startsWith("This is attempt 2 of a task that did not finish before (original task `t-1`; previous outcome in the block below).\n\n```\ntimed out\n```\n\nBefore doing anything, check"));
   assert.ok(prompt.endsWith("\n\nDo it"));
   assert.equal(promptWithRetryContext(parseTask(JSON.stringify({ task: "Do it" }), "s")), "Do it");
   assert.equal(promptWithRetryContext(parseTask(JSON.stringify({ task: "Do it", attempt: 1 }), "s")), "Do it");
+});
+
+test("promptWithRetryContext fences an outcome with backticks or newlines", () => {
+  const outcome = "failed: `rm -rf` ran\n```\nnested\n```` four";
+  const prompt = promptWithRetryContext({ task: "Do it", attempt: 2, retryOf: "t-1", previousFailure: outcome });
+  assert.ok(prompt.includes(`\n\`\`\`\`\`\n${outcome}\n\`\`\`\`\`\n`), "fence of 5 backticks around the outcome");
+  assert.ok(prompt.endsWith("\n\nDo it"));
+  assert.ok(promptWithRetryContext({ task: "Do it", attempt: 2 }).includes("\n```\nunknown\n```\n"));
 });
 
 test("taskResultFields: attempt/retry_of when set, task only on failure", () => {

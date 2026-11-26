@@ -166,3 +166,89 @@ describe("knight micro service against a real nats-server", { skip: !hasBin(NATS
     await assert.rejects(client.request("$SRV.PING.roundtable-knight", "", { timeout: 300 }));
   });
 });
+
+describe("refreshSkills with an injected Svcm", () => {
+  const mkSkills = () => {
+    const dir = mkdtempSync(join(tmpdir(), "skills-"));
+    cpSync(FIXTURE, dir, { recursive: true });
+    return dir;
+  };
+  const addSkill = (dir: string, name: string) => {
+    mkdirSync(join(dir, "sec", name), { recursive: true });
+    writeFileSync(join(dir, "sec", name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\n`);
+  };
+  /** A fake registry: each add() yields a service whose stop() is recorded; `gate` can hold or fail add(). */
+  const fake = () => {
+    const state = { adds: 0, live: 0, failNext: false, gate: null as Promise<void> | null };
+    const createSvcm = () => ({
+      async add() {
+        state.adds++;
+        if (state.gate) await state.gate;
+        if (state.failNext) {
+          state.failNext = false;
+          throw new Error("add failed");
+        }
+        state.live++;
+        let stopped = false;
+        return {
+          stop: async () => {
+            if (!stopped) state.live--;
+            stopped = true;
+            return null;
+          },
+          info: () => ({ id: `svc-${state.adds}` }),
+          addEndpoint: () => {},
+        } as unknown as Awaited<ReturnType<import("@nats-io/services").Svcm["add"]>>;
+      },
+    });
+    return { state, createSvcm };
+  };
+  const start = (skillsDir: string, createSvcm: () => { add(): Promise<never> } | unknown) =>
+    startKnightService({
+      nc: {} as NatsConnection,
+      knightName: "K",
+      table: "t",
+      domain: "d",
+      model: "m",
+      runtime: "pi-knight",
+      version: "1",
+      pod: "p",
+      skillsDir,
+      maxConcurrentTasks: 1,
+      getActive: () => 0,
+      getCounts: () => ({ total: 0, failed: 0 }),
+      createSvcm: createSvcm as never,
+    });
+
+  it("retries on the next call when add() fails", async () => {
+    const dir = mkSkills();
+    const { state, createSvcm } = fake();
+    const svc = await start(dir, createSvcm);
+    const before = svc.metadata()["skills"];
+    addSkill(dir, "extra");
+    state.failNext = true;
+    await svc.refreshSkills();
+    assert.equal(svc.metadata()["skills"], before, "failed add does not commit the new list");
+    assert.equal(state.live, 0);
+    assert.equal(await svc.refreshSkills(), true, "next call retries");
+    assert.match(svc.metadata()["skills"]!, /extra/);
+    assert.equal(state.live, 1);
+    assert.equal(await svc.refreshSkills(), false, "now unchanged");
+    await svc.stop();
+  });
+
+  it("stop() while add() is pending leaves no live service", async () => {
+    const dir = mkSkills();
+    const { state, createSvcm } = fake();
+    const svc = await start(dir, createSvcm);
+    addSkill(dir, "extra");
+    let release!: () => void;
+    state.gate = new Promise<void>((r) => (release = r));
+    const refreshing = svc.refreshSkills();
+    await sleep(10);
+    await svc.stop();
+    release();
+    await refreshing;
+    assert.equal(state.live, 0, "the late service was stopped");
+  });
+});

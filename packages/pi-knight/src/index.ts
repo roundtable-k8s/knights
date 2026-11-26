@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { skillsExpected, waitForSkills } from "./skill-wait.js";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
@@ -31,8 +31,7 @@ async function main(): Promise<void> {
     exit: (code) => process.exit(code),
   });
   telemetry = await startTelemetry({ service: "pi-knight", knight: config.knightName, table: config.table });
-  migrateMemory({ memoryDir: config.memoryDir, dataDir: dataPaths().dataDir });
-  ensureMemoryDirs(resolveMemoryPaths({ memoryDir: config.memoryDir, memoryRoot: config.memoryRoot, dataDir: dataPaths().dataDir }));
+  const memoryProblem = setupMemory(config, dataPaths().dataDir, setDegradedReason);
 
   log.info("Pi-Knight starting", {
     model: config.knightModel,
@@ -61,7 +60,7 @@ async function main(): Promise<void> {
   await preflightModelUntilReady((await resolveModel(config.knightModel)).model, {
     onAttemptFailed: (error) => setDegradedReason(`model preflight failed: ${error}`),
   });
-  setDegradedReason(null);
+  setDegradedReason(memoryProblem);
 
   // Discover skills using Pi SDK's built-in agentskills.io loader
   // Retry for git-sync race at startup
