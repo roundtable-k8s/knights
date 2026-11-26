@@ -3,6 +3,7 @@ import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { initRoster, resetRoster, type KnightCard } from "@roundtable/knight-core";
 import { roundtableTools } from "../src/tools.js";
+import { startParentRoster } from "../src/parent-roster.js";
 import { buildPreamble } from "../src/prompt.js";
 import { loadConfig } from "../src/config.js";
 
@@ -62,4 +63,16 @@ test("the preamble tells the model to call find_knights before delegating", () =
   const env = { KNIGHT_NAME: "gawain", SUBSCRIBE_TOPICS: "x" } as NodeJS.ProcessEnv;
   const p = buildPreamble(loadConfig(env));
   assert.match(p, /call mcp__roundtable__find_knights/);
+});
+
+test("the cli runtime does not start the parent roster; the sdk runtime does", () => {
+  const started: string[] = [];
+  const fake = ((_env: NodeJS.ProcessEnv, self: string) => {
+    started.push(self);
+    return { start: async () => {} };
+  }) as unknown as typeof initRoster;
+  assert.equal(startParentRoster("cli", {}, "gawain", fake), null);
+  assert.deepEqual(started, [], "cli: no roster, so no KV watch");
+  assert.notEqual(startParentRoster("sdk", {}, "gawain", fake), null);
+  assert.deepEqual(started, ["gawain"]);
 });

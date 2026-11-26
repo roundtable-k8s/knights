@@ -5,7 +5,8 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { waitForSkills } from "./skills.js";
@@ -89,7 +90,7 @@ export async function main(): Promise<void> {
   startIntrospect({ ...introspectOptions(config), prefix: natsPrefix(config) });
   // Agent-card roster for find_knights / nats_request by name: a KV watch on <table>.* (none without KNIGHT_CARDS_BUCKET).
   // Only the sdk runtime runs the tools in this process; the cli runtime's stdio MCP child starts its own roster.
-  if (config.runtime === "sdk") void initRoster(process.env, config.knightName, getConnection)?.start();
+  startParentRoster(config.runtime, process.env, config.knightName);
 
   let activeCount = 0;
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
