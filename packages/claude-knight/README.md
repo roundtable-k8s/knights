@@ -172,22 +172,10 @@ the token. Without `GITHUB_TOKEN_FILE` the old `gh auth git-credential` / `GH_TO
 
 Set `spec.concurrency: 1` unless the plan has headroom: each concurrent task is its own Claude Code process.
 
-### Mise tools and the egress allowlist
+### Tools
 
-The image bakes its baseline tools (ripgrep, python, yq) at build time; start-up installs nothing by default. The
-entrypoint runs `mise install` only when `/config/mise.toml` (`spec.tools.mise`) lists at least one tool under
-`[tools]`. An empty or comment-only file makes no network request. The install is bounded by
-`MISE_INSTALL_TIMEOUT` (seconds, default `120`); on timeout or failure it logs one `WARNING: mise install gave up …
-could not reach <host>` line and the runtime starts anyway. `apt` is bounded the same
-way by `STARTUP_APT_TIMEOUT` (default `180`). Each logs a WARNING naming the host to allow, and every start-up phase
-logs its elapsed time.
-
-A knight with `spec.tools.mise` needs these hosts on its egress allowlist, plus the host of each tool's own
-download:
-
-- `mise-versions.jdx.dev` — version lists
-- `api.github.com` — release metadata
-- `github.com`, `objects.githubusercontent.com` — release downloads (for `github:` tools)
+The image bakes its baseline tools (ripgrep, python, yq) at build time; start-up installs nothing. Extra tools
+come from the operator's tools image mounted at `/nix` (`spec.tools.nix`).
 
 See `examples/knight-galahad-claude.yaml` for a complete Knight.
 

@@ -130,7 +130,7 @@ describe("startup-signals.sh (entrypoint)", () => {
       const src = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "scripts", "entrypoint.sh"), "utf8");
       const statements = src.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#"));
       assert.equal(statements[0], '. "$(dirname "$0")/startup-signals.sh"', pkg);
-      assert.ok(src.includes("rt_run rt_mise"), `${pkg}: rt_run rt_mise`);
+      assert.doesNotMatch(src, /mise-\w+\.sh|rt_mise|\/config\/mise\.toml/, `${pkg}: per-knight mise installer removed`);
       assert.doesNotMatch(src, /rt_bootstrap_nix|nix build|nix-lib|nix-env/, `${pkg}: legacy Nix installers removed`);
       assert.equal(statements.at(-1), "exec node dist/index.js", pkg);
       const dockerfile = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "Dockerfile"), "utf8");
