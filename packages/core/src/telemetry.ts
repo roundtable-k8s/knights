@@ -1,6 +1,7 @@
 import { SpanStatusCode, ROOT_CONTEXT, context, propagation, trace, type Context, type Span, type SpanAttributes } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { boundText } from "./activity.js";
 import { log } from "./logger.js";
 
 const TRACER_NAME = "@roundtable/knight-core";
@@ -205,4 +206,37 @@ export function endSpan(
 /** The current trace context, to parent spans started later from an event callback. */
 export function activeTraceContext(): Context {
   return context.active();
+}
+
+const DEFAULT_CONTENT_MAX_BYTES = 16 * 1024;
+
+/** Content capture is on by default; `ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false` (or `0`) turns it off. */
+export function captureContent(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env["ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT"]?.trim().toLowerCase();
+  return !(v === "false" || v === "0");
+}
+
+/** Per-attribute cap in bytes (`ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES`, default 16 KiB). */
+export function contentMaxBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env["ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES"]);
+  return Number.isInteger(n) && n > 0 ? n : DEFAULT_CONTENT_MAX_BYTES;
+}
+
+/**
+ * Set a content attribute (prompt, response, tool arguments or result) on `span`: redacted with
+ * `redactSecrets`, cut to the byte cap with `roundtable.content.truncated=true` when cut. Does
+ * nothing when content capture is off or `value` is empty. Returns whether it was set.
+ */
+export function setContentAttribute(span: Span, key: string, value: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!captureContent(env) || !value) return false;
+  const max = contentMaxBytes(env);
+  let { text, truncated } = boundText(value, max);
+  if (Buffer.byteLength(text) > max) {
+    // Cut on a byte boundary without leaving a split multi-byte character behind.
+    text = Buffer.from(text).subarray(0, max).toString("utf8").replace(/\uFFFD+$/, "");
+    truncated = true;
+  }
+  span.setAttribute(key, text);
+  if (truncated) span.setAttribute("roundtable.content.truncated", true);
+  return true;
 }

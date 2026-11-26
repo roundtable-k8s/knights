@@ -57,7 +57,10 @@ test("two turns and one tool call export chat/execute_tool children of invoke_ag
   assert.equal(tools[0].attributes["gen_ai.tool.name"], "bash");
   assert.equal(tools[0].attributes["gen_ai.tool.call.id"], "c1");
   assert.equal(tools[0].status.code, 0);
-  assert.ok(!JSON.stringify(spans.map((s) => s.attributes)).includes("SECRET"));
+  assert.match(String(chats[0].attributes["gen_ai.output.messages"]), /SECRET/);
+  assert.equal(tools[0].attributes["gen_ai.tool.call.arguments"], '{"cmd":"SECRET"}');
+  assert.equal(tools[0].attributes["gen_ai.tool.call.result"], "SECRET");
+  assert.equal(chats[0].attributes["gen_ai.system_instructions"], undefined);
   await t.shutdown();
 });
 
@@ -91,4 +94,58 @@ test("no spans and no errors when no SDK is registered", async () => {
   const s = new SessionSpans("p/m", { knight: "k" });
   for (const e of events(true)) s.handle(e);
   s.endAll();
+});
+
+const TOKEN = "sk-ant-api03-abcdefghijklmnop";
+
+async function run(env: Record<string, string> = {}, evs: any[] = events()) {
+  Object.assign(process.env, env);
+  const { exporter, t, processor } = await setup();
+  await withTaskSpan({ taskId: "t", knight: "k" }, async () => {
+    const s = new SessionSpans("p/m", { knight: "k" }, undefined, () => `system ${TOKEN}`);
+    for (const e of evs) s.handle(e);
+    s.endAll();
+  });
+  await processor.forceFlush();
+  const spans = exporter.getFinishedSpans();
+  await t.shutdown();
+  return spans;
+}
+const CONTENT_ENV = ["ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT", "ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES"];
+afterEach(() => { for (const k of CONTENT_ENV) delete process.env[k]; });
+
+test("secrets are redacted before reaching any span attribute", async () => {
+  const evs = [
+    { type: "turn_start" },
+    { type: "message_end", message: { role: "user", content: `use ${TOKEN}` } },
+    { type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: { cmd: TOKEN } },
+    { type: "tool_execution_end", toolCallId: "c", toolName: "bash", result: { content: [{ type: "text", text: TOKEN }] } },
+    msg({ content: [{ type: "text", text: TOKEN }] }),
+  ];
+  const spans = await run({}, [{ type: "turn_start" }, ...evs]);
+  const all = JSON.stringify(spans.map((s) => s.attributes));
+  assert.ok(!all.includes(TOKEN));
+  assert.match(all, /REDACTED/i);
+  assert.match(String(spans.find((s) => s.name === "chat p/m")!.attributes["gen_ai.system_instructions"]), /system/);
+});
+
+test("oversize content is cut at the cap and flagged", async () => {
+  const big = "a".repeat(5000);
+  const spans = await run({ ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES: "100" }, [
+    { type: "tool_execution_start", toolCallId: "c", toolName: "bash", args: big },
+    { type: "tool_execution_end", toolCallId: "c", toolName: "bash", result: { content: "ok" } },
+  ]);
+  const tool = spans.find((s) => s.name === "execute_tool bash")!;
+  assert.equal(Buffer.byteLength(String(tool.attributes["gen_ai.tool.call.arguments"])), 100);
+  assert.equal(tool.attributes["roundtable.content.truncated"], true);
+  assert.equal(tool.attributes["gen_ai.tool.call.result"], "ok");
+});
+
+test("ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT=false leaves content unset but keeps tokens", async () => {
+  const spans = await run({ ROUNDTABLE_TELEMETRY_CAPTURE_CONTENT: "false" });
+  const keys = spans.flatMap((s) => Object.keys(s.attributes));
+  assert.ok(!keys.some((k) => /input\.messages|output\.messages|system_instructions|tool\.call\.(arguments|result)|content\.truncated/.test(k)));
+  const chat = spans.find((s) => s.name === "chat p/m")!;
+  assert.equal(chat.attributes["gen_ai.usage.input_tokens"], 10);
+  assert.ok(spans.some((s) => s.attributes["gen_ai.tool.name"] === "bash"));
 });
