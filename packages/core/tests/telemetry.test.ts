@@ -137,3 +137,32 @@ test("a throwing task still ends its span with error status", async () => {
   await t.shutdown();
   assert.equal(s!.status.code, 2);
 });
+
+async function spanWithParent(parent?: { traceparent?: string; tracestate?: string }) {
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const t = await startTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] });
+  let logged = "";
+  await withTaskSpan({ taskId: "t", knight: "k", parent }, async () => { logged = trace.getActiveSpan()!.spanContext().traceId; return 1; });
+  await processor.forceFlush();
+  const spans = exporter.getFinishedSpans();
+  await t.shutdown();
+  assert.equal(spans.length, 1);
+  assert.equal(logged, spans[0]!.spanContext().traceId);
+  return spans[0]!;
+}
+
+test("a valid traceparent makes the task span its child", async () => {
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const s = await spanWithParent({ traceparent: `00-${traceId}-00f067aa0ba902b7-01`, tracestate: "a=b" });
+  assert.equal(s.spanContext().traceId, traceId);
+  assert.equal(s.parentSpanContext?.spanId, "00f067aa0ba902b7");
+});
+
+test("missing or malformed trace headers give a root span", async () => {
+  for (const parent of [undefined, {}, { traceparent: "garbage" }, { traceparent: `00-${"0".repeat(32)}-${"0".repeat(16)}-01` }]) {
+    trace.disable(); // a fresh SDK per case
+    const s = await spanWithParent(parent);
+    assert.equal(s.parentSpanContext, undefined);
+  }
+});

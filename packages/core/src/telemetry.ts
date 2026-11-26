@@ -1,4 +1,4 @@
-import { SpanStatusCode, trace, type Span } from "@opentelemetry/api";
+import { context, propagation, ROOT_CONTEXT, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { log } from "./logger.js";
@@ -87,6 +87,8 @@ export interface TaskSpanAttributes {
   attempt?: number;
   /** Requested model. */
   model?: string;
+  /** W3C trace context from the task message headers; the span becomes its child when valid. */
+  parent?: { traceparent?: string; tracestate?: string };
 }
 
 export interface TaskSpanOutcome {
@@ -99,7 +101,8 @@ export interface TaskSpanOutcome {
 }
 
 /**
- * Run `fn` inside a new root `invoke_agent <knight>` span (no parent until NATS trace propagation lands).
+ * Run `fn` inside a new `invoke_agent <knight>` span. It is a child of `attrs.parent` (the NATS
+ * `traceparent`/`tracestate` headers) when that is a valid trace context, otherwise a root span.
  * With no SDK registered the tracer is a no-op and this just calls `fn`.
  */
 export function withTaskSpan<T>(
@@ -118,7 +121,19 @@ export function withTaskSpan<T>(
   if (attrs.runId) attributes["roundtable.run.id"] = attrs.runId;
   if (attrs.attempt) attributes["roundtable.attempt"] = attrs.attempt;
   if (attrs.model) attributes["gen_ai.request.model"] = attrs.model;
-  return tracer.startActiveSpan(`invoke_agent ${attrs.knight}`, { root: true, attributes }, async (span: Span) => {
+  let parentCtx = context.active();
+  let root = true;
+  if (attrs.parent?.traceparent) {
+    const carrier: Record<string, string> = { traceparent: attrs.parent.traceparent };
+    if (attrs.parent.tracestate) carrier["tracestate"] = attrs.parent.tracestate;
+    const extracted = propagation.extract(ROOT_CONTEXT, carrier);
+    const sc = trace.getSpanContext(extracted);
+    if (sc && trace.isSpanContextValid(sc)) {
+      parentCtx = extracted;
+      root = false;
+    }
+  }
+  return tracer.startActiveSpan(`invoke_agent ${attrs.knight}`, { ...(root ? { root: true } : {}), attributes }, parentCtx, async (span: Span) => {
     try {
       const result = await fn();
       if (outcome) {

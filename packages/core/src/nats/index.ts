@@ -100,15 +100,37 @@ const FETCH_EXPIRES_MS = 5_000;
 export interface PulledMsg {
   data: Uint8Array;
   subject: string;
+  /** NATS message headers (nats.js MsgHdrs: `get` returns "" for a missing key). Optional. */
+  headers?: { get(key: string): string | undefined };
   ack(): void;
   working(): void;
   term(reason?: string): void;
   // No nak(): with max_deliver 1 a nak'd task is never delivered again (MAX_DELIVERIES at once), i.e. lost.
 }
 
+export interface TraceContext {
+  traceparent?: string;
+  tracestate?: string;
+}
+
+function traceContextOf(msg: PulledMsg): TraceContext | undefined {
+  let traceparent: string | undefined;
+  let tracestate: string | undefined;
+  try {
+    traceparent = msg.headers?.get("traceparent") || undefined;
+    tracestate = msg.headers?.get("tracestate") || undefined;
+  } catch {
+    return undefined;
+  }
+  if (!traceparent && !tracestate) return undefined;
+  return { ...(traceparent ? { traceparent } : {}), ...(tracestate ? { tracestate } : {}) };
+}
+
 /** A task taken from the stream. It stays un-acked until `ack()`; call `working()` to extend its ack window. */
 export interface TaskDelivery {
   task: ParsedTask;
+  /** W3C trace context the publisher put in the message headers; absent when it sent none. */
+  traceContext?: TraceContext;
   /** In-progress ack: resets the server's ack_wait timer. */
   working(): void;
   /** Final ack — call once the task finished and its result was published. */
@@ -224,7 +246,8 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
       ...(parsed.attempt ? { attempt: parsed.attempt } : {}),
       ...(parsed.retryOf ? { retryOf: parsed.retryOf } : {}),
     });
-    opts.onTask({ task: parsed, working: () => msg.working(), ack: () => msg.ack() });
+    const traceContext = traceContextOf(msg);
+    opts.onTask({ task: parsed, ...(traceContext ? { traceContext } : {}), working: () => msg.working(), ack: () => msg.ack() });
   }
 
   return {
