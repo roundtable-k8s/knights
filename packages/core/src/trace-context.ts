@@ -14,3 +14,15 @@ export function traceparentEnv(): Record<string, string> {
   if (!sc || !trace.isSpanContextValid(sc)) return {};
   return { TRACEPARENT: `00-${sc.traceId}-${sc.spanId}-${sc.traceFlags.toString(16).padStart(2, "0")}` };
 }
+
+/** `traceparent`/`tracestate` for an outgoing message, from the active span; empty when there is none. */
+export function traceHeaders(): Record<string, string> {
+  const sc = trace.getSpanContext(context.active());
+  if (!sc || !trace.isSpanContextValid(sc)) return {};
+  const out: Record<string, string> = {
+    traceparent: `00-${sc.traceId}-${sc.spanId}-${sc.traceFlags.toString(16).padStart(2, "0")}`,
+  };
+  const state = sc.traceState?.serialize();
+  if (state) out.tracestate = state;
+  return out;
+}

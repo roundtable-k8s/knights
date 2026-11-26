@@ -21,3 +21,4 @@ export * from "./roster.js";
 export * from "./telemetry.js";
 export * from "./trace-context.js";
 export * from "./slots.js";
+export * from "./knight-request.js";

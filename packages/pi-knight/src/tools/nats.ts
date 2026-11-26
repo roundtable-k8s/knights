@@ -12,7 +12,7 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getJetStream, getConnection, log, resolveRequestTarget } from "@roundtable/knight-core";
+import { publishOutOfBand, requestKnight } from "@roundtable/knight-core";
 import { findKnightsTool } from "./find-knights.js";
 
 
@@ -70,24 +70,9 @@ export const natsPublishTool = defineTool({
   ],
   parameters: PublishParams,
   async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-    const js = getJetStream();
-    if (!js) return textResult("Error: NATS not connected");
-
-    if (!params.message || params.message.trim().length === 0) {
-      log.warn("nats_publish: empty message rejected", { subject: params.subject });
-      return textResult("Error: Cannot publish empty message. Provide a non-empty message payload.");
-    }
-
-    try {
-      await js.publish(params.subject, params.message);
-      log.info("nats_publish tool", { subject: params.subject, size: params.message.length });
-      // terminate: the message is delivered, so no follow-up LLM turn is needed.
-      return { ...textResult(`Published to ${params.subject} (${params.message.length} bytes)`), terminate: true };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error("nats_publish failed", { subject: params.subject, error: msg });
-      return textResult(`Error publishing to ${params.subject}: ${msg}`);
-    }
+    const r = await publishOutOfBand(params.subject, params.message);
+    // terminate: the message is delivered, so no follow-up LLM turn is needed.
+    return r.ok ? { ...textResult(r.text), terminate: true } : textResult(r.text);
   },
 });
 
@@ -148,92 +133,17 @@ const natsRequestTool = defineTool({
   ],
   parameters: RequestParams,
   async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-    if (!params.task || params.task.trim().length === 0) {
-      log.warn("nats_request: empty task rejected", { knight: params.knight, domain: params.domain });
-      return textResult("Error: Cannot send empty task. Provide a non-empty task description.");
-    }
-
-    // Without a domain, look it up from the target's agent card (unknown names are rejected).
-    const target = await resolveRequestTarget(params.knight, params.domain);
-    if ("error" in target) return textResult(`Error: ${target.error}`);
-    const { knight, domain } = target;
-
-    const js = getJetStream();
-    const nc = getConnection();
-    if (!js || !nc) return textResult("Error: NATS not connected");
-
-    const timeoutMs = params.timeout_ms ?? 600_000; // 10 min default
-    const taskId = `${knight}-xreq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const taskSubject = `${_natsPrefix}.tasks.${domain}.${taskId}`;
-    const resultSubject = `${_natsPrefix}.results.${taskId}`;
-
-    log.info("nats_request: dispatching", {
-      knight,
-      domain,
-      taskId,
-      timeoutMs,
+    const r = await requestKnight({
+      knightName: _knightName,
       prefix: _natsPrefix,
+      knight: params.knight,
+      domain: params.domain,
+      task: params.task,
+      timeoutMs: params.timeout_ms,
+      signal,
+      onProgress: (t) => onUpdate?.(textResult(t)),
     });
-
-    onUpdate?.(textResult(`Dispatching to ${knight} (${domain})…`));
-
-    try {
-      // Subscribe to result subject BEFORE publishing the task
-      const sub = nc.subscribe(resultSubject, { max: 1, timeout: timeoutMs });
-
-      // Publish the task
-      const payload = JSON.stringify({
-        task: params.task,
-        task_id: taskId,
-        domain,
-        from: _knightName.toLowerCase(),
-        dispatched_by: _knightName,
-        timestamp: new Date().toISOString(),
-        metadata: { timeout_ms: timeoutMs, table_prefix: _natsPrefix },
-      });
-      await js.publish(taskSubject, payload);
-      log.info("nats_request: task published", { taskId, subject: taskSubject });
-      onUpdate?.(textResult(`Task sent to ${knight}; awaiting response (timeout ${Math.round(timeoutMs / 1000)}s)…`));
-
-      // Wait for result
-      for await (const msg of sub) {
-        const raw = msg.string();
-        try {
-          const result = JSON.parse(raw);
-          const success = result.success ?? true;
-          const text = result.result ?? raw;
-          const cost = result.cost ?? 0;
-          const duration = result.duration_ms ?? 0;
-
-          log.info("nats_request: response received", {
-            taskId,
-            success,
-            cost,
-            durationMs: duration,
-          });
-
-          if (success) {
-            return textResult(
-              `Response from ${knight} (${Math.round(duration / 1000)}s, $${cost.toFixed(4)}):\n\n${text}`,
-            );
-          } else {
-            return textResult(`${knight} reported failure: ${text}`);
-          }
-        } catch {
-          return textResult(`Raw response from ${knight}: ${raw}`);
-        }
-      }
-
-      // Sub exhausted without message = timeout
-      return textResult(`Timeout: ${knight} did not respond within ${Math.round(timeoutMs / 1000)}s`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (signal?.aborted) {
-        return textResult(`Request to ${knight} was cancelled`);
-      }
-      log.error("nats_request failed", { taskId, error: msg });
-      return textResult(`Error requesting from ${knight}: ${msg}`);
-    }
+    return textResult(r.text);
   },
 });
 
