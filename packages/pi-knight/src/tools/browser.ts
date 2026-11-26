@@ -9,44 +9,16 @@
  * Requires BROWSER_ENABLED=true (set by operator when spec.capabilities.browser is true).
  */
 
-import { execSync } from "child_process";
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
+import { browserEnabled, runBrowser } from "@roundtable/knight-core";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 
 const BROWSER_DISABLED_MSG =
   "Browser capability not enabled. Set spec.capabilities.browser: true in Knight CR.";
 
-const CDP_URL = process.env.BROWSER_CDP_URL || "http://localhost:9222";
-
-function browserEnabled(): boolean {
-  return process.env.BROWSER_ENABLED === "true";
-}
-
 function textResult(text: string): AgentToolResult<void> {
   return { content: [{ type: "text", text }], details: undefined };
-}
-
-function runBrowser(args: string, timeoutMs = 30000): string {
-  // Always reconnect before every command — agent-browser daemon can die
-  // between calls. connect is idempotent and fast when already connected.
-  try {
-    execSync(`agent-browser connect ${CDP_URL}`, { timeout: 10000, encoding: "utf-8", stdio: "pipe" });
-  } catch {
-    // Best-effort — command may still work via existing daemon
-  }
-
-  try {
-    const result = execSync(`agent-browser ${args}`, {
-      timeout: timeoutMs,
-      encoding: "utf-8",
-    });
-    return result.trim();
-  } catch (err: any) {
-    const stderr = err.stderr?.toString() || "";
-    const stdout = err.stdout?.toString() || "";
-    throw new Error(stderr || stdout || err.message);
-  }
 }
 
 // --- Tool Definitions ---
@@ -63,7 +35,7 @@ export const browserOpenTool = defineTool({
   async execute(_id, params) {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser(`open "${params.url}"`) || `Navigated to ${params.url}`);
+      return textResult(await runBrowser(["open", params.url]) || `Navigated to ${params.url}`);
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -79,7 +51,7 @@ export const browserSnapshotTool = defineTool({
   async execute() {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser("snapshot", 15000));
+      return textResult(await runBrowser(["snapshot"], 15000));
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -98,7 +70,7 @@ export const browserClickTool = defineTool({
   async execute(_id, params) {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser(`click "${params.ref}"`) || `Clicked ${params.ref}`);
+      return textResult(await runBrowser(["click", params.ref]) || `Clicked ${params.ref}`);
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -118,7 +90,7 @@ export const browserFillTool = defineTool({
   async execute(_id, params) {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser(`fill "${params.ref}" "${params.text}"`) || `Filled ${params.ref}`);
+      return textResult(await runBrowser(["fill", params.ref, params.text]) || `Filled ${params.ref}`);
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -133,7 +105,7 @@ export const browserGetTextTool = defineTool({
   async execute(_id, params) {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser(`get text "${params.ref}"`));
+      return textResult(await runBrowser(["get", "text", params.ref]));
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -151,10 +123,8 @@ export const browserScreenshotTool = defineTool({
   async execute(_id, params) {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      let args = "screenshot";
-      if (params.full) args += " --full";
-      if (params.path) args += ` "${params.path}"`;
-      return textResult(runBrowser(args) || "Screenshot captured");
+      const args = ["screenshot", ...(params.full ? ["--full"] : []), ...(params.path ? [params.path] : [])];
+      return textResult((await runBrowser(args)) || "Screenshot captured");
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -174,7 +144,7 @@ export const browserEvalTool = defineTool({
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
       const b64 = Buffer.from(params.js).toString("base64");
-      return textResult(runBrowser(`eval -b "${b64}"`, 30000));
+      return textResult(await runBrowser(["eval", "-b", b64], 30000));
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
@@ -189,7 +159,7 @@ export const browserCloseTool = defineTool({
   async execute() {
     if (!browserEnabled()) return textResult(BROWSER_DISABLED_MSG);
     try {
-      return textResult(runBrowser("close") || "Browser closed");
+      return textResult(await runBrowser(["close"]) || "Browser closed");
     } catch (err: any) {
       return textResult(`Error: ${err.message}`);
     }
