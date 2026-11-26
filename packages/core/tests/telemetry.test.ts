@@ -177,8 +177,9 @@ test("task span carries runtime, chain, step and token usage; absent when unset"
     () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50 } }),
   );
   await withTaskSpan({ taskId: "b", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 7, output: 3 } }));
+  await withTaskSpan({ taskId: "c", knight: "k" }, async () => 1, () => ({ success: true, tokens: { input: 100, output: 20, cacheRead: 50, cacheWrite: 30 } }));
   await processor.forceFlush();
-  const [a, b] = exporter.getFinishedSpans();
+  const [a, b, c] = exporter.getFinishedSpans();
   await t.shutdown();
   assert.equal(a!.attributes["roundtable.knight.runtime"], "claude");
   assert.equal(a!.attributes["roundtable.chain"], "c1");
@@ -186,7 +187,10 @@ test("task span carries runtime, chain, step and token usage; absent when unset"
   assert.equal(a!.attributes["gen_ai.usage.input_tokens"], 150);
   assert.equal(a!.attributes["gen_ai.usage.output_tokens"], 20);
   assert.equal(a!.attributes["gen_ai.usage.cache_read.input_tokens"], 50);
-  for (const k of ["roundtable.chain", "roundtable.chain.step", "roundtable.knight.runtime", "gen_ai.usage.cache_read.input_tokens"]) {
+  assert.equal(a!.attributes["gen_ai.usage.cache_creation.input_tokens"], undefined);
+  assert.equal(c!.attributes["gen_ai.usage.input_tokens"], 180);
+  assert.equal(c!.attributes["gen_ai.usage.cache_creation.input_tokens"], 30);
+  for (const k of ["roundtable.chain", "roundtable.chain.step", "roundtable.knight.runtime", "gen_ai.usage.cache_read.input_tokens", "gen_ai.usage.cache_creation.input_tokens"]) {
     assert.equal(k in b!.attributes, false, k);
   }
   assert.equal(b!.attributes["gen_ai.usage.input_tokens"], 7);
