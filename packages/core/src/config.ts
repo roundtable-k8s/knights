@@ -2,6 +2,9 @@ import { log } from "./logger.js";
 
 export type Env = NodeJS.ProcessEnv;
 
+/** Default total time publishResult retries a failing publish (RESULT_PUBLISH_RETRY_MS). The one place this default is defined. */
+export const RESULT_PUBLISH_RETRY_MS = 60_000;
+
 /** The config both runtimes share: the env contract the operator sets on every knight pod. */
 export interface BaseKnightConfig {
   knightName: string;
@@ -112,7 +115,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     table: env["ROUNDTABLE_TABLE"]?.trim() || "none",
     natsUrl: env["NATS_URL"] ?? "nats://nats.database.svc.cluster.local:4222",
     natsResultsPrefix: env["NATS_RESULTS_PREFIX"] ?? "fleet-a.results",
-    resultPublishRetryMs: positiveIntEnv(env, "RESULT_PUBLISH_RETRY_MS", 60_000, { min: 0 }),
+    resultPublishRetryMs: positiveIntEnv(env, "RESULT_PUBLISH_RETRY_MS", RESULT_PUBLISH_RETRY_MS, { min: 0 }),
     resultMaxBytes: positiveIntEnv(env, "RESULT_MAX_BYTES", 512 * 1024, { min: 1 }),
     metricsPort: intEnv(env, "METRICS_PORT", 3000),
     logLevel: env["LOG_LEVEL"] ?? "info",

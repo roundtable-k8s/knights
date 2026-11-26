@@ -11,6 +11,9 @@ import {
   type ConsumerConfig,
 } from "@nats-io/jetstream";
 import { log } from "../logger.js";
+import { RESULT_PUBLISH_RETRY_MS } from "../config.js";
+
+export { RESULT_PUBLISH_RETRY_MS };
 import { RESULT_MAX_BYTES, assertTaskResult, capResultText, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 const decoder = new TextDecoder();
@@ -76,15 +79,17 @@ export async function connectNats(
   (async () => {
     if (!nc) return;
     for await (const status of nc.status()) {
-      if (status.type === "disconnect" || status.type === "error") {
-        connected = false;
-        log.warn("NATS disconnected", { type: status.type });
-        onStatus?.(false);
-      } else if (status.type === "reconnect") {
-        connected = true;
-        log.info("NATS reconnected");
-        onStatus?.(true);
+      if (status.type === "error") {
+        // e.g. a permission violation on one subject: the connection is still up.
+        log.warn("NATS error status", { error: String((status as { error?: unknown }).error ?? "") });
+        continue;
       }
+      const next = connectionStateFor(status.type, connected);
+      if (next === connected) continue;
+      connected = next;
+      if (next) log.info("NATS reconnected");
+      else log.warn("NATS disconnected", { type: status.type });
+      onStatus?.(next);
     }
   })();
 
@@ -463,6 +468,16 @@ export class TaskTracker {
   }
 }
 
+/** Budget for each JetStream API call findResult makes; an unreadable results stream must not delay the lost result. */
+export const FIND_RESULT_TIMEOUT_MS = 2_000;
+
+/** New `connected` value for a NATS status event: false on disconnect/close, true on reconnect, unchanged otherwise (an `error` status leaves the connection up). */
+export function connectionStateFor(statusType: string, current: boolean): boolean {
+  if (statusType === "disconnect" || statusType === "close") return false;
+  if (statusType === "reconnect") return true;
+  return current;
+}
+
 /**
  * The last result published for a task on `<resultsPrefix>.<taskId>`, if a stream stores it.
  * Undefined when there is none or it cannot be looked up (no results stream, no permission).
@@ -471,16 +486,27 @@ export async function findResult(
   jsm: Pick<JetStreamManager, "streams">,
   resultsPrefix: string,
   taskId: string,
+  timeoutMs = FIND_RESULT_TIMEOUT_MS,
 ): Promise<{ success: boolean } | undefined> {
   const subject = `${resultsPrefix}.${taskId}`;
-  try {
+  let timer: NodeJS.Timeout | undefined;
+  const lookup = (async () => {
     const stream = await jsm.streams.find(subject);
     const m = await jsm.streams.getMessage(stream, { last_by_subj: subject });
     if (!m) return undefined;
     const r = m.json<{ success?: unknown }>();
     return { success: r.success === true };
+  })();
+  lookup.catch(() => {}); // a lookup that settles after the timeout must not be an unhandled rejection
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  });
+  try {
+    return await Promise.race([lookup, timeout]);
   } catch {
     return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -540,13 +566,11 @@ function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLos
 
 // Module-level config ref for publishResult (set during subscribe)
 let _config: NatsSubscribeConfig | null = null;
-let _retryMs = 60_000;
+let _retryMs = RESULT_PUBLISH_RETRY_MS;
 let _resultMaxBytes = RESULT_MAX_BYTES;
 /** Room kept for JSON escaping and the envelope when sizing the result text against max_payload. */
 const PAYLOAD_MARGIN_BYTES = 1024;
 
-/** Default total time publishResult retries a failing publish. */
-export const RESULT_PUBLISH_RETRY_MS = 60_000;
 /** While connected, "no responders" is retried this long (a stream electing a leader) before it counts as a missing stream. */
 export const NO_RESPONDERS_RETRY_MS = 10_000;
 const RETRY_INITIAL_DELAY_MS = 500;
