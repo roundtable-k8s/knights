@@ -12,16 +12,12 @@
  * so an explicit pod value always wins. With no OTLP endpoint, nothing is added.
  */
 
+import { telemetryEnabled } from "@roundtable/knight-core";
+
 type Env = NodeJS.ProcessEnv;
 
 function present(env: Env, name: string): boolean {
   return (env[name] ?? "").trim().length > 0;
-}
-
-/** True when the pod asks for OTLP export and has not disabled the SDK. */
-export function claudeCodeTelemetryOn(env: Env): boolean {
-  if ((env["OTEL_SDK_DISABLED"] ?? "").trim().toLowerCase() === "true") return false;
-  return present(env, "OTEL_EXPORTER_OTLP_ENDPOINT") || present(env, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT");
 }
 
 /**
@@ -29,7 +25,7 @@ export function claudeCodeTelemetryOn(env: Env): boolean {
  * Returns {} when no OTLP endpoint is configured.
  */
 export function claudeCodeTelemetryEnv(env: Env = process.env): Record<string, string> {
-  if (!claudeCodeTelemetryOn(env)) return {};
+  if (!telemetryEnabled(env)) return {};
   const out: Record<string, string> = {};
   const set = (name: string, value: string) => {
     if (!present(env, name)) out[name] = value;
@@ -39,8 +35,14 @@ export function claudeCodeTelemetryEnv(env: Env = process.env): Record<string, s
   set("CLAUDE_CODE_ENABLE_TELEMETRY", "1");
   set("CLAUDE_CODE_ENHANCED_TELEMETRY_BETA", "1");
   set("OTEL_TRACES_EXPORTER", "otlp");
-  set("OTEL_METRICS_EXPORTER", "otlp");
-  set("OTEL_LOGS_EXPORTER", "otlp");
+  // Metrics and logs have no traces-endpoint fallback: without a general or per-signal
+  // endpoint they would go to the default localhost:4318, so leave them off.
+  if (present(env, "OTEL_EXPORTER_OTLP_ENDPOINT") || present(env, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")) {
+    set("OTEL_METRICS_EXPORTER", "otlp");
+  }
+  if (present(env, "OTEL_EXPORTER_OTLP_ENDPOINT") || present(env, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")) {
+    set("OTEL_LOGS_EXPORTER", "otlp");
+  }
   // Group the child's spans with ours.
   set("OTEL_SERVICE_NAME", "claude-knight");
 
