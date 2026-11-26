@@ -192,15 +192,21 @@ export async function main(): Promise<void> {
         activity?.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
         metrics.usageLimitHits.labels().inc();
         metrics.tasksTotal.labels("refused").inc();
-        await publishResult(
-          parsed.taskId,
-          buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
-            taskId: parsed.taskId,
-            knight: config.knightName,
-            durationMs: Date.now() - started,
-            parsed,
-          }),
-        );
+        try {
+          await publishResult(
+            parsed.taskId,
+            buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
+              taskId: parsed.taskId,
+              knight: config.knightName,
+              durationMs: Date.now() - started,
+              parsed,
+            }),
+          );
+        } catch (e) {
+          // Same as the normal path: do not fall into the outer catch and publish a made-up failure.
+          log.error("Failed to publish task result — result lost", { taskId: parsed.taskId, error: e instanceof Error ? e.message : String(e) });
+          metrics.tasksTotal.labels("publish_failed").inc();
+        }
         return;
       }
 
