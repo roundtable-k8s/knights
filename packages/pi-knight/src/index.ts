@@ -182,7 +182,7 @@ async function main(): Promise<void> {
 
     try {
       const result = await withTaskSpan(
-        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel },
+        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, parent: delivery.traceContext },
         () => executeTask(taskText, config, controller.signal, runId, taskId, { model, activity }),
         (r) => ({ success: r.success, cost: r.cost, model: r.model, error: r.error }),
       );

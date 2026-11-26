@@ -24,6 +24,22 @@ describe("pull loop (fake fetch)", () => {
     ack() {}, working() {}, term() {},
   });
 
+  it("hands the traceparent/tracestate headers to onTask", async () => {
+    const hdrs = new Map([["traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"], ["tracestate", "a=b"]]);
+    const withHdrs: PulledMsg = { ...msg("h1"), headers: { get: (k) => hdrs.get(k) ?? "" } };
+    const got: TaskDelivery[] = [];
+    let n = 0;
+    const puller = startPullLoop({
+      freeSlots: () => (n < 2 ? 1 : 0),
+      fetch: async () => (async function* () { n++; yield n === 1 ? withHdrs : msg("h2"); })(),
+      onTask: (d) => { got.push(d); },
+    });
+    await waitFor(() => got.length === 2);
+    assert.deepEqual(got[0]!.traceContext, { traceparent: hdrs.get("traceparent"), tracestate: "a=b" });
+    assert.equal(got[1]!.traceContext, undefined);
+    await puller.stop();
+  });
+
   it("requests exactly the number of free slots and nothing when full", async () => {
     let free = 0;
     const requests: number[] = [];

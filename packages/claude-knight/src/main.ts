@@ -194,7 +194,7 @@ export async function main(): Promise<void> {
       const outcome = reserve.blocked
         ? null
         : await withTaskSpan(
-            { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel },
+            { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, parent: delivery.traceContext },
             () => executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model }),
             (o) => ({ success: o.success, cost: o.cost, model: o.model, error: o.error }),
           );
