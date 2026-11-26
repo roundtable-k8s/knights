@@ -369,7 +369,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   });
 
   const pullConsumer = await client.consumers.get(config.natsTasksStream, durableName);
-  const tracker = new TaskTracker(undefined, undefined, undefined, (config.taskTimeoutMs ?? 1_800_000) + ackWaitMs);
+  const tracker = new TaskTracker(undefined, undefined, undefined, (config.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS) + ackWaitMs);
   const stopWatch = watchLostTasks(conn, jsm, {
     stream: config.natsTasksStream,
     durable: durableName,
@@ -386,6 +386,11 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
       let acked = false;
       opts.onTask({
         ...d,
+        // A heartbeat proves the task is alive: the tracker's active bound runs from the last one.
+        working: () => {
+          tracker.touch(id);
+          d.working();
+        },
         ack: () => {
           if (acked) return; // a handler that failed early may ack on its error path too
           acked = true;
@@ -406,8 +411,10 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   };
 }
 
-/** Default bound on an active id: the default task timeout (30 min) plus the heartbeat window. */
-export const DEFAULT_ACTIVE_TTL_MS = 35 * 60_000;
+/** Default per-task timeout (30 min) when the knight config sets none. */
+const DEFAULT_TASK_TIMEOUT_MS = 1_800_000;
+/** Default bound on an active id, measured from its last heartbeat: the default task timeout plus the ack window. */
+const DEFAULT_ACTIVE_TTL_MS = DEFAULT_TASK_TIMEOUT_MS + ACK_WAIT_MS;
 
 /**
  * Task ids this process is running or finished recently. A MAX_DELIVERIES advisory for one of
@@ -437,10 +444,16 @@ export class TaskTracker {
     const cur = this.active.get(taskId);
     const n = cur?.n ?? 0;
     if (n <= 1) this.active.delete(taskId);
-    else this.active.set(taskId, { n: n - 1, at: cur!.at });
+    else this.active.set(taskId, { n: n - 1, at: this.now() });
     this.done.delete(taskId); // re-insert: Map order = finish order, oldest first
     this.done.set(taskId, this.now());
     this.prune();
+  }
+
+  /** A heartbeat for a running task: restarts its active bound. No-op for unknown ids. */
+  touch(taskId: string): void {
+    const cur = this.active.get(taskId);
+    if (cur) cur.at = this.now();
   }
 
   /** "active" (within activeTtlMs), "finished" (within ttlMs) or undefined when this process does not know the task. */
