@@ -56,7 +56,6 @@ export function invalidTaskResult(meta: {
   model: string;
   invalid: string;
   timestamp?: string;
-  parsed?: ParsedTask;
 }): TaskResult {
   return failureResult({ ...meta, error: `Invalid task payload: ${meta.invalid}` });
 }

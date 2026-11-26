@@ -16,7 +16,6 @@ import {
 } from "@roundtable/knight-core";
 import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
-
 let knightName = "unknown";
 let natsPrefix = "fleet-a";
 

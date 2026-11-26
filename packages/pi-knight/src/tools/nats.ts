@@ -15,7 +15,6 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { publishOutOfBand, requestKnight } from "@roundtable/knight-core";
 import { findKnightsTool } from "./find-knights.js";
 
-
 // Knight identity — set once at startup for self-echo prevention
 let _knightName = "unknown";
 export function setKnightName(name: string): void { _knightName = name; }
