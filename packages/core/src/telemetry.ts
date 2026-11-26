@@ -26,7 +26,11 @@ export interface Telemetry {
 /** Tracing is on only when an exporter is configured and the SDK is not disabled. */
 export function telemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env["OTEL_SDK_DISABLED"]?.trim().toLowerCase() === "true") return false;
-  return !!(env["OTEL_EXPORTER_OTLP_ENDPOINT"]?.trim() || env["OTEL_TRACES_EXPORTER"]?.trim());
+  return !!(
+    env["OTEL_EXPORTER_OTLP_ENDPOINT"]?.trim() ||
+    env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]?.trim() ||
+    env["OTEL_TRACES_EXPORTER"]?.trim()
+  );
 }
 
 function parseResourceAttributes(raw: string | undefined): Record<string, string> {

@@ -131,7 +131,19 @@ test("OTLP endpoint switches on Claude Code's export with content on", () => {
     OTEL_LOG_TOOL_DETAILS: "1",
     OTEL_LOG_TOOL_CONTENT: "1",
   });
-  assert.equal(claudeCodeTelemetryEnv({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }).OTEL_TRACES_EXPORTER, "otlp");
+  const tracesOnly = claudeCodeTelemetryEnv({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" });
+  assert.equal(tracesOnly.CLAUDE_CODE_ENABLE_TELEMETRY, "1");
+  assert.equal(tracesOnly.OTEL_TRACES_EXPORTER, "otlp");
+  assert.equal(tracesOnly.OTEL_METRICS_EXPORTER, undefined);
+  assert.equal(tracesOnly.OTEL_LOGS_EXPORTER, undefined);
+  assert.deepEqual(claudeCodeTelemetryEnv({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c", OTEL_SDK_DISABLED: "true" }), {});
+  const perSignal = claudeCodeTelemetryEnv({
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces",
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: "http://c/v1/metrics",
+  });
+  assert.equal(perSignal.OTEL_METRICS_EXPORTER, "otlp");
+  assert.equal(perSignal.OTEL_LOGS_EXPORTER, undefined);
+  assert.equal(claudeCodeTelemetryEnv({ OTEL_TRACES_EXPORTER: "otlp" }).CLAUDE_CODE_ENABLE_TELEMETRY, "1");
   assert.deepEqual(claudeCodeTelemetryEnv({ ...env, OTEL_SDK_DISABLED: "true" }), {});
   assert.ok(!("OTEL_LOG_RAW_API_BODIES" in t));
   const child = buildChildEnv("api", {}, { ...env, ANTHROPIC_API_KEY: "k" });

@@ -39,6 +39,8 @@ test("telemetry stays off without OTEL_* env, with OTEL_SDK_DISABLED, and regist
   assert.equal(telemetryEnabled({}), false);
   assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_ENDPOINT: "http://c:4318", OTEL_SDK_DISABLED: "true" }), false);
   assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "otlp" }), true);
+  assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }), true);
+  assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces", OTEL_SDK_DISABLED: "true" }), false);
   const t = await startTelemetry({ service: "pi-knight", knight: "k", env: {} });
   assert.equal(t.enabled, false);
   await t.shutdown();
