@@ -212,6 +212,7 @@ test("success: result text, cost, tokens, turns, model and session id", async ()
   assert.equal(r.result, "pong");
   assert.equal(r.billing, "subscription");
   assert.equal(r.turns, 1);
+  assert.equal(r.toolCalls, 0, "a prose answer made no tool calls");
   assert.ok(r.cost > 0);
   assert.equal(r.tokens.input, 100);
   assert.equal(r.tokens.output, 20);
@@ -237,6 +238,7 @@ test("tool use: final text after the tool round trip, tool calls counted", async
   assert.equal(r.success, true, r.error);
   assert.equal(r.result, "TOOL_RESULT: hello-from-bash");
   assert.equal(r.turns, 2);
+  assert.equal(r.toolCalls, 1, "tool_calls counts the tool_use blocks in the stream");
   const m = await registry.getSingleMetricAsString("roundtable_knight_tool_calls_total");
   assert.match(m, /tool="Bash",status="success",table="none",knight="[^"]*",runtime="claude"\} 1/);
   const d = await registry.getSingleMetricAsString("roundtable_knight_tool_call_duration_seconds");

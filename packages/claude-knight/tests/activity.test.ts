@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { listInflight, SlotPool, TaskActivity } from "@roundtable/knight-core";
 import { applyMessage, newStreamState } from "../src/stream.js";
+import { loadConfig } from "../src/config.js";
 
 type Pub = { subject: string; ev: Record<string, any> };
 
@@ -83,4 +84,15 @@ test("with concurrency 2, a third task reuses the freed slot instead of sharing 
     endB();
     endC();
   }
+});
+
+test("toolCalls counts every tool_use block, with countTools off (sdk runtime) and for subagent messages", () => {
+  const config = loadConfig({ KNIGHT_NAME: "g", SUBSCRIBE_TOPICS: "rt.tasks.x.>" });
+  const state = newStreamState();
+  const ctx = { config, taskId: "tc-1", countTools: false };
+  const use = (id: string) => ({ type: "tool_use", id, name: "Bash", input: { command: "ls" } });
+  applyMessage({ type: "assistant", message: { content: [use("1"), { type: "text", text: "hi" }, use("2")] } } as never, state, ctx);
+  applyMessage({ type: "assistant", parent_tool_use_id: "p", message: { content: [use("3")] } } as never, state, ctx);
+  applyMessage({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "1", content: "x" }] } } as never, state, ctx);
+  assert.equal(state.toolCalls, 3);
 });

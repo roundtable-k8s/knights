@@ -126,3 +126,13 @@ test("cache usage: tokens.cacheRead and cacheWrite are published, input stays un
   });
   assert.deepEqual(buildResultPayload(out, meta).tokens, { input: 6, output: 40, cacheRead: 9000, cacheWrite: 1500 });
 });
+
+test("tool_calls is published (0 included) and the payload still validates", () => {
+  const p = buildResultPayload({ ...run, toolCalls: 2 }, meta);
+  assert.equal(p.tool_calls, 2);
+  assert.deepEqual(resultFixtureDiff(p, "result.success"), []);
+  assert.equal(buildResultPayload({ ...run, toolCalls: 0 }, meta).tool_calls, 0);
+  assert.equal("tool_calls" in buildResultPayload(run, meta), false);
+  const failed = classifyResult({ result: undefined, lastAssistantText: "", thrown: "boom", aborted: false, config, durationMs: 1, toolCalls: 3 });
+  assert.equal(buildResultPayload(failed, meta).tool_calls, 3);
+});

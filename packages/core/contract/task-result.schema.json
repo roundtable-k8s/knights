@@ -86,7 +86,7 @@
     "tool_calls": {
       "type": "number",
       "minimum": 0,
-      "description": "pi-knight: tool calls the agent made."
+      "description": "Tool calls the agent made (pi-knight and claude-knight)."
     },
     "turns": {
       "type": "number",
