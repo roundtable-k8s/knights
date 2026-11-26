@@ -11,8 +11,11 @@ interface Published {
   headers?: MsgHdrs;
 }
 
-/** A fake connection: `reply` pushes a result message, `fail` makes the subscription throw. */
-function fakeConn() {
+/**
+ * A fake connection: `reply` pushes a result message, `fail` makes the subscription throw.
+ * `publishError` makes every publish reject with that error.
+ */
+function fakeConn(publishError?: Error) {
   const published: Published[] = [];
   const subjects: string[] = [];
   let unsubscribed = false;
@@ -41,6 +44,7 @@ function fakeConn() {
   };
   const js = {
     async publish(subject: string, payload: string, opts?: { headers?: MsgHdrs }) {
+      if (publishError) throw publishError;
       published.push({ subject, payload, headers: opts?.headers });
       return { seq: 1 };
     },
@@ -92,6 +96,13 @@ describe("requestKnight", () => {
     const r = await p;
     assert.equal(r.ok, false);
     assert.equal(r.text, "Timeout: galahad did not respond within 3s");
+  });
+
+  it("reports a failed publish as a publish error and drops the subscription", async () => {
+    const f = fakeConn(new Error("timeout"));
+    const r = await requestKnight({ ...base, conn: f.conn, timeoutMs: 3000 });
+    assert.deepEqual(r, { ok: false, text: "Error publishing task to galahad: timeout" });
+    assert.equal(f.wasUnsubscribed(), true);
   });
 
   it("treats a silently ended subscription as a timeout", async () => {
@@ -170,5 +181,11 @@ describe("publishOutOfBand", () => {
     assert.equal(f.published[0]!.payload, "hi");
     assert.equal((await publishOutOfBand("s", " ", f.conn)).ok, false);
     assert.equal((await publishOutOfBand("s", "m", { js: null })).text, "Error: NATS not connected");
+  });
+
+  it("reports the size in bytes, not characters", async () => {
+    const f = fakeConn();
+    const r = await publishOutOfBand("rt-dev.alerts.x", "héllo", f.conn);
+    assert.deepEqual(r, { ok: true, text: "Published to rt-dev.alerts.x (6 bytes)" });
   });
 });

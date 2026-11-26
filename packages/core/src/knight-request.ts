@@ -87,6 +87,7 @@ export async function requestKnight(opts: RequestKnightOptions): Promise<KnightT
   opts.onProgress?.(`Dispatching to ${knight} (${domain})…`);
 
   let sub: ReturnType<NatsConnection["subscribe"]> | undefined;
+  let published = false;
   const onAbort = () => sub?.unsubscribe();
   try {
     // Subscribe before publishing so a fast reply can't be missed.
@@ -108,6 +109,7 @@ export async function requestKnight(opts: RequestKnightOptions): Promise<KnightT
       }),
       { headers: hdrs },
     );
+    published = true;
     log.info("nats_request: task published", { taskId, subject: taskSubject });
     opts.onProgress?.(`Task sent to ${knight}; awaiting response (timeout ${Math.round(timeoutMs / 1000)}s)…`);
     if (signal?.aborted) sub.unsubscribe();
@@ -121,11 +123,17 @@ export async function requestKnight(opts: RequestKnightOptions): Promise<KnightT
   } catch (err) {
     if (signal?.aborted) return fail(cancelledText);
     const msg = err instanceof Error ? err.message : String(err);
+    // A failed publish never reached the knight: report it as such, not as a missing reply.
+    if (!published) {
+      log.error("nats_request publish failed", { taskId, error: msg });
+      return fail(`Error publishing task to ${knight}: ${msg}`);
+    }
     // the subscription iterator throws a TimeoutError ("timeout") when no reply arrives in time
     if (/timeout/i.test(msg)) return fail(timeoutText);
     log.error("nats_request failed", { taskId, error: msg });
     return fail(`Error requesting from ${knight}: ${msg}`);
   } finally {
+    sub?.unsubscribe();
     signal?.removeEventListener("abort", onAbort);
   }
 }
@@ -140,8 +148,9 @@ export async function publishOutOfBand(subject: string, message: string, conn?: 
   }
   try {
     await js.publish(subject, message);
-    log.info("nats_publish tool", { subject, size: message.length });
-    return { ok: true, text: `Published to ${subject} (${message.length} bytes)` };
+    const bytes = Buffer.byteLength(message);
+    log.info("nats_publish tool", { subject, size: bytes });
+    return { ok: true, text: `Published to ${subject} (${bytes} bytes)` };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error("nats_publish failed", { subject, error: msg });
