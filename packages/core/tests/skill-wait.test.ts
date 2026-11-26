@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillsExpected, waitForSkills } from "../src/skill-wait.ts";
+import { skillsExpected, waitForSkills } from "../src/skill-wait.js";
 
 const missing = () => { throw new Error("ENOENT"); };
 
