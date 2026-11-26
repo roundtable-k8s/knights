@@ -5,6 +5,7 @@ import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
 import { introspectOptions } from "./session-source.js";
 import { resolveModel } from "./model.js";
+import { refusalCode } from "./result-extraction.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
 import * as metrics from "./runtime-metrics.js";
@@ -205,6 +206,7 @@ async function main(): Promise<void> {
       // Token/cost are recorded regardless — a no-output task still spent them. Only the
       // task-outcome counter reflects the honest success/failure. (#31)
       metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
+      metrics.recordRefusal(result.refused);
       metrics.taskDuration.labels().observe(durationMs / 1000);
       metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
       metrics.recordTokens(result.model, result.tokens);
@@ -227,6 +229,7 @@ async function main(): Promise<void> {
         { taskId, knight: config.knightName, durationMs, parsed: delivery.task },
       )).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
+      metrics.recordRefusal(refusalCode(errMsg));
       metrics.tasksTotal.labels("error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {

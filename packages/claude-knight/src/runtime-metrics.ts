@@ -1,4 +1,3 @@
-import client from "prom-client";
 import { createKnightMetrics } from "@roundtable/knight-core";
 
 const metrics = createKnightMetrics({
@@ -22,14 +21,7 @@ export const {
   toolCallDuration,
   toolCallsTotal,
   toolCallsBlocked,
+  usageLimitHits,
   recordLostTask,
   recordTokens,
 } = metrics;
-
-// ─── claude-knight only ─────────────────────────────────────────────
-
-export const usageLimitHits = new client.Counter({
-  name: "roundtable_knight_usage_limit_hits_total",
-  help: "Tasks that failed because the Claude plan or credit limit was reached",
-  registers: [registry],
-});
