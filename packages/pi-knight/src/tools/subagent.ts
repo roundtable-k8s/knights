@@ -31,6 +31,25 @@ function textResult(text: string): AgentToolResult<void> {
   return { content: [{ type: "text", text }], details: undefined };
 }
 
+type SubagentStats = { cost: number; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } };
+
+/**
+ * Attribute sub-agent spend to the parent knight so chains aren't invisible in fleet
+ * metrics. The sub-session is fresh per spawn, so its absolute stats ARE this spawn's
+ * total (no diff needed). Clamp finite/non-negative — same guard as the parent task
+ * accounting — to stay safe with routing/custom models.
+ */
+export function recordSubagentUsage(modelStr: string, stats: SubagentStats, local: boolean): void {
+  const finite = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
+  metrics.llmCost.labels(modelStr, local ? "local" : metrics.BILLING).inc(local ? 0 : finite(stats.cost));
+  metrics.recordTokens(modelStr, {
+    input: finite(stats.tokens.input),
+    output: finite(stats.tokens.output),
+    cacheRead: finite(stats.tokens.cacheRead),
+    cacheWrite: finite(stats.tokens.cacheWrite),
+  });
+}
+
 /** Parent knight's model — overwritten via setParentModel() during session init */
 let parentModel: string = "openrouter/deepseek/deepseek-v3.2";
 
@@ -111,19 +130,12 @@ export const spawnSubagentTool = defineTool({
       // fleet metrics. The sub-session is fresh per spawn, so its absolute stats ARE this
       // spawn's total (no diff needed). Clamp finite/non-negative — same guard as the
       // parent task accounting — to stay safe with routing/custom models.
-      const finite = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
-      const local = isLocalModel(model);
-      metrics.llmCost.labels(modelStr, local ? "local" : metrics.BILLING).inc(local ? 0 : finite(stats.cost));
-      metrics.recordTokens(modelStr, {
-        input: finite(stats.tokens.input),
-        output: finite(stats.tokens.output),
-        cacheRead: finite(stats.tokens.cacheRead),
-      });
+      recordSubagentUsage(modelStr, stats, isLocalModel(model));
 
       log.info("Sub-agent completed", {
         durationMs,
         cost: stats.cost,
-        tokens: { input: stats.tokens.input, output: stats.tokens.output, cacheRead: stats.tokens.cacheRead },
+        tokens: { input: stats.tokens.input, output: stats.tokens.output, cacheRead: stats.tokens.cacheRead, cacheWrite: stats.tokens.cacheWrite },
         toolCalls: stats.toolCalls,
       });
 

@@ -105,7 +105,7 @@ export interface TaskSpanOutcome {
   /** Resolved model. */
   model?: string;
   /** Token usage; `input` excludes cached input (task contract). */
-  tokens?: { input: number; output: number; cacheRead?: number };
+  tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
   error?: string;
 }
 
@@ -154,10 +154,12 @@ export function withTaskSpan<T>(
         if (o.model) span.setAttribute("gen_ai.response.model", o.model);
         if (o.tokens) {
           const cacheRead = o.tokens.cacheRead ?? 0;
-          // semconv input_tokens includes cached tokens; the contract's `input` does not.
-          span.setAttribute("gen_ai.usage.input_tokens", o.tokens.input + cacheRead);
+          const cacheWrite = o.tokens.cacheWrite ?? 0;
+          // semconv input_tokens includes cached reads and writes; the contract's `input` does not.
+          span.setAttribute("gen_ai.usage.input_tokens", o.tokens.input + cacheRead + cacheWrite);
           span.setAttribute("gen_ai.usage.output_tokens", o.tokens.output);
           if (o.tokens.cacheRead !== undefined) span.setAttribute("gen_ai.usage.cache_read.input_tokens", cacheRead);
+          if (o.tokens.cacheWrite !== undefined) span.setAttribute("gen_ai.usage.cache_creation.input_tokens", cacheWrite);
         }
         if (!o.success) span.setStatus({ code: SpanStatusCode.ERROR, message: o.error });
       }
