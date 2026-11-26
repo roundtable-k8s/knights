@@ -294,6 +294,7 @@ export async function executeTask(
         config,
         durationMs: Date.now() - started,
         toolCalls: state.toolCalls,
+        backgroundTasks: state.backgroundTasks,
       });
       await removeWorkDir(true);
       remember({ taskId, runId, sessionId: state.sessionId, success: false, costUsd: outcome.cost, durationMs: Date.now() - started, turns: state.result?.num_turns ?? 0, finishedAt: new Date().toISOString(), error: outcome.error });
@@ -329,6 +330,7 @@ export async function executeTask(
       durationMs: Date.now() - started,
       prs: state.prs,
       toolCalls: state.toolCalls,
+      backgroundTasks: state.backgroundTasks,
     });
     await removeWorkDir(!outcome.success);
     remember({

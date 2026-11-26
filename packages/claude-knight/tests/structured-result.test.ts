@@ -55,3 +55,21 @@ test("classifyResult: a final Outcome: failed line records failure, keeping the 
   const plain = classifyResult({ result: ok("All done"), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
   assert.equal(plain.success, true);
 });
+
+const sysCtx = { config: { knightName: "k" } as never, taskId: "t", countTools: false };
+const changed = (tasks: object[]) => ({ type: "system", subtype: "background_tasks_changed", tasks }) as never;
+
+test("background jobs: live set noted on success, ambient ignored, notification clears", () => {
+  const state = newStreamState();
+  applyMessage(changed([{ task_id: "a", description: "make test" }, { task_id: "b", description: "x".repeat(100) }, { task_id: "w", description: "watch", ambient: true }]), state, sysCtx);
+  assert.deepEqual([...state.backgroundTasks.keys()], ["a", "b"]);
+  const r = classifyResult({ result: ok("Done."), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1, backgroundTasks: state.backgroundTasks });
+  assert.equal(r.success, true);
+  assert.equal(r.result.split("\n").pop(), `Note: 2 background job(s) were still running when this turn ended and were stopped: make test; ${"x".repeat(77)}.... Their output is not in this result.`);
+
+  applyMessage({ type: "system", subtype: "task_notification", task_id: "a", status: "completed" } as never, state, sysCtx);
+  assert.deepEqual([...state.backgroundTasks.keys()], ["b"]);
+  applyMessage(changed([]), state, sysCtx);
+  const clean = classifyResult({ result: ok("Done."), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1, backgroundTasks: state.backgroundTasks });
+  assert.equal(clean.result, "Done.");
+});

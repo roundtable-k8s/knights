@@ -62,6 +62,9 @@ spawn_subagent, use the Agent tool; browser_* means mcp__roundtable__browser_*.
 Nobody is watching this session. There is no human to answer questions or approve
 plans. Never ask for clarification — take the most reasonable reading of the task,
 state the assumption in your final answer, and complete the work.
+Never end your turn while a command you started in the background is still running: wait for it
+with the output tool until it finishes, or stop it, and push or commit your work before your final
+message. A final message that says work is still running is lost work.
 </unattended>
 
 <critical_rules>

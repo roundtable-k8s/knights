@@ -6,6 +6,8 @@
  *   success.jsonl, tool-use.jsonl  recorded from the real CLI 2.1.329 against the mock Messages API
  *   auth-error.jsonl               recorded from the real CLI against api.anthropic.com with an invalid OAuth token
  *   api-key-auth.jsonl             recorded from the real CLI with ANTHROPIC_API_KEY set (init apiKeySource)
+ *   background-running.jsonl       success.jsonl plus a background_tasks_changed with a live job and an ambient watcher before the result
+ *   background-done.jsonl          the same, then a second background_tasks_changed with only the watcher left
  *   usage-limit.jsonl              synthesized from auth-error.jsonl: rate_limit_event (warning, then rejected),
  *                                  an assistant rate_limit error with the CLI's limit text, an is_error result
  */
@@ -284,6 +286,20 @@ test("a crash without a result message surfaces the exit code and stderr", async
   const r = await run("x");
   assert.equal(r.success, false);
   assert.match(r.error!, /exited with code 3: boom: something broke/);
+});
+
+test("a background job still running at the result is noted; success is unchanged", async () => {
+  useFixture("background-running");
+  const r = await run("brief me");
+  assert.equal(r.success, true, r.error);
+  assert.equal(r.result.split("\n").pop(), "Note: 1 background job(s) were still running when this turn ended and were stopped: make test. Their output is not in this result.");
+});
+
+test("a background job that finished before the result adds no note", async () => {
+  useFixture("background-done");
+  const r = await run("brief me");
+  assert.equal(r.success, true, r.error);
+  assert.equal(r.result, "pong");
 });
 
 test("a missing CLI binary is a clear failure", async () => {

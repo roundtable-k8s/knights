@@ -14,3 +14,9 @@ test("memory dir set: prompt points at the memory volume", () => {
   assert.match(p, /\/memory\/Kay\/MEMORY\.md/);
   assert.match(p, /never write there/);
 });
+
+test("unattended preamble forbids ending a turn with background work running", async () => {
+  const { buildAppendPrompt } = await import("../src/prompt.js");
+  const config = loadConfig({ KNIGHT_NAME: "k", SUBSCRIBE_TOPICS: "rt.tasks.x.>", KNIGHT_MODEL: "anthropic/claude-sonnet-4.6" });
+  assert.match(buildAppendPrompt(config), /Never end your turn while a command you started in the background is still running/);
+});
