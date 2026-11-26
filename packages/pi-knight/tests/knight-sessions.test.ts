@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { executeTask, workspaceName, __setSessionFactoryForTests, __setTaskModelResolverForTests } from "../src/knight.ts";
+import { executeTask, workspaceName, __setSessionFactoryForTests, __setTaskModelResolverForTests, __slotKeysForTests } from "../src/knight.ts";
 import type { KnightConfig } from "../src/config.ts";
 
 // Minimal fake AgentSession: records prompts as messages so we can see what each
@@ -285,20 +285,14 @@ test("executeTask: per-task model applies on the run's own session, under its lo
   __setSessionFactoryForTests(null);
 });
 
-test("executeTask: a failed model restore drops the run's session; the next step gets a fresh one on the default", async () => {
-  const { created, disposed } = setup();
+test("executeTask: a failed model restore drops the run's session and slot; the next step gets a fresh one on the default", async () => {
+  setup();
   __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));
-  const origCreate = created.length;
-  const r1 = await executeTask("a1", config, undefined, "run-rf", "rf1", { model: "m/opus" });
-  assert.equal(r1.success, true);
-  assert.equal(created.length, origCreate + 1);
-  // Make the restore fail on the first session.
-  // (a fresh run so we can patch the session before its override task)
-  __setSessionFactoryForTests(null);
-  const disposed2: number[] = [];
+  // Every session's restore to the knight default fails.
+  const disposed: number[] = [];
   const sessions: ReturnType<typeof fakeSession>[] = [];
   __setSessionFactoryForTests(async () => {
-    const s = fakeSession(sessions.length + 1, disposed2);
+    const s = fakeSession(sessions.length + 1, disposed);
     const realSet = s.setModel.bind(s);
     s.setModel = async function (m: any) {
       if (m.id === "default") throw new Error("restore boom");
@@ -309,13 +303,37 @@ test("executeTask: a failed model restore drops the run's session; the next step
   });
   const a = await executeTask("b1", config, undefined, "run-rf2", "rf2", { model: "m/opus" });
   assert.equal(a.success, true, "the task itself still succeeds");
-  assert.deepEqual(disposed2, [1], "the stuck session is disposed");
+  assert.deepEqual(disposed, [1], "the stuck session is disposed");
+  assert.equal(__slotKeysForTests().includes("run:run-rf2"), false, "no later step is waiting, so the slot is gone");
   const b = await executeTask("b2", config, undefined, "run-rf2", "rf3");
   assert.equal(sessions.length, 2, "next step of the run created a new session");
   assert.equal(sessions[1].model.id, "default", "on the knight default");
   assert.deepEqual(sessions[1].messages.map((m) => m.content), ["b2", "done: b2"]);
   assert.equal(b.model, "x/y");
-  void disposed;
+  __setTaskModelResolverForTests(null);
+  __setSessionFactoryForTests(null);
+});
+
+test("executeTask: a stale session is disposed exactly once even when reading the task's messages throws", async () => {
+  setup();
+  __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));
+  const disposed: number[] = [];
+  __setSessionFactoryForTests(async () => {
+    const s = fakeSession(1, disposed);
+    s.setModel = async function (m: any) {
+      if (m.id === "default") throw new Error("restore boom");
+      this.model = m;
+    };
+    const realPrompt = s.prompt;
+    s.prompt = async (t: string) => {
+      await realPrompt(t);
+      // Only the structured-result read after the prompt uses slice(); make it throw.
+      (s.messages as unknown as { slice: unknown }).slice = () => { throw new Error("read boom"); };
+    };
+    return s as any;
+  });
+  await assert.rejects(executeTask("c1", config, undefined, "run-rf4", "rf4", { model: "m/opus" }), /read boom/);
+  assert.deepEqual(disposed, [1], "disposed once, not skipped and not twice");
   __setTaskModelResolverForTests(null);
   __setSessionFactoryForTests(null);
 });
