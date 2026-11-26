@@ -10,7 +10,7 @@
  * `session` (one persisted session, paged). The routing, paging, limits and the
  * reply envelope live here; each runtime supplies only a {@link SessionSource}.
  */
-import type { NatsConnection, Subscription } from "@nats-io/transport-node";
+import type { Msg, NatsConnection, Subscription } from "@nats-io/transport-node";
 import { log } from "./logger.js";
 import { getConnection } from "./nats/index.js";
 import { subjectToken } from "./activity.js";
@@ -259,22 +259,51 @@ export function startIntrospect<E>(opts: StartIntrospectOptions<E>): Subscriptio
 
 async function serve<E>(sub: Subscription, opts: IntrospectOptions<E>): Promise<void> {
   for await (const msg of sub) {
-    let req: IntrospectRequest = { type: "stats" };
+    // One bad message must not end the loop: a rejection here would leave the responder dead.
     try {
-      const parsed = JSON.parse(decoder.decode(msg.data));
-      if (parsed && typeof parsed === "object") req = parsed;
-    } catch {
-      // not JSON: default to stats
-    }
-    let body: Record<string, unknown>;
-    try {
-      body = await handleIntrospect(req, opts);
+      await answer(msg, opts);
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      log.error("Introspect error", { error });
-      const { pod, node } = opts.identity;
-      body = { pod, ...(node ? { node } : {}), error };
+      log.error("Introspect responder failed to answer", { error: errorMessage(err) });
     }
-    msg.respond(JSON.stringify(body));
   }
+}
+
+async function answer<E>(msg: Msg, opts: IntrospectOptions<E>): Promise<void> {
+  let req: IntrospectRequest = { type: "stats" };
+  try {
+    const parsed = JSON.parse(decoder.decode(msg.data));
+    if (parsed && typeof parsed === "object") req = parsed;
+  } catch {
+    // not JSON: default to stats
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = await handleIntrospect(req, opts);
+  } catch (err) {
+    const error = errorMessage(err);
+    log.error("Introspect error", { error });
+    body = errorBody(opts, error);
+  }
+  const payload = JSON.stringify(body);
+  try {
+    msg.respond(payload);
+  } catch (err) {
+    // Typically the reply exceeded the server's max_payload: say so instead of going silent.
+    const cause = errorMessage(err);
+    const bytes = new TextEncoder().encode(payload).length;
+    log.error("Introspect reply failed", { error: cause, bytes });
+    const error = /max_payload/i.test(cause)
+      ? `reply too large (${bytes} bytes): request fewer entries (limit=...)`
+      : `reply failed: ${cause}`;
+    msg.respond(JSON.stringify(errorBody(opts, error)));
+  }
+}
+
+function errorBody<E>(opts: IntrospectOptions<E>, error: string): Record<string, unknown> {
+  const { pod, node } = opts.identity;
+  return { pod, ...(node ? { node } : {}), error };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

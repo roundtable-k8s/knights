@@ -193,10 +193,17 @@ describe("introspectRequestFromQuery", () => {
 
 describe("startIntrospect", () => {
   function fakeNats() {
-    const subs: { subject: string; queue?: string; push: (data: string) => Promise<string> }[] = [];
+    const subs: {
+      subject: string;
+      queue?: string;
+      push: (data: string) => Promise<string>;
+      /** Make the next `respond` call throw once (as a too-large reply does). */
+      failNextRespond: (err: Error) => void;
+    }[] = [];
     const nc = {
       subscribe(subject: string, o?: { queue?: string }) {
         const pending: { data: Uint8Array; respond: (d: string | Uint8Array) => boolean }[] = [];
+        const failures: Error[] = [];
         let wake: (() => void) | null = null;
         const iter = {
           async *[Symbol.asyncIterator]() {
@@ -211,9 +218,18 @@ describe("startIntrospect", () => {
           queue: o?.queue,
           push: (data) =>
             new Promise<string>((resolve) => {
-              pending.push({ data: new TextEncoder().encode(data), respond: (d) => (resolve(typeof d === "string" ? d : new TextDecoder().decode(d)), true) });
+              pending.push({
+                data: new TextEncoder().encode(data),
+                respond: (d) => {
+                  const failure = failures.shift();
+                  if (failure) throw failure;
+                  resolve(typeof d === "string" ? d : new TextDecoder().decode(d));
+                  return true;
+                },
+              });
               wake?.();
             }),
+          failNextRespond: (err) => failures.push(err),
         });
         return iter;
       },
@@ -247,6 +263,32 @@ describe("startIntrospect", () => {
     };
     const failed = JSON.parse(await subs[1]!.push(JSON.stringify({ type: "history" })));
     assert.deepEqual(failed, { pod: "kay.0", error: "disk gone" });
+  });
+
+  it("answers an oversized reply with an error naming the size, and keeps serving", async () => {
+    const { nc, subs } = fakeNats();
+    const src = fakeSource({ persisted: { abc: entries(2) } });
+    startIntrospect({ ...options(src), identity: { pod: "kay.0", node: "n1" }, prefix: "rt-dev", nc });
+    const [base] = subs;
+    base!.failNextRespond(new Error("max_payload size exceeded"));
+    const tooBig = JSON.parse(await base!.push(JSON.stringify({ type: "session", limit: 500 })));
+    assert.deepEqual(Object.keys(tooBig).sort(), ["error", "node", "pod"]);
+    assert.equal(tooBig.pod, "kay.0");
+    assert.equal(tooBig.node, "n1");
+    assert.match(tooBig.error, /^reply too large \(\d+ bytes\): request fewer entries/);
+    // The responder is still alive for the next request.
+    const next = JSON.parse(await base!.push(JSON.stringify({ type: "history" })));
+    assert.deepEqual(next, { pod: "kay.0", node: "n1", knight: "Kay", sessions: [{ id: "abc" }], total: 1 });
+  });
+
+  it("reports a non-size send failure as a reply failure and keeps serving", async () => {
+    const { nc, subs } = fakeNats();
+    startIntrospect({ ...options(fakeSource({ persisted: { abc: entries(1) } })), prefix: "rt-dev", nc });
+    subs[1]!.failNextRespond(new Error("connection draining"));
+    const failed = JSON.parse(await subs[1]!.push(JSON.stringify({ type: "history" })));
+    assert.deepEqual(failed, { pod: "kay-0", node: "n1", error: "reply failed: connection draining" });
+    const next = JSON.parse(await subs[1]!.push(JSON.stringify({ type: "history" })));
+    assert.equal(next.knight, "Kay");
   });
 
   it("podSubjectToken keeps NATS-safe names and replaces the rest", () => {
