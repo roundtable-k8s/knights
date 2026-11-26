@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isPrCommand, mergePrs, normalizeVerdict, parseVerdict, prsFromBash, prsFromText, resolvePrs } from "../src/structured.js";
+import { isPrCommand, mergePrs, normalizeVerdict, parseTaskFailure, parseVerdict, prsFromBash, prsFromText, resolvePrs } from "../src/structured.js";
 
 const URL1 = "https://github.com/roundtable-k8s/claude-knight/pull/20";
 
@@ -75,4 +75,16 @@ test("resolvePrs: command PRs win, else message URLs", () => {
   const cmd = prsFromBash("gh pr create", URL1);
   assert.equal(resolvePrs(cmd, "https://github.com/a/b/pull/3"), cmd);
   assert.deepEqual(resolvePrs([], "https://github.com/a/b/pull/3").map((p) => p.number), [3]);
+});
+
+test("parseTaskFailure: only a final Outcome: failed line matches", () => {
+  assert.equal(parseTaskFailure("Outcome: failed - the filing script rejected the answer"), "the filing script rejected the answer");
+  assert.equal(parseTaskFailure("tried\n\n**Outcome:** FAILED: bad json\n\n"), "bad json");
+  assert.equal(parseTaskFailure("> outcome = failed because x"), "because x");
+  assert.equal(parseTaskFailure("work\nOutcome: failed"), "Outcome: failed");
+  assert.equal(parseTaskFailure("Outcome: failed\nbut then I fixed it"), undefined);
+  assert.equal(parseTaskFailure("The Outcome: failed line is a convention"), undefined);
+  assert.equal(parseTaskFailure("Outcome: failedover"), undefined);
+  assert.equal(parseTaskFailure("Outcome: succeeded"), undefined);
+  assert.equal(parseTaskFailure(""), undefined);
 });
