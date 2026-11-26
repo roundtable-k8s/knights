@@ -108,11 +108,15 @@ Each task is delivered at most once (durable pull consumer, `max_deliver: 1`, 30
 3. It waits for running tasks, up to `DRAIN_TIMEOUT_MS`. They keep sending heartbeats (in-progress acks every 10 s), then publish their result and ack.
 4. If tasks are still running at the deadline, they are aborted and publish a failure result. Then the pod drains NATS and exits.
 
-A task whose ack deadline passes (the pod crashed, or was too busy to send heartbeats for 30 s) gets a MAX_DELIVERIES advisory. The operator dead-letters it, and one replica of the knight publishes a `lost` failure result for it. No replica publishes that result if the task is running in, or recently finished in, the replica that receives the advisory. None publishes it either if a successful result for the task is already on the results subject. So a task that succeeded is never then reported as failed.
+A task whose ack deadline passes (the pod crashed, or was too busy to send heartbeats for 30 s) gets a MAX_DELIVERIES advisory. The operator dead-letters it, and one replica of the knight publishes a `lost` failure result for it. No replica publishes that result if the task is running in, or recently finished in, the replica that receives the advisory. None publishes it either if a successful result for the task is already on the results subject. A success already on the results subject before that check is never then reported as failed. The check and the publish are not atomic, though: a success published after the check but before the `lost` result leaves the failure first, and both results end up on the subject.
 
 A pod can also be terminated while it is still starting up (a newer ReplicaSet replaces it, or KEDA scales down). Then it never takes a task: the entrypoint traps SIGTERM from its first line and exits during the start-up phases (Nix profile, mise), and the runtime installs its signal handlers before any network call, so a signal before it is ready closes what is open (health server, NATS, telemetry) and exits 0 without starting the pull loop. The pod is gone within seconds instead of the whole grace period.
 
 With the Recreate strategy no pod is pulling between the old pod's exit and the new pod's start. Tasks published in that gap wait in the stream (consumer lag) and run when the new pod starts.
+
+## Result publishing
+
+Each task's result is published once on `<prefix>.<taskId>` in the results stream (`NATS_RESULTS_PREFIX`), with the JetStream message id `result-<taskId>` on every attempt. A publish that fails is retried with back-off for up to `RESULT_PUBLISH_RETRY_MS` (default 60 s; `0` means one attempt), across NATS reconnects. A timed-out publish may already have been stored, and JetStream drops the same message id again inside the stream's duplicate window. Keep the retry budget below that window (2 minutes, the JetStream default) so a late retry is still de-duplicated and never stored twice. If the budget runs out, the result is lost: the knight logs it and counts the task as `publish_failed` in `roundtable_knight_tasks_total` as well as its `success` or `error` status (see [OBSERVABILITY](packages/pi-knight/docs/OBSERVABILITY.md)).
 
 ## Fleet discovery
 

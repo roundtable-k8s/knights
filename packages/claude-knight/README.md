@@ -146,6 +146,8 @@ A task payload may carry an optional `model` (a Claude alias or `claude-*` id); 
 | `MCP_SERVERS_JSON` | — | extra MCP servers (`{"mcpServers":{…}}` or a bare map); merged over `/config/mcp.json` |
 | `CLAUDE_DISALLOWED_TOOLS` | — | extra built-ins to disable, comma separated |
 | `CLAUDE_CONFIG_DIR` | `/data/.claude-home` | Claude Code state, sessions, linked skills |
+| `KNIGHT_MEMORY_DIR` | — | This knight's memory volume, e.g. `/memory/<knight>` (read-write). Set by the operator when a memory volume is mounted; the system prompt states the paths, as in pi-knight |
+| `KNIGHT_MEMORY_ROOT` | — | Read-only root holding every knight's memory, e.g. `/memory`; the prompt tells the knight to read, never write, `$KNIGHT_MEMORY_ROOT/<name>/` |
 
 ### Telemetry
 
@@ -231,6 +233,12 @@ and a missing token left the knight degraded.
   `max_deliver` stays 1: a task whose knight crashed mid-run is not re-run; a `MAX_DELIVERIES` advisory makes a surviving
   replica publish a failure result (`lost: true`) instead. Known limit: the advisory is missed if no replica of the knight
   is up when the ack window expires.
+
+## Fleet discovery
+
+Each pod registers as the NATS micro service `roundtable-knight`, the same as pi-knight: `nats micro ls roundtable-knight`
+lists the fleet and `nats micro stats roundtable-knight` shows load. See the root README's
+[Fleet discovery](../../README.md#fleet-discovery) section.
 
 ## Draining on rollout
 

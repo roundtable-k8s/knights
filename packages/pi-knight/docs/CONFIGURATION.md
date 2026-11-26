@@ -45,7 +45,7 @@ Knights can evolve their own files over time — ConfigMap seeds the initial sta
 |----------|-------------|---------|
 | `KNIGHT_DATA_DIR` | Data root: SDK `cwd`/`agentDir`, session notes, scratch, default root of the paths below | `/data` |
 | `KNIGHT_WORK_ROOT` | Per-task workspaces | `$KNIGHT_DATA_DIR/work` |
-| `KNIGHT_SESSIONS_ROOT` | Persisted session JSONL files | `$KNIGHT_DATA_DIR/sessions` |
+| `KNIGHT_SESSIONS_ROOT` | Directory pi-knight lists and prunes session JSONL files in (see Session Persistence): the SDK writes sessions under its agent directory (`KNIGHT_DATA_DIR`), not here | `$KNIGHT_DATA_DIR/sessions` |
 | `MODELS_JSON_PATH` | Custom-model catalog | `$KNIGHT_DATA_DIR/models.json` |
 
 ### LLM Configuration
