@@ -187,6 +187,49 @@ describe("TaskTracker active expiry (#118)", () => {
   });
 });
 
+describe("TaskTracker heartbeats (#147)", () => {
+  it("keeps an id active past activeTtlMs while heartbeats keep arriving", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    for (let i = 0; i < 5; i++) {
+      now += 4000;
+      t.touch("a");
+    }
+    assert.equal(t.state("a"), "active", "20s of run time, heartbeat every 4s, bound 5s");
+  });
+
+  it("expires an id whose heartbeats stopped", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 4000;
+    t.touch("a");
+    now = 9001;
+    assert.equal(t.state("a"), undefined);
+  });
+
+  it("ignores touch for an unknown id", () => {
+    const t = new TaskTracker(1000, 10, () => 0, 5000);
+    t.touch("x");
+    assert.equal(t.state("x"), undefined);
+  });
+
+  it("keeps overlapping started/finished alive until the last finished", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 3000;
+    t.started("a");
+    now = 6000;
+    t.finished("a");
+    now = 10_000; // 4s after the first finished refreshed the entry
+    assert.equal(t.state("a"), "active", "the remaining run has not expired early");
+    t.finished("a");
+    assert.equal(t.state("a"), "finished");
+  });
+});
+
 const NATS_BIN = process.env["NATS_SERVER_BIN"] ?? ["/usr/local/bin/nats-server", "/usr/bin/nats-server"].find(existsSync) ?? "nats-server";
 
 describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) && "nats-server not found (set NATS_SERVER_BIN)" }, () => {
@@ -337,6 +380,36 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     assert.ok(acks.filter((a) => a === "+WPI").length >= 5, `heartbeats sent while running: ${JSON.stringify(acks)}`);
     assert.equal(acks.filter((a) => a !== "+WPI").length, 1, `exactly one final ack: ${JSON.stringify(acks)}`);
     assert.equal(acks.at(-1), "+ACK");
+    ackSub.unsubscribe();
+    await puller.stop();
+  });
+
+  it("acts on a second ack() call at most once (#147)", async () => {
+    const cfg: NatsSubscribeConfig = { ...config, knightName: "Twice", subscribeTopics: ["fleet-a.tasks.twice.>"] };
+    await preCreate("Twice", "fleet-a.tasks.twice.>");
+    const acks: string[] = [];
+    const ackSub = admin.subscribe("$JS.ACK.TASKS.Twice-consumer.>");
+    void (async () => { for await (const m of ackSub) acks.push(m.string()); })();
+    await admin.flush();
+
+    let active = 0;
+    const done: string[] = [];
+    const puller = await subscribe(cfg, {
+      ackWaitMs: 1000,
+      freeSlots: () => 1 - active,
+      onLost: () => {},
+      onTask: (d) => {
+        active++;
+        d.ack();
+        d.ack();
+        done.push(d.task.taskId);
+        active--;
+      },
+    });
+    await publishTask("tw1", "twice");
+    await waitFor(() => done.length === 1, 10_000);
+    await sleep(500);
+    assert.equal(acks.filter((a) => a === "+ACK").length, 1, `exactly one ack reached the server: ${JSON.stringify(acks)}`);
     ackSub.unsubscribe();
     await puller.stop();
   });
