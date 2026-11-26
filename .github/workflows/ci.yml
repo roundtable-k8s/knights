@@ -92,6 +92,8 @@ jobs:
           echo "NATS_SERVER_BIN=/tmp/nats-server-${NATS_VERSION}-linux-amd64/nats-server" >> "$GITHUB_ENV"
       - run: npm run typecheck --workspace packages/core
       - run: npm test --workspace packages/core
+      - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
+        run: npm run test:hermetic --workspace packages/core
 
   pi-knight:
     needs: changes
@@ -107,6 +109,8 @@ jobs:
       - run: npm run build --workspace packages/core --if-present
       - run: npm run typecheck --workspace packages/pi-knight
       - run: npm test --workspace packages/pi-knight
+      - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
+        run: npm run test:hermetic --workspace packages/pi-knight
       - run: npm run build --workspace packages/pi-knight
 
   claude-knight:
@@ -123,6 +127,8 @@ jobs:
       - run: npm run build --workspace packages/core --if-present
       - run: npm run typecheck --workspace packages/claude-knight
       - run: npm test --workspace packages/claude-knight
+      - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
+        run: npm run test:hermetic --workspace packages/claude-knight
       - run: npm run build --workspace packages/claude-knight
 
   ci-ok:

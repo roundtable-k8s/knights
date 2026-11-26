@@ -29,6 +29,7 @@ docker build -f packages/claude-knight/Dockerfile .
 
 - Keep a change to one package unless it really spans more. Code both runtimes need goes in `packages/core`.
 - Add or update tests with the change. Run typecheck, tests and lint before pushing.
+- Tests must not read the ambient environment. Knight pods set `ROUNDTABLE_TABLE`, `KNIGHT_NAME`, `NATS_URL` and similar, so `scripts/test/hermetic-env.ts` clears them before every test file (loaded by each package's `test` script). Set what a test needs inside the test, and pass an explicit `env` to spawned processes. `npm run test:hermetic` runs the suites with `ROUNDTABLE_TABLE` and `KNIGHT_NAME` set to check this; CI runs it.
 - The task, result and activity payloads are a contract with the operator ([knight task contract](https://github.com/roundtable-k8s/roundtable/blob/main/docs/knight-task-contract.md)). A change to them needs the matching change in roundtable.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, with an optional scope such as `fix(pi-knight):`).
 - Open a pull request against `main`. PRs are squash-merged through the merge queue once CI passes.

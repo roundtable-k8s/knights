@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "tsx --test --import ../../scripts/test/hermetic-env.ts tests/*.test.ts",
+    "test:hermetic": "ROUNDTABLE_TABLE=x KNIGHT_NAME=y npm test",
     "contract:export": "tsx scripts/export-contract.ts"
   },
   "dependencies": {
