@@ -30,6 +30,8 @@ export interface NatsSubscribeConfig extends NatsConnectConfig {
   natsTasksStream: string;
   subscribeTopics: string[];
   natsResultsPrefix: string;
+  /** Bounds how long a started task stays "active" in the tracker (plus the ack window). Default 30 min. */
+  taskTimeoutMs?: number;
 }
 
 let nc: NatsConnection | null = null;
@@ -367,7 +369,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   });
 
   const pullConsumer = await client.consumers.get(config.natsTasksStream, durableName);
-  const tracker = new TaskTracker();
+  const tracker = new TaskTracker(undefined, undefined, undefined, (config.taskTimeoutMs ?? 1_800_000) + ackWaitMs);
   const stopWatch = watchLostTasks(conn, jsm, {
     stream: config.natsTasksStream,
     durable: durableName,
@@ -381,9 +383,12 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
     onTask: (d) => {
       const id = d.task.taskId;
       tracker.started(id);
+      let acked = false;
       opts.onTask({
         ...d,
         ack: () => {
+          if (acked) return; // a handler that failed early may ack on its error path too
+          acked = true;
           tracker.finished(id);
           d.ack();
         },
@@ -401,6 +406,9 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   };
 }
 
+/** Default bound on an active id: the default task timeout (30 min) plus the heartbeat window. */
+export const DEFAULT_ACTIVE_TTL_MS = 35 * 60_000;
+
 /**
  * Task ids this process is running or finished recently. A MAX_DELIVERIES advisory for one of
  * them is not a lost task: this process answers it (or already did) itself. Typical cause: the
@@ -408,30 +416,40 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
  * while the task was still running here.
  */
 export class TaskTracker {
-  private readonly active = new Map<string, number>();
+  private readonly active = new Map<string, { n: number; at: number }>();
   private readonly done = new Map<string, number>();
   constructor(
     private readonly ttlMs = 15 * 60_000,
     private readonly max = 1_000,
     private readonly now: () => number = Date.now,
+    /** An active id older than this is dropped: a missed `finished` must not hide a lost task forever. */
+    private readonly activeTtlMs = DEFAULT_ACTIVE_TTL_MS,
   ) {}
 
   started(taskId: string): void {
-    this.active.set(taskId, (this.active.get(taskId) ?? 0) + 1);
+    const cur = this.active.get(taskId);
+    // Re-use the count only while the entry is still live; an expired one starts over.
+    const n = cur && cur.at >= this.now() - this.activeTtlMs ? cur.n : 0;
+    this.active.set(taskId, { n: n + 1, at: this.now() });
   }
 
   finished(taskId: string): void {
-    const n = this.active.get(taskId) ?? 0;
+    const cur = this.active.get(taskId);
+    const n = cur?.n ?? 0;
     if (n <= 1) this.active.delete(taskId);
-    else this.active.set(taskId, n - 1);
+    else this.active.set(taskId, { n: n - 1, at: cur!.at });
     this.done.delete(taskId); // re-insert: Map order = finish order, oldest first
     this.done.set(taskId, this.now());
     this.prune();
   }
 
-  /** "active", "finished" (within ttlMs) or undefined when this process does not know the task. */
+  /** "active" (within activeTtlMs), "finished" (within ttlMs) or undefined when this process does not know the task. */
   state(taskId: string): "active" | "finished" | undefined {
-    if (this.active.has(taskId)) return "active";
+    const cur = this.active.get(taskId);
+    if (cur) {
+      if (cur.at >= this.now() - this.activeTtlMs) return "active";
+      this.active.delete(taskId); // expired: treated as unknown
+    }
     this.prune();
     return this.done.has(taskId) ? "finished" : undefined;
   }

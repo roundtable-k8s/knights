@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields } from "./result.js";
-import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, SlotPool, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
+import { migrateMemory, ensureMemoryDirs, resolveMemoryPaths, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { linkSkills } from "./skills.js";
@@ -147,43 +147,50 @@ export async function main(): Promise<void> {
   // Concurrency slots (0-based) in use, reported on task.started.
   const slots = new SlotPool();
 
-  async function processTask(delivery: TaskDelivery): Promise<void> {
+  async function processTask(delivery: TaskDelivery, slot: number): Promise<void> {
     const parsed = delivery.task;
     // Skills may have changed (git-sync): re-read and re-register the service if so.
     // Not awaited: the slot must be counted synchronously so the next fetch sees it.
     void knightService?.refreshSkills();
     // Keep the message un-acked but alive while the task runs; ack only when it finishes.
     const started = Date.now();
-    const slot = slots.acquire();
-    const activity = new TaskActivity({
-      knight: config.knightName,
-      table: config.table,
-      prefix: natsPrefix(config),
-      taskId: parsed.taskId,
-      identity: podIdentity(process.env, hostname()),
-      runId: parsed.runId,
-      chainName: parsed.chainName,
-      stepName: parsed.stepName,
-      attempt: parsed.attempt,
-      model: parsed.model ?? config.claudeModel,
-      slot,
-      concurrency: config.maxConcurrentTasks,
-      queuedFor: parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined,
-      workDir: basename(config.workDir),
-      content: config.activityContent,
-    });
-    activity.started();
-    const heartbeat = setInterval(() => {
-      delivery.working();
-      activity.heartbeat();
-    }, HEARTBEAT_MS);
-    setActive(activeCount + 1);
-    const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    inflight.add(controller);
+    // Everything taken after the slot is released in the finally below, even when a step throws part-way.
+    let activity: TaskActivity | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let counted = false;
 
     try {
+      activity = new TaskActivity({
+        knight: config.knightName,
+        table: config.table,
+        prefix: natsPrefix(config),
+        taskId: parsed.taskId,
+        identity: podIdentity(process.env, hostname()),
+        runId: parsed.runId,
+        chainName: parsed.chainName,
+        stepName: parsed.stepName,
+        attempt: parsed.attempt,
+        model: parsed.model ?? config.claudeModel,
+        slot,
+        concurrency: config.maxConcurrentTasks,
+        queuedFor: parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined,
+        workDir: basename(config.workDir),
+        content: config.activityContent,
+      });
+      const act = activity;
+      activity.started();
+      heartbeat = setInterval(() => {
+        delivery.working();
+        act.heartbeat();
+      }, HEARTBEAT_MS);
+      setActive(activeCount + 1);
+      counted = true;
+      const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
+      timer = setTimeout(() => controller.abort(), timeoutMs);
+      inflight.add(controller);
+
       // Plan reserve: refuse new work before spawning Claude Code at all.
       const reserve: { blocked: boolean; reason?: string } =
         config.authMode === "subscription"
@@ -201,7 +208,7 @@ export async function main(): Promise<void> {
 
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
-        activity.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
+        activity?.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
         metrics.usageLimitHits.labels().inc();
         metrics.tasksTotal.labels("refused").inc();
         await publishResult(
@@ -217,7 +224,7 @@ export async function main(): Promise<void> {
       }
 
       const durationMs = Date.now() - started;
-      activity.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
+      activity?.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
 
       // Metrics first: a result that cannot be published must not lose them or turn a success into an error. (#91)
       metrics.tasksTotal.labels(outcome.success ? "success" : "error").inc();
@@ -237,7 +244,7 @@ export async function main(): Promise<void> {
       const durationMs = Date.now() - started;
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error("Task failed", { taskId: parsed.taskId, error: errMsg });
-      activity.finished({ success: false, error: errMsg, errorClass: "internal", cost: 0 });
+      activity?.finished({ success: false, error: errMsg, errorClass: "internal", cost: 0 });
       await publishResult(
         parsed.taskId,
         buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }),
@@ -249,11 +256,10 @@ export async function main(): Promise<void> {
       clearTimeout(timer);
       inflight.delete(controller);
       clearInterval(heartbeat);
-      activity.close();
+      activity?.close();
       knightService?.markTaskFinished();
-      slots.release(slot);
       delivery.ack();
-      setActive(activeCount - 1);
+      if (counted) setActive(activeCount - 1);
       puller?.wake();
     }
   }
@@ -295,7 +301,11 @@ export async function main(): Promise<void> {
     },
     onTask: (delivery) => {
       // Count the slot synchronously so the next fetch sees it.
-      void processTask(delivery);
+      // withSlot frees the slot on any throw; the catch makes sure the delivery is acked and the error logged.
+      void withSlot(slots, (slot) => processTask(delivery, slot)).catch((e) => {
+        log.error("Task handler crashed", { taskId: delivery.task.taskId, error: e instanceof Error ? e.message : String(e) });
+        delivery.ack();
+      });
     },
     onLost: async (parsed) => {
       metrics.recordLostTask();
