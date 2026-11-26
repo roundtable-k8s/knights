@@ -1,6 +1,6 @@
 import test, { beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { trace } from "@opentelemetry/api";
+import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { startTelemetry, withTaskSpan } from "@roundtable/knight-core";
 import { SessionSpans } from "../src/spans.ts";
@@ -56,7 +56,7 @@ test("two turns and one tool call export chat/execute_tool children of invoke_ag
   assert.equal(tools[0].attributes["gen_ai.operation.name"], "execute_tool");
   assert.equal(tools[0].attributes["gen_ai.tool.name"], "bash");
   assert.equal(tools[0].attributes["gen_ai.tool.call.id"], "c1");
-  assert.equal(tools[0].status.code, 0);
+  assert.equal(tools[0].status.code, SpanStatusCode.UNSET);
   assert.match(String(chats[0].attributes["gen_ai.output.messages"]), /SECRET/);
   assert.equal(tools[0].attributes["gen_ai.tool.call.arguments"], '{"cmd":"SECRET"}');
   assert.equal(tools[0].attributes["gen_ai.tool.call.result"], "SECRET");
@@ -72,7 +72,7 @@ test("a tool call with isError yields an error-status span", async () => {
     s.endAll();
   });
   await processor.forceFlush();
-  assert.equal(exporter.getFinishedSpans().find((s) => s.name === "execute_tool bash")!.status.code, 2);
+  assert.equal(exporter.getFinishedSpans().find((s) => s.name === "execute_tool bash")!.status.code, SpanStatusCode.ERROR);
   await t.shutdown();
 });
 
