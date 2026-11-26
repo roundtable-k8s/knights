@@ -9,6 +9,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isLocalModel, resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import { dataPaths, type KnightConfig } from "./config.js";
+import { SessionSpans } from "./spans.js";
 import { log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
 import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
@@ -443,6 +444,8 @@ export async function executeTask(
   };
   // The model this task actually ran on, captured before the restore swaps it back.
   let ranModel = modelUsed;
+  let spans: SessionSpans | undefined;
+  let unsubSpans: (() => void) | undefined;
   try {
     if (override) {
       try {
@@ -453,10 +456,30 @@ export async function executeTask(
     }
     opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
     ranModel = resolvedModelName(override?.model ?? sess.model, modelUsed);
+    // chat / execute_tool spans under the task's invoke_agent span (no-ops without an SDK).
+    spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table });
+    const sp = spans;
+    try {
+      unsubSpans = (sess as any).subscribe?.((e: any) => {
+        try {
+          sp.handle(e);
+        } catch (err) {
+          log.debug("Span event mapping failed", { error: String(err) });
+        }
+      });
+    } catch (err) {
+      log.debug("Span subscribe failed", { error: String(err) });
+    }
     await sess.prompt(task);
     promptFailed = false;
   } finally {
     opts.activity?.detach();
+    try {
+      unsubSpans?.();
+    } catch {
+      // ignore
+    }
+    spans?.endAll();
     if (defaultModel) {
       try {
         await sess.setModel(defaultModel);

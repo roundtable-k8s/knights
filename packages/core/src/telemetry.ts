@@ -1,4 +1,4 @@
-import { context, propagation, ROOT_CONTEXT, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
+import { SpanStatusCode, ROOT_CONTEXT, context, propagation, trace, type Context, type Span, type SpanAttributes } from "@opentelemetry/api";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { log } from "./logger.js";
@@ -153,3 +153,38 @@ export function withTaskSpan<T>(
   });
 }
 
+
+/**
+ * Start a child span of `parent` (default: the active context, so the task span inside
+ * `withTaskSpan`) with an explicit start time (ms epoch). The caller must `endSpan` it.
+ * A no-op span when no SDK is registered.
+ */
+export function startChildSpan(
+  name: string,
+  attributes: SpanAttributes = {},
+  opts: { startTime?: number; parent?: Context } = {},
+): Span {
+  const tracer = trace.getTracer(TRACER_NAME);
+  return tracer.startSpan(
+    name,
+    { attributes, ...(opts.startTime !== undefined ? { startTime: opts.startTime } : {}) },
+    opts.parent ?? context.active(),
+  );
+}
+
+/** Set final attributes, mark an error status when `error` is set, and end the span. */
+export function endSpan(
+  span: Span,
+  opts: { attributes?: SpanAttributes; error?: string | boolean; endTime?: number } = {},
+): void {
+  if (opts.attributes) span.setAttributes(opts.attributes);
+  if (opts.error) {
+    span.setStatus({ code: SpanStatusCode.ERROR, ...(typeof opts.error === "string" ? { message: opts.error } : {}) });
+  }
+  span.end(opts.endTime);
+}
+
+/** The current trace context, to parent spans started later from an event callback. */
+export function activeTraceContext(): Context {
+  return context.active();
+}
