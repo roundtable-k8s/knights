@@ -2,7 +2,8 @@ import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:net";
 import { describe, it } from "node:test";
-import { createShutdown, installSignalHandlers, waitForInflight } from "../src/drain.ts";
+import { createShutdown, installSignalHandlers, waitForInflight, ShutdownAbort, SHUTDOWN_ABORT_REASON } from "../src/drain.ts";
+import { loadBaseConfig, SHUTDOWN_MARGIN_MS } from "../src/config.ts";
 import { startHealthServer, stopHealthServer, setDraining } from "../src/health.ts";
 import { startPullLoop, type PulledMsg } from "../src/nats/index.ts";
 import { createKnightMetrics } from "../src/metrics.ts";
@@ -147,5 +148,24 @@ describe("drain on SIGTERM (real shutdown handler)", () => {
   it("waitForInflight reports tasks still running at the deadline", async () => {
     const left = await waitForInflight({ getActive: () => 2, maxWaitMs: 60, pollMs: 10 });
     assert.equal(left, 2);
+  });
+});
+
+describe("shutdown timing", () => {
+  it("default drain bound plus abort grace ends before the pod grace period", () => {
+    const abortGraceMs = 5000;
+    for (const t of ["1000", "600000", "1800000"]) {
+      const c = loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: t });
+      const grace = Number(t) + 60_000;
+      assert.ok(c.drainTimeoutMs + abortGraceMs < grace);
+      assert.ok(grace - c.drainTimeoutMs >= SHUTDOWN_MARGIN_MS);
+    }
+  });
+
+  it("ShutdownAbort survives AbortSignal.reason", () => {
+    const c = new AbortController();
+    c.abort(new ShutdownAbort());
+    assert.ok(c.signal.reason instanceof ShutdownAbort);
+    assert.equal(c.signal.reason.message, SHUTDOWN_ABORT_REASON);
   });
 });

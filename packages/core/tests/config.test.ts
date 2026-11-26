@@ -13,7 +13,7 @@ test("loadBaseConfig applies defaults", () => {
     metricsPort: 3000,
     logLevel: "info",
     taskTimeoutMs: 1_800_000,
-    drainTimeoutMs: 1_860_000,
+    drainTimeoutMs: 1_840_000,
   });
 });
 
@@ -31,7 +31,7 @@ test("loadBaseConfig reads env overrides", () => {
   assert.equal(c.metricsPort, 9000);
   assert.equal(c.logLevel, "debug");
   assert.equal(c.taskTimeoutMs, 1000);
-  assert.equal(c.drainTimeoutMs, 61_000);
+  assert.equal(c.drainTimeoutMs, 41_000);
   assert.equal(loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: "1000", DRAIN_TIMEOUT_MS: "5" }).drainTimeoutMs, 5);
 });
 
@@ -78,7 +78,7 @@ test("floatEnv parses or falls back", () => {
 test("loadBaseConfig rejects non-positive timeouts", () => {
   const c = loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: "0", DRAIN_TIMEOUT_MS: "-5" });
   assert.equal(c.taskTimeoutMs, 1_800_000);
-  assert.equal(c.drainTimeoutMs, 1_860_000);
+  assert.equal(c.drainTimeoutMs, 1_840_000);
 });
 
 test("loadBaseConfig reads RESULT_PUBLISH_RETRY_MS (default 60 s, 0 disables retries)", () => {

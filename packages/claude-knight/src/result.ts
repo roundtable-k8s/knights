@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { ShutdownAbort, invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -36,6 +36,8 @@ export interface ClassifyInput {
   assistantError?: string;
   thrown?: string;
   aborted: boolean;
+  /** `signal.reason` of the abort; a ShutdownAbort marks an interruption by knight shutdown. */
+  abortReason?: unknown;
   config: KnightConfig;
   durationMs: number;
   /** PRs found from the agent's gh/git commands (StreamState.prs). */
@@ -83,7 +85,7 @@ export function resultModel(config: Pick<KnightConfig, "claudeModel">): string {
 const safe = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
 export function classifyResult(input: ClassifyInput): TaskResult {
-  const { result, lastAssistantText, assistantError, thrown, aborted, config } = input;
+  const { result, lastAssistantText, assistantError, thrown, aborted, abortReason, config } = input;
   const usage = result?.usage;
   const base = {
     cost: safe(result?.total_cost_usd),
@@ -140,6 +142,10 @@ export function classifyResult(input: ClassifyInput): TaskResult {
         config.authMode === "subscription" ? "CLAUDE_CODE_OAUTH_TOKEN (setup-tokens last a year)" : "ANTHROPIC_API_KEY"
       }.`,
     );
+  }
+  if (aborted && abortReason instanceof ShutdownAbort) {
+    const msg = "Task interrupted: the knight is shutting down (pod restart or rollout), not a task timeout. It can be retried.";
+    return fail(lastAssistantText ? `${msg} Partial output:\n\n${lastAssistantText}` : msg);
   }
   if (aborted) {
     return lastAssistantText
