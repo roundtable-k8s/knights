@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { log } from "@roundtable/knight-core";
+import { log, skillsExpected, waitForSkills as waitForSkillsCore } from "@roundtable/knight-core";
 
 /**
  * Expose the operator's skill tree to Claude Code.
@@ -96,4 +96,35 @@ function isSymlink(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+export interface SkillWaitDeps {
+  expected?: boolean;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Same git-sync race pi-knight handles: the skill-filter sidecar links categories a few
+ * seconds after start. Waits ~60s, then goes on without skills; no wait when none are configured.
+ */
+export async function waitForSkills(
+  config: { skillsDir: string; claudeConfigDir: string; configDir: string },
+  deps: SkillWaitDeps = {},
+): Promise<number> {
+  const count = await waitForSkillsCore({
+    maxAttempts: 20,
+    intervalMs: 3000,
+    expected: deps.expected ?? skillsExpected(process.env, undefined, config.configDir),
+    sleep: deps.sleep,
+    info: (msg, data) => log.info(msg, { skillsDir: config.skillsDir, ...data }),
+    load: () => {
+      const { names } = linkSkills(config.skillsDir, config.claudeConfigDir);
+      if (names.length > 0) log.info("Skills available", { count: names.length, names });
+      return names.length;
+    },
+  });
+  if (count === 0 && (deps.expected ?? skillsExpected(process.env, undefined, config.configDir))) {
+    log.warn("No skills found after waiting for git-sync — continuing without", { skillsDir: config.skillsDir });
+  }
+  return count;
 }

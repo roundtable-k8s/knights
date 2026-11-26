@@ -15,11 +15,12 @@ export const SKILLS_CONFIG_FILE = "/config/KNIGHT_SKILLS";
 export function skillsExpected(
   env: NodeJS.ProcessEnv = process.env,
   readFile: (path: string) => string = (p) => readFileSync(p, "utf8"),
+  configDir = "/config",
 ): boolean {
   let raw = env["KNIGHT_SKILLS"];
   if (raw === undefined) {
     try {
-      raw = readFile(SKILLS_CONFIG_FILE);
+      raw = readFile(`${configDir}/KNIGHT_SKILLS`);
     } catch {
       return true;
     }

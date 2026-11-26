@@ -23,3 +23,4 @@ export * from "./trace-context.js";
 export * from "./slots.js";
 export * from "./knight-request.js";
 export * from "./workdirs.js";
+export * from "./skill-wait.js";

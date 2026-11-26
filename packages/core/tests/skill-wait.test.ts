@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { skillsExpected, waitForSkills } from "../src/skill-wait.ts";
+import { skillsExpected, waitForSkills } from "../src/skill-wait.js";
 
 const missing = () => { throw new Error("ENOENT"); };
 
@@ -45,4 +45,11 @@ test("waitForSkills: gives up after maxAttempts when skills never arrive", async
   const n = await waitForSkills({ maxAttempts: 20, intervalMs: 3000, expected: true, load: () => 0, ...c });
   assert.equal(n, 0);
   assert.equal(c.sleeps.length, 19);
+});
+
+test("skillsExpected: reads KNIGHT_SKILLS from a non-default config dir", () => {
+  const paths: string[] = [];
+  const read = (p: string) => { paths.push(p); return ""; };
+  assert.equal(skillsExpected({}, read, "/custom"), false);
+  assert.deepEqual(paths, ["/custom/KNIGHT_SKILLS"]);
 });

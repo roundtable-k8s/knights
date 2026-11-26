@@ -8,7 +8,7 @@ import { buildResultPayload, failedOutcome, reserveRefusedOutcome, runtimeFields
 import { setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, invalidTaskResult, lostTaskResult, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, type KnightService } from "@roundtable/knight-core";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
-import { linkSkills } from "./skills.js";
+import { waitForSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
 
 /**
@@ -18,24 +18,6 @@ import { configureTools } from "./tools.js";
 async function probeUsage(config: KnightConfig): Promise<void> {
   const r = await executeTask("Reply with the single word: ok", "plan-usage-probe", config, AbortSignal.timeout(60_000), undefined, { model: "haiku" });
   if (!r.success && !r.usageLimited) throw new Error(r.error ?? "usage probe failed");
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function waitForSkills(config: KnightConfig): Promise<number> {
-  // Same git-sync race pi-knight handles: the skill-filter sidecar links
-  // categories a few seconds after start. ~60s, then go on without skills.
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const { names } = linkSkills(config.skillsDir, config.claudeConfigDir);
-    if (names.length > 0) {
-      log.info("Skills available", { count: names.length, names });
-      return names.length;
-    }
-    if (attempt === 0) log.info("No skills found yet, waiting for git-sync", { skillsDir: config.skillsDir });
-    if (attempt < 19) await sleep(3000);
-  }
-  log.warn("No skills found after waiting for git-sync — continuing without", { skillsDir: config.skillsDir });
-  return 0;
 }
 
 export async function main(): Promise<void> {
