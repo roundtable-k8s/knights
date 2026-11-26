@@ -1,5 +1,5 @@
 #!/bin/bash
-# entrypoint.sh — Pi-Knight startup with PVC-native Nix
+# entrypoint.sh — Pi-Knight startup (tools from the read-only tools image)
 #
 # Architecture:
 #   - Nix tools come from the operator's tools image, mounted read-only at /nix
