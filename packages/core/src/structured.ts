@@ -71,23 +71,25 @@ const GIT_OPTS_WITH_VALUE = new Set(["-c", "-C", "--git-dir", "--work-tree", "--
 const PR_EDIT_NUM_RE = /\bgh\s+pr\s+edit\s+(?:--?[\w-]+=\S+\s+|-\S+\s+\S+\s+)*#?(\d+)\b/;
 
 /**
- * Segment of a shell command that runs `git push`: the first token after `git`
+ * Arguments after `push` when a shell command segment runs `git push`, else undefined: the first token after `git`
  * that is not a global option must be `push`, so `git -c push.default=x status`
  * is not a push. Quoted arguments are not parsed; `echo "git push"` is matched
  * because its words are split on whitespace like any other.
  */
-export function isGitPush(segment: string): boolean {
+export function gitPushArgs(segment: string): string[] | undefined {
   for (const m of segment.matchAll(/\bgit\s+/g)) {
     const tokens = segment.slice(m.index + m[0].length).split(/\s+/);
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i]!;
-      if (/^push(?![\w.-])/.test(t)) return true;
+      if (/^push(?![\w.-])/.test(t)) return tokens.slice(i + 1);
       if (GIT_OPTS_WITH_VALUE.has(t)) i++; // skip the option's value
       else if (!t.startsWith("-")) break; // another subcommand: not a push
     }
   }
-  return false;
+  return undefined;
 }
+
+export const isGitPush = (segment: string): boolean => gitPushArgs(segment) !== undefined;
 
 /** Bash command that can open or update a PR; worth remembering until its output arrives. */
 export function isPrCommand(command: string): boolean {

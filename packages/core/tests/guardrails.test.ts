@@ -85,3 +85,21 @@ test("checkWriteContent understands pi write and edit (both edit shapes)", () =>
   assert.equal(checkWriteContent("edit", { path: "a", edits: [null, {}] }), undefined);
   assert.equal(checkWriteContent("write", { path: "a", content: "hello" }), undefined);
 });
+
+test("checkBashCommand pins the intended over-blocks", () => {
+  // `rm` is matched as a token anywhere in a segment, so these are blocked on purpose (fail-safe).
+  for (const cmd of ["git rm -r /", "find / -exec rm -r {} +", "sudo rm -rf /*"]) {
+    assert.equal(checkBashCommand(cmd), "Recursive delete at root level", cmd);
+  }
+  // A non-root target or a non-recursive rm stays allowed.
+  for (const cmd of ["git rm -r ./dir", "find ./tmp -exec rm -r {} +", "rm /"]) {
+    assert.equal(checkBashCommand(cmd), undefined, cmd);
+  }
+});
+
+test("checkBashCommand blocks a heredoc body that mentions a force push (documented false positive)", () => {
+  // Quoted text is not parsed. Workaround: write the text with the Write tool and pass it by file.
+  const heredoc = "gh pr review 3 --body-file - <<'EOF'\nPlease do not run:\ngit push -f origin main\nEOF";
+  assert.equal(checkBashCommand(heredoc), "Force push (use new commits instead)");
+  assert.equal(checkBashCommand("gh pr review 3 --body-file review.md"), undefined);
+});

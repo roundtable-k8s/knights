@@ -1,9 +1,15 @@
 /**
  * Tool guardrails shared by both runtimes (pi-knight extension, claude-knight
  * SDK and CLI hooks): blocked bash commands and writes that carry a secret.
+ *
+ * Intended over-blocks (fail-safe, pinned in tests/guardrails.test.ts):
+ * - `git rm -r /` and `find / -exec rm -r {} +` are blocked: `rm` is matched as a token anywhere
+ *   in a segment, and a recursive flag plus a bare `/` target is never legitimate in a knight pod.
+ * - Quoted text is not parsed, so a heredoc or `echo` body that mentions `git push -f` is blocked
+ *   too. Workaround: write review/PR text with the Write tool, then pass it by file (`--body-file`).
  */
 import { containsSecret } from "./activity.js";
-import { isGitPush } from "./structured.js";
+import { gitPushArgs } from "./structured.js";
 
 /** Bash commands that should be blocked outright. */
 export const BLOCKED_BASH_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
@@ -31,10 +37,8 @@ const ROOT_DELETE_REASON = "Recursive delete at root level";
 
 /** Reason a bash segment is a force push, or undefined. Token-level, so flag order and `git -C dir` do not matter. */
 function forcePushReason(segment: string): string | undefined {
-  if (!isGitPush(segment)) return undefined;
-  const tokens = segment.trim().split(/\s+/);
-  const at = tokens.findIndex((t) => /^push(?![\w.-])/.test(t));
-  const args = tokens.slice(at + 1);
+  const args = gitPushArgs(segment);
+  if (!args) return undefined;
   if (args.includes("--force")) return LONG_FORCE_REASON;
   // A short-flag cluster containing `f` (`-f`, `-uf`) or a `+refspec` (`+main`, `+HEAD:main`) also forces.
   if (args.some((t) => /^-[a-zA-Z]*f[a-zA-Z]*$/.test(t) || (t.startsWith("+") && t.length > 1))) return SHORT_FORCE_REASON;

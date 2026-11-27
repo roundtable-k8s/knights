@@ -14,6 +14,13 @@ import {
 import { containsSecret, redactSecrets } from "@roundtable/knight-core";
 import { findBlockedBashReason, toolHooksExtension } from "../src/hooks.ts";
 
+import { toolCallsBlocked } from "../src/runtime-metrics.ts";
+
+async function blockedCount(reason: string): Promise<number> {
+  const { values } = await toolCallsBlocked.get();
+  return values.filter((v) => v.labels.reason === reason).reduce((n, v) => n + v.value, 0);
+}
+
 test("findBlockedBashReason blocks dangerous commands and allows safe ones", () => {
   assert.match(findBlockedBashReason("rm -rf /") ?? "", /root/i);
   assert.match(findBlockedBashReason("git push origin main --force") ?? "", /force/i);
@@ -135,6 +142,55 @@ test("tool hooks extension blocks an edit that adds a secret and lets a plain ed
       assert.match(results[0].content[0].text, /Blocked/);
       assert.notEqual(results[1].isError, true);
       assert.equal(readFileSync(target, "utf8"), "gamma beta\n");
+    } finally {
+      session.dispose();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a blocked edit increments toolCallsBlocked{reason=secret_in_content}", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "hooks-"));
+  try {
+    const target = join(dir, "f.txt");
+    writeFileSync(target, "alpha beta\n");
+    const before = await blockedCount("secret_in_content");
+    const session = await runWithHooks(dir, [
+      fauxAssistantMessage([
+        fauxToolCall("edit", { path: target, edits: [{ oldText: "alpha", newText: `ghp_${"e".repeat(36)}` }] }, { id: "e1" }),
+      ]),
+      fauxAssistantMessage(fauxText("done")),
+    ]);
+    try {
+      await session.prompt("go");
+      assert.equal(await blockedCount("secret_in_content"), before + 1);
+      assert.equal(readFileSync(target, "utf8"), "alpha beta\n");
+    } finally {
+      session.dispose();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a docs-style Authorization header example write is blocked (current behaviour)", async () => {
+  // A bearer value of 8+ chars is token-shaped, so docs examples with a made-up bearer value are
+  // blocked too. Pinned on purpose: use a placeholder such as <token> in docs instead.
+  const dir = mkdtempSync(join(tmpdir(), "hooks-"));
+  try {
+    const target = join(dir, "doc.md");
+    const example = `curl -H 'Authorization: Bearer ${"abcdefgh123"}' https://x`;
+    const session = await runWithHooks(dir, [
+      fauxAssistantMessage([fauxToolCall("write", { path: target, content: example }, { id: "w1" })]),
+      fauxAssistantMessage(fauxText("done")),
+    ]);
+    try {
+      await session.prompt("go");
+      assert.equal(existsSync(target), false);
+      const results = session.messages.filter((m) => m.role === "toolResult") as any[];
+      assert.equal(results[0].isError, true);
+      assert.match(results[0].content[0].text, /Blocked/);
     } finally {
       session.dispose();
     }
