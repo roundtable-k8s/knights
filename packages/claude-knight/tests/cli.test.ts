@@ -326,6 +326,58 @@ test("abort (task timeout) kills the process and reports a timeout", async () =>
   assert.match(r.error!, /aborted before producing output \(task timeout\)/);
 });
 
+/** Running, not merely a zombie (an orphan nobody reaps, e.g. when pid 1 is not an init, stays defunct). */
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return true;
+  }
+};
+
+test("abort kills the whole process group, grandchildren included", async () => {
+  useFixture("success", { hang: true });
+  process.env.FAKE_CLAUDE_FIXTURE = initOnlyFixture();
+  const pidFile = join(root, "grandchild-abort.pid");
+  process.env.FAKE_CLAUDE_GRANDCHILD = pidFile;
+  try {
+    const ac = new AbortController();
+    const waitForPid = setInterval(() => {
+      if (existsSync(pidFile) && readFileSync(pidFile, "utf8")) {
+        clearInterval(waitForPid);
+        ac.abort();
+      }
+    }, 20);
+    await run("x", undefined, config, ac.signal);
+    clearInterval(waitForPid);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    assert.ok(pid > 0);
+    assert.equal(alive(pid), false, "grandchild is gone");
+  } finally {
+    delete process.env.FAKE_CLAUDE_GRANDCHILD;
+  }
+});
+
+test("a finished run leaves no grandchild behind", async () => {
+  useFixture("success");
+  const pidFile = join(root, "grandchild-ok.pid");
+  process.env.FAKE_CLAUDE_GRANDCHILD = pidFile;
+  try {
+    const r = await run("x");
+    assert.equal(r.success, true, r.error);
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    assert.ok(pid > 0);
+    assert.equal(alive(pid), false, "grandchild is gone");
+  } finally {
+    delete process.env.FAKE_CLAUDE_GRANDCHILD;
+  }
+});
+
 test("chain steps resume one session; fresh mode never resumes", async () => {
   useFixture("success");
   await run("step 1", "run-A");

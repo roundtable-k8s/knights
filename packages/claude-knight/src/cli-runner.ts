@@ -16,7 +16,7 @@
  * accepts without listing them (the Agent SDK passes --max-turns itself); the
  * end-to-end test in tests/cli-e2e.test.ts runs the real binary with all of them.
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,6 +166,28 @@ export function parseStreamLine(line: string): SDKMessage | undefined {
   }
 }
 
+/**
+ * Signal the CLI's whole process group (it is spawned detached, so its pid is
+ * the group id): Claude Code's shell commands and background jobs die with it.
+ * Falls back to the single process when the group call fails.
+ */
+export function killTree(child: Pick<ChildProcess, "pid" | "kill">, signal: NodeJS.Signals): void {
+  if (child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "ESRCH" && code !== "EPERM") throw e;
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // already gone
+  }
+}
+
 /** Grace period between SIGTERM and SIGKILL when a task is aborted. */
 const KILL_GRACE_MS = 5000;
 const STDERR_TAIL = 4000;
@@ -179,7 +201,9 @@ const RESULT_EXIT_GRACE_MS = 10_000;
  * terminates the process.
  */
 export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: AbortSignal): AsyncGenerator<SDKMessage> {
-  const child = spawn(inv.bin, inv.args, { cwd: inv.cwd, env: inv.env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(inv.bin, inv.args, { cwd: inv.cwd, env: inv.env, stdio: ["pipe", "pipe", "pipe"],
+    detached: true, // own process group, so killTree can stop everything the CLI started
+  });
   let spawnError: Error | undefined;
   child.on("error", (e) => (spawnError = e));
   const exited = new Promise<{ code: number | null; sig: NodeJS.Signals | null }>((resolve) =>
@@ -196,8 +220,8 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
   let killTimer: NodeJS.Timeout | undefined;
   const kill = () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
-    child.kill("SIGTERM");
-    killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    killTree(child, "SIGTERM");
+    killTimer = setTimeout(() => killTree(child, "SIGKILL"), KILL_GRACE_MS);
     killTimer.unref();
   };
   if (signal.aborted) kill();
@@ -231,6 +255,7 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
     signal.removeEventListener("abort", kill);
     kill(); // no-op when already exited; stops the CLI when the consumer bailed out early
     await exited;
+    killTree(child, "SIGKILL"); // leftovers of the group (background jobs, test runs) that outlived the CLI
     if (killTimer) clearTimeout(killTimer);
   }
 }

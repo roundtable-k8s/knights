@@ -5,7 +5,9 @@
 //   FAKE_CLAUDE_FIXTURE  stream-json file to print on stdout
 //   FAKE_CLAUDE_EXIT     exit code (default 0)
 //   FAKE_CLAUDE_STDERR   text to print on stderr
+//   FAKE_CLAUDE_GRANDCHILD  file to write the pid of a `sleep 600` child (same process group) to
 //   FAKE_CLAUDE_HANG=1   never exit (abort tests)
+import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const chunks = [];
@@ -30,6 +32,11 @@ if (process.env.FAKE_CLAUDE_RECORD) {
       },
     }),
   );
+}
+if (process.env.FAKE_CLAUDE_GRANDCHILD) {
+  const gc = spawn("sleep", ["600"], { stdio: "ignore" });
+  gc.unref();
+  writeFileSync(process.env.FAKE_CLAUDE_GRANDCHILD, String(gc.pid));
 }
 if (process.env.FAKE_CLAUDE_FIXTURE) process.stdout.write(readFileSync(process.env.FAKE_CLAUDE_FIXTURE, "utf8"));
 if (process.env.FAKE_CLAUDE_STDERR) process.stderr.write(process.env.FAKE_CLAUDE_STDERR);
