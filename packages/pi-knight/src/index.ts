@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
 import { introspectOptions } from "./session-source.js";
-import { resolveModel } from "./model.js";
+import { MissingCredentialsError, resolveModel } from "./model.js";
 import { refusalCode } from "./result-extraction.js";
 import { buildResultPayload, failedTaskResult } from "./task-payload.js";
 import { preflightModelUntilReady } from "./preflight.js";
@@ -61,7 +61,16 @@ async function main(): Promise<void> {
   // startup probe passes) and retries with capped backoff until the endpoint answers.
   // Resolving here is throwaway (knight.ts re-resolves for the session) but shares the
   // same baseUrl/default logic, so what we probe is exactly what the session will use.
-  const startupModel = await resolveModel(config.knightModel).catch((err: unknown) => {
+  const startupModel = await resolveModel(config.knightModel).catch(async (err: unknown) => {
+    if (err instanceof MissingCredentialsError) {
+      // A missing key can only be fixed by changing the Secret, which restarts the pod. Stay up and
+      // degraded (readiness 503 with the reason) and park, so tasks wait in the stream instead of
+      // failing one by one at the provider. Same posture as claude-knight's start-up auth check.
+      const reason = `auth: ${err.message}`;
+      log.error("Startup check failed — knight will stay degraded", { reason });
+      setDegradedReason(reason);
+      await new Promise(() => {}); // park; SIGTERM exits via the start-up signal handlers
+    }
     // A bad KNIGHT_MODEL is a config error: name it in the log before the fatal exit.
     log.error("Invalid KNIGHT_MODEL", { model: config.knightModel, error: String(err) });
     throw err;

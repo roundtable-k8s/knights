@@ -106,6 +106,22 @@ export function contextWindowFromEnv(env: NodeJS.ProcessEnv = process.env): numb
   return DEFAULT_CONTEXT_WINDOW;
 }
 
+/**
+ * A catalog or models.json model on a hosted (https) endpoint has no API key in the
+ * environment or the knight's secret. Without this error the knight would send a fake
+ * key and fail at the first prompt; index.ts catches it at start-up and stays degraded.
+ */
+export class MissingCredentialsError extends Error {
+  readonly provider: string;
+  readonly modelId: string;
+  constructor(provider: string, modelId: string) {
+    super(`No credentials for provider "${provider}" (model ${modelId}): set the provider's API key in the knight's secret`);
+    this.name = "MissingCredentialsError";
+    this.provider = provider;
+    this.modelId = modelId;
+  }
+}
+
 export interface ResolvedModel {
   model: Model<Api>;
   provider: string;
@@ -218,6 +234,8 @@ export async function resolveModel(
 
   // Built-in catalog + custom models.json.
   let model = modelRuntime.getModel(provider, lookupName);
+  // Only a registry hit (catalog or models.json) is a hosted-model candidate for the credential check below.
+  const fromRegistry = model !== undefined;
 
   // Catalog hit on the base slug: clone (the registry returns a shared reference)
   // and restore the routing suffix on the id so OpenRouter applies the variant
@@ -288,7 +306,13 @@ export async function resolveModel(
 
   // Dummy key only when no auth is configured anywhere — hasConfiguredAuth() uses the
   // runtime's correct provider→env-var map, so real keys are never clobbered.
+  // A hosted catalog/models.json model with no credentials is an error, not a dummy-key case:
+  // the provider would reject the fake key at the first prompt. Local endpoints and the
+  // hand-built fallback model keep the dummy key (they often need no auth at all).
   if (!modelRuntime.hasConfiguredAuth(model.provider)) {
+    if (fromRegistry && model.baseUrl.startsWith("https://")) {
+      throw new MissingCredentialsError(model.provider, model.id);
+    }
     await modelRuntime.setRuntimeApiKey(model.provider, "ollama");
   }
 
