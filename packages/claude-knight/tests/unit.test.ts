@@ -363,7 +363,7 @@ test("usage limits, auth failures, timeouts and turn caps are reported as such",
   assert.match(auth.error!, /CLAUDE_CODE_OAUTH_TOKEN/);
 
   const timeout = classifyResult({ result: undefined, lastAssistantText: "half a report", thrown: "aborted", aborted: true, config: cfg, durationMs: 90_000 });
-  assert.match(timeout.error!, /timed out after 90s\. Partial output:\n\nhalf a report/);
+  assert.match(timeout.error!, /timed out after 90s \(limit \d+s\)\. .*Partial output:\n\nhalf a report/);
 
   const turns = classifyResult({ result: resultMsg({ subtype: "error_max_turns", is_error: true, errors: [] }), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
   assert.match(turns.error!, /turn limit \(3 turns\)/);
@@ -499,5 +499,7 @@ test("classifyResult: shutdown abort reports an interruption, own timer still re
   const bare = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new ShutdownAbort(), config: cfg, durationMs: 1 });
   assert.match(bare.error!, /^Task interrupted/);
   const timer = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new Error("x"), config: cfg, durationMs: 1 });
-  assert.match(timer.error!, /task timeout/);
+  assert.equal(timer.error, "Task timed out after 0s (limit " + cfg.taskTimeoutMs / 1000 + "s). Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds.");
+  const own = classifyResult({ result: undefined, lastAssistantText: "half", aborted: true, config: cfg, durationMs: 90_000, timeoutMs: 120_000 });
+  assert.match(own.error!, /^Task timed out after 90s \(limit 120s\)\. Raise it with .*timeoutSeconds\. Partial output:\n\nhalf/);
 });

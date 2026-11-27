@@ -323,7 +323,7 @@ test("abort (task timeout) kills the process and reports a timeout", async () =>
   const r = await run("x", undefined, config, ac.signal);
   assert.ok(Date.now() - started < 5000, "killed promptly");
   assert.equal(r.success, false);
-  assert.match(r.error!, /aborted before producing output \(task timeout\)/);
+  assert.match(r.error!, /^Task timed out after \d+s \(limit \d+s\)\. Raise it with/);
 });
 
 /** Running, not merely a zombie (an orphan nobody reaps, e.g. when pid 1 is not an init, stays defunct). */

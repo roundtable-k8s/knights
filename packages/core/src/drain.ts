@@ -11,6 +11,16 @@ export class ShutdownAbort extends Error {
   }
 }
 
+/** Failure text for a task cut short by knight shutdown (shared by both runtimes). */
+export const SHUTDOWN_INTERRUPTED_MESSAGE =
+  "Task interrupted: the knight is shutting down (pod restart or rollout), not a task timeout. It can be retried.";
+
+/** Failure text for a task that hit its time limit; names the elapsed time and the limit. */
+export function taskTimeoutMessage(elapsedMs: number, limitMs: number): string {
+  return `Task timed out after ${Math.round(elapsedMs / 1000)}s (limit ${Math.round(limitMs / 1000)}s). ` +
+    "Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds.";
+}
+
 export interface DrainOptions {
   /** Tasks currently executing. */
   getActive(): number;

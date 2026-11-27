@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { ShutdownAbort, invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { SHUTDOWN_INTERRUPTED_MESSAGE, ShutdownAbort, taskTimeoutMessage, invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -40,6 +40,8 @@ export interface ClassifyInput {
   abortReason?: unknown;
   config: KnightConfig;
   durationMs: number;
+  /** The task's own time limit (`parsed.timeoutMs`); defaults to `config.taskTimeoutMs`. */
+  timeoutMs?: number;
   /** PRs found from the agent's gh/git commands (StreamState.prs). */
   prs?: PRRef[];
   /** Tool calls seen in the stream (StreamState.toolCalls). */
@@ -155,13 +157,12 @@ export function classifyResult(input: ClassifyInput): TaskResult {
     );
   }
   if (aborted && abortReason instanceof ShutdownAbort) {
-    const msg = "Task interrupted: the knight is shutting down (pod restart or rollout), not a task timeout. It can be retried.";
+    const msg = SHUTDOWN_INTERRUPTED_MESSAGE;
     return fail(lastAssistantText ? `${msg} Partial output:\n\n${lastAssistantText}` : msg);
   }
   if (aborted) {
-    return lastAssistantText
-      ? fail(`Task timed out after ${Math.round(input.durationMs / 1000)}s. Partial output:\n\n${lastAssistantText}`)
-      : fail("Task aborted before producing output (task timeout)");
+    const timedOut = taskTimeoutMessage(input.durationMs, input.timeoutMs ?? config.taskTimeoutMs);
+    return fail(lastAssistantText ? `${timedOut} Partial output:\n\n${lastAssistantText}` : timedOut);
   }
   // Provider-side failure after Claude Code's own retries. Only provider/API error text is
   // inspected, never the agent's own output, so a task that failed on its own terms is not marked.

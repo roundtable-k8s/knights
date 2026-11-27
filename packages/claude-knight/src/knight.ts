@@ -180,6 +180,8 @@ export interface ExecuteOverrides {
   cliInvocation?: (inv: CliInvocation) => CliInvocation;
   /** Per-task model (TaskPayload.model); replaces the knight's CLAUDE_MODEL for this task. Must be a Claude model. */
   model?: string;
+  /** The task's effective time limit, named in a timeout failure. Defaults to the knight's TASK_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
 /** One task's message stream from the configured runtime, plus cleanup for its temp files. */
@@ -294,6 +296,7 @@ export async function executeTask(
         abortReason: signal.reason,
         config,
         durationMs: Date.now() - started,
+        timeoutMs: over.timeoutMs,
         toolCalls: state.toolCalls,
         backgroundTasks: state.frozenBackgroundTasks ?? state.backgroundTasks,
       });
@@ -330,6 +333,7 @@ export async function executeTask(
         abortReason: signal.reason,
       config,
       durationMs: Date.now() - started,
+      timeoutMs: over.timeoutMs,
       prs: state.prs,
       toolCalls: state.toolCalls,
       backgroundTasks: state.frozenBackgroundTasks ?? state.backgroundTasks,

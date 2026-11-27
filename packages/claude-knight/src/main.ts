@@ -189,7 +189,7 @@ export async function main(): Promise<void> {
             () => {
               act.setTraceId(activeTraceId());
               taskTrace = traceHeaders();
-              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, scope.signal, parsed.runId, { model: parsed.model });
+              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, scope.signal, parsed.runId, { model: parsed.model, timeoutMs });
             },
             (o) => ({ success: o.success, cost: o.cost, model: o.model, tokens: o.tokens, error: o.error }),
           );

@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -118,6 +118,7 @@ async function main(): Promise<void> {
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
   // Discovery only: tasks stay on JetStream.
   let activeCount = 0;
+  const openScopes = new Set<TaskScope>();
   let knightService: KnightService | null = null;
   const nc = getConnection();
   if (nc) {
@@ -179,6 +180,7 @@ async function main(): Promise<void> {
 
     // Trace headers of the task span, captured while it is active: the result is published after it ends.
     let taskTrace: Record<string, string> | undefined;
+    openScopes.add(scope);
     try {
       activity = new TaskActivity({
         knight: config.knightName,
@@ -205,7 +207,7 @@ async function main(): Promise<void> {
           act.setTraceId(activeTraceId());
           taskTrace = traceHeaders();
           act.started(); // after the trace id is known, so task.started carries it
-          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity });
+          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity, timeoutMs, startedAt: startTime });
         },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );
@@ -245,6 +247,7 @@ async function main(): Promise<void> {
       metrics.tasksTotal.labels("error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
+      openScopes.delete(scope);
       scope.close(); // clears timers, drops the active count, then acks once
       activity?.close();
       knightService?.markTaskFinished();
@@ -264,6 +267,8 @@ async function main(): Promise<void> {
     maxWaitMs: config.drainTimeoutMs,
     // Dispose sessions to abort in-flight agent/compaction/retry/bash work.
     abortInflight: () => {
+      // Abort the scopes first so the result says "shutting down", not a timeout.
+      for (const scope of openScopes) scope.abort(new ShutdownAbort());
       for (const s of getActiveSessions()) {
         try {
           s.dispose();

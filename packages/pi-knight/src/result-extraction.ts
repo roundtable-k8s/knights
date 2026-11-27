@@ -5,6 +5,9 @@ import {
   parseVerdict,
   prsFromBash,
   resolvePrs,
+  SHUTDOWN_INTERRUPTED_MESSAGE,
+  ShutdownAbort,
+  taskTimeoutMessage,
   type PRRef,
   type Verdict,
 } from "@roundtable/knight-core";
@@ -58,6 +61,16 @@ export const LOCAL_NO_TOOL_CALLS_REASON =
   "Local model produced no output and made no tool calls. It may not support tool calling " +
   "(or the endpoint dropped the tools); check the model's tool support and the endpoint logs.";
 
+/** Why and when the task scope aborted, for naming shutdown vs timeout (and the limit) in the failure. */
+export interface AbortContext {
+  /** `signal.reason`; a ShutdownAbort marks an interruption by knight shutdown. */
+  reason?: unknown;
+  /** Time the task ran before the abort. */
+  elapsedMs: number;
+  /** The task's effective time limit. */
+  timeoutMs: number;
+}
+
 /**
  * Describe why a session ended without a deliverable. The Pi agent loop never throws on
  * LLM failures — a stream error or abort ends the loop silently, recorded only as
@@ -69,7 +82,13 @@ export function describeSessionFailure(
   sess: AgentSession,
   taskAborted: boolean,
   fromIndex = 0,
+  abort?: AbortContext,
 ): string | undefined {
+  const abortedText = (): string => {
+    if (abort?.reason instanceof ShutdownAbort) return SHUTDOWN_INTERRUPTED_MESSAGE;
+    if (!taskAborted) return "Task aborted before producing output";
+    return abort ? taskTimeoutMessage(abort.elapsedMs, abort.timeoutMs) : "Task timed out before producing output";
+  };
   const messages = (sess as AgentSession & { messages?: Array<{ role?: string; stopReason?: string; errorMessage?: string }> }).messages;
   if (Array.isArray(messages)) {
     for (let i = messages.length - 1; i >= fromIndex; i--) {
@@ -79,9 +98,7 @@ export function describeSessionFailure(
         return `LLM call failed: ${msg.errorMessage ?? "unknown provider error"}`;
       }
       if (msg.stopReason === "aborted") {
-        return taskAborted
-          ? "Task aborted before producing output (task timeout)"
-          : "Task aborted before producing output";
+        return abortedText();
       }
       // A normal stop whose text is a raw tool-call payload: the model "called" a tool in
       // prose instead of structured tool_calls, so nothing ran (#99, #27).
@@ -92,7 +109,7 @@ export function describeSessionFailure(
       break; // last assistant message is a normal stop — fall through to generic
     }
   }
-  if (taskAborted) return "Task aborted before producing output (task timeout)";
+  if (taskAborted) return abortedText();
   return undefined;
 }
 
@@ -179,6 +196,7 @@ export function describeAbortedTask(
   taskAborted: boolean,
   partial: string | undefined,
   fromIndex = 0,
+  abort?: AbortContext,
 ): string | undefined {
   const messages = (sess as AgentSession & { messages?: Array<{ role?: string; stopReason?: string }> }).messages;
   if (!Array.isArray(messages)) return undefined;
@@ -186,12 +204,11 @@ export function describeAbortedTask(
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
     if (msg.stopReason !== "error" && msg.stopReason !== "aborted") return undefined;
-    const reason = msg.stopReason === "aborted" && taskAborted
-      ? "Task timed out"
-      : describeSessionFailure(sess, taskAborted, fromIndex) ?? "Task aborted";
+    const reason = describeSessionFailure(sess, taskAborted, fromIndex, abort) ?? "Task aborted";
     // "before producing output" contradicts the partial output that follows.
     if (partial && reason.startsWith("Task aborted before producing output")) return `Task aborted. Partial output: ${partial}`;
-    return partial ? `${reason}. Partial output: ${partial}` : reason;
+    if (!partial) return reason;
+    return /[.!?]$/.test(reason) ? `${reason} Partial output: ${partial}` : `${reason}. Partial output: ${partial}`;
   }
   return undefined;
 }
