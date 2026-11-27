@@ -28,6 +28,13 @@ Optional tuning (all per knight, from env):
 At start-up the knight probes `<base URL>/models` and fails fast, retrying with back-off, if
 the endpoint is unreachable or the model is not pulled.
 
+**Keyless `models.json` providers on `https://` URLs are refused.** A hosted-looking model
+(a `models.json` entry whose base URL starts with `https://`) with no credentials fails at
+start-up with `MissingCredentialsError`, because the dummy key is only set for local endpoints.
+For an internal endpoint that is served over `https://` and needs no key, give the provider a
+placeholder `apiKey` in `models.json` (for example `"apiKey": "none"`). Auth then counts as
+configured and the request goes out unchanged. Plain `http://` endpoints need no placeholder.
+
 ## Example Knight
 
 Under isolation a knight reaches an in-cluster model server only through

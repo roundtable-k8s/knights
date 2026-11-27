@@ -1,7 +1,11 @@
 import os from "node:os";
 import path from "node:path";
 
-/** Resolve a read path like pi's read tool (`resolveToCwd`): strip a leading `@`, expand `~`, resolve against the session cwd. */
+/**
+ * Resolve a read path like pi's read tool (`resolveToCwd`): strip a leading `@`, expand `~`, resolve against the session cwd.
+ * This is a subset of `resolveToCwd`: it does not normalise Unicode space characters in the path and does not handle `file://` URLs.
+ * A path that only resolves to a skill under pi's full rules is therefore not recognised as an activation.
+ */
 function resolveReadPath(p: string, cwd: string): string {
   let s = p.startsWith("@") ? p.slice(1) : p;
   if (s === "~") s = os.homedir();

@@ -19,6 +19,7 @@ npm test --workspace packages/pi-knight   # one package
 
 - Work in one package unless the task says otherwise.
 - Shared code goes in `packages/core`.
+- The root `build` script lists its workspaces by hand (`--workspace=pi-knight --workspace=claude-knight`). A new `packages/*` package is skipped by `npm run build` until it is added there.
 - Run typecheck, test and lint before pushing.
 - Use conventional commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
 - Never add AI attribution lines (for example "Co-Authored-By" or "Generated with" footers) to commits or PRs.

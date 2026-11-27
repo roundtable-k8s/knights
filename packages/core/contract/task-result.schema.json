@@ -86,7 +86,7 @@
     "tool_calls": {
       "type": "number",
       "minimum": 0,
-      "description": "Tool calls the agent made (pi-knight and claude-knight)."
+      "description": "Tool calls the agent made (pi-knight and claude-knight). 0 on a failure result (lost, invalid, refused) means not counted, like `cost` and `tokens`; tools may have run before the failure."
     },
     "turns": {
       "type": "number",
