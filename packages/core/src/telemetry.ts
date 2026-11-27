@@ -23,13 +23,17 @@ export interface Telemetry {
   shutdown(): Promise<void>;
 }
 
-/** Tracing is on only when an exporter is configured and the SDK is not disabled. */
+/**
+ * Tracing is on only when an exporter is configured and the SDK is not disabled. `OTEL_TRACES_EXPORTER=none`
+ * (the OpenTelemetry value for no exporter) counts as not configured; a general or traces endpoint still turns it on.
+ */
 export function telemetryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env["OTEL_SDK_DISABLED"]?.trim().toLowerCase() === "true") return false;
+  const exporter = env["OTEL_TRACES_EXPORTER"]?.trim().toLowerCase();
   return !!(
     env["OTEL_EXPORTER_OTLP_ENDPOINT"]?.trim() ||
     env["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"]?.trim() ||
-    env["OTEL_TRACES_EXPORTER"]?.trim()
+    (exporter && exporter !== "none")
   );
 }
 
