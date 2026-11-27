@@ -124,7 +124,7 @@ test("boundText never leaves half a surrogate pair at the cut", () => {
   }
   // The pre-cut at max * 8 lands inside a pair as well.
   const pre = boundText("a".repeat(79) + "😀" + "b".repeat(50), 10);
-  assert.ok(!/[\ud800-\udfff]/.test(pre.text.replace(/[\ud800-\udbff][\udc00-\udfff]/g, "")));
+  assert.ok(pre.text.isWellFormed());
 });
 
 test("a secret straddling the preview limit is not half-leaked", () => {

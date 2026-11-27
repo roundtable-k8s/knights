@@ -277,11 +277,9 @@ describe("startIntrospect", () => {
     assert.equal(tooBig.pod, "kay.0");
     assert.equal(tooBig.node, "n1");
     assert.match(tooBig.error, /^reply too large \(\d+ bytes\) \(server max_payload 50 bytes\): request at most \d+ entries \(limit=\d+\)$/);
-    const fit = Number(/limit=(\d+)\)$/.exec(tooBig.error)![1]);
-    const bytes = Number(/^reply too large \((\d+) bytes\)/.exec(tooBig.error)![1]);
-    assert.ok(fit >= 1 && fit < 500, "suggests fewer entries than the caller asked for");
-    // A 10 % margin under the linear estimate: the suggested reply must fit within 90 % of max_payload.
-    assert.ok(fit * bytes <= 0.9 * 500 * 50, `suggested ${fit} entries would be ${fit * bytes} bytes`);
+    // The fixture's reply is 67 bytes; 90 % of max_payload (50) per entry, over 500 requested entries: floor(500 * 50 * 0.9 / 67) = 335.
+    assert.match(tooBig.error, /^reply too large \(67 bytes\)/);
+    assert.match(tooBig.error, /limit=335\)$/, "suggests 335 entries, fewer than the 500 asked for");
     // The responder is still alive for the next request.
     const next = JSON.parse(await base!.push(JSON.stringify({ type: "history" })));
     assert.deepEqual(next, { pod: "kay.0", node: "n1", knight: "Kay", sessions: [{ id: "abc" }], total: 1 });
