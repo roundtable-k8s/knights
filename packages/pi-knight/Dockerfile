@@ -1,5 +1,5 @@
 # Build from the repo root: docker build -f packages/pi-knight/Dockerfile .
-FROM node:22.19-slim AS builder
+FROM node:26.13-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/core/package.json ./packages/core/
@@ -22,7 +22,7 @@ RUN mkdir -p /out \
     && mkdir -p /out/node_modules/@roundtable/knight-core \
     && cp -a packages/core/package.json packages/core/dist /out/node_modules/@roundtable/knight-core/
 
-FROM node:22.19-slim
+FROM node:26.13-slim
 LABEL org.opencontainers.image.source="https://github.com/roundtable-k8s/knights" \
       org.opencontainers.image.description="pi-knight: universal base agent runtime for the Knights of the Round Table" \
       org.opencontainers.image.licenses="Apache-2.0"
