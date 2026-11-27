@@ -5,18 +5,15 @@
  * agent-browser CLI (compact accessibility trees with @e refs), exposed through
  * the in-process "roundtable" MCP server as mcp__roundtable__browser_*.
  *
- * Differences from pi-knight: arguments go to agent-browser as an argv array
- * (no shell, so page text or selectors can't inject commands), and screenshots
- * come back as an image Claude can see, not just a file path.
+ * Difference from pi-knight: screenshots come back as an image Claude can see,
+ * not just a file path. Both runtimes run agent-browser through the core
+ * argv-based runner (no shell).
  */
 import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { log, browserEnabled, runBrowser } from "@roundtable/knight-core";
-
-export { browserEnabled, runBrowser, setBrowserExec } from "@roundtable/knight-core";
-export type { ExecFn } from "@roundtable/knight-core";
 
 const MAX_IMAGE_BYTES = 4_500_000;
 

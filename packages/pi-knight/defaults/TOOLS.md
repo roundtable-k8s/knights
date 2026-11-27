@@ -32,7 +32,7 @@ Run `mise ls` to see what's installed. Baseline tools available to all knights:
 - `curl` — HTTP requests
 - `git` — version control
 
-Your knight may have additional tools installed via ConfigMap or self-provisioned.
+Your knight may have additional tools installed through `spec.tools.nix` on its Knight resource, or self-provisioned.
 Run `mise ls` or `which <tool>` to check availability.
 
 Need a tool you don't have? See AGENTS.md for self-provisioning instructions.

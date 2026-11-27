@@ -8,8 +8,10 @@
 # period and loses the one it is running when it is SIGKILLed.
 #
 # Bash runs a trap only between commands, so a long phase must go through
-# rt_run: it runs the phase as a background job and waits for it, and `wait`
-# returns as soon as a trapped signal arrives. The handler stops that job and
+# rt_run (a kept helper: neither entrypoint has a slow phase today, since
+# tools come from spec.tools.nix, but a future one must use it): it runs the
+# phase as a background job and waits for it, and `wait` returns as soon as a
+# trapped signal arrives. The handler stops that job and
 # exits 0 before the runtime is ever started.
 
 RT_PHASE_PID=""

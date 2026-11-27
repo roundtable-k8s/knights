@@ -10,8 +10,8 @@ against them.
 | `task-payload.schema.json` | A task on `<prefix>.tasks.<domain>.<knight>` (`TaskPayload`). |
 | `task-result.schema.json` | A result on `<prefix>.results.<taskId>` (`TaskResult`). |
 | `task-activity-events.schema.json` | A live activity event on `<prefix>.activity.<Knight>.<taskId>` (v1). |
-| `fixtures/*.json` | Golden payloads: two tasks, six results, one activity event per event type. |
-| `fixtures/consumer.knight-tasks.json` | The knight's durable task consumer (`<knight>-consumer`, from `taskConsumerConfig` in `src/nats`), in NATS wire names. The operator vendors it and checks its consumer against it. |
+| `fixtures/*.json` | Golden payloads: two tasks (`task.*`), eight results (`result.*`), one activity event per event type (`activity.*`). |
+| `fixtures/consumer.knight-tasks.json` | The knight's durable task consumer (`<knight>-consumer`, from `taskConsumerConfig` in `src/nats`), in NATS wire names. It pins the settings for the operator to vendor; this repo checks `taskConsumerConfig` against it (see Checks). |
 
 The schemas are JSON Schema 2020-12. Do not edit them by hand: change `schema.ts`, then run
 

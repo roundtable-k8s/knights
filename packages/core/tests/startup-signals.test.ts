@@ -124,7 +124,7 @@ describe("startup-signals.sh (entrypoint)", () => {
     assert.match(r.out, /ok/);
   });
 
-  it("both entrypoints source it as their first statement, run slow phases through rt_run and exec the runtime", async () => {
+  it("both entrypoints source it as their first statement and exec the runtime", async () => {
     const { readFileSync } = await import("node:fs");
     for (const pkg of ["claude-knight", "pi-knight"]) {
       const src = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "scripts", "entrypoint.sh"), "utf8");

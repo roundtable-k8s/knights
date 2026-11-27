@@ -375,9 +375,10 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
 
   const jsm: JetStreamManager = await jetstreamManager(conn);
 
-  const durableName = `${config.knightName}-consumer`;
   const ackWaitMs = opts.ackWaitMs ?? ACK_WAIT_MS;
-  await bindConsumer(jsm, config.natsTasksStream, taskConsumerConfig(config.knightName, config.subscribeTopics, ackWaitMs));
+  const desired = taskConsumerConfig(config.knightName, config.subscribeTopics, ackWaitMs);
+  const durableName = desired.durable_name;
+  await bindConsumer(jsm, config.natsTasksStream, desired);
 
   const pullConsumer = await client.consumers.get(config.natsTasksStream, durableName);
   const tracker = new TaskTracker(undefined, undefined, undefined, (config.taskTimeoutMs ?? DEFAULT_TASK_TIMEOUT_MS) + ackWaitMs);
