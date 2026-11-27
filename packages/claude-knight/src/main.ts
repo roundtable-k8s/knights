@@ -6,7 +6,7 @@ import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload } from "./result.js";
 import { refuseForReserve } from "./reserve-refusal.js";
-import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, createActiveCounter, type TaskScope, subscribe, TaskActivity, SlotPool, isSelfEcho, runInSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, createActiveCounter, type TaskScope, subscribe, TaskActivity, SlotPool, isSelfEcho, runInSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, mayPullAfterSweep, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
 import { recordPublishFailed, recordTaskOutcome } from "./task-metrics.js";
@@ -264,8 +264,9 @@ export async function main(): Promise<void> {
   // start-up exit is already running: do not start the pull loop.
   if (!signals.ready(shutdown)) return;
 
-  // No task may start while the stale-workspace sweep is still running.
-  await sweep;
+  // No task may start while the stale-workspace sweep is still running, and none after a
+  // termination requested during it (the start-up exit is already running).
+  if (!(await mayPullAfterSweep(sweep, signals))) return;
 
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {

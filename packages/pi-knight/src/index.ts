@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, createActiveCounter, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, isSelfEcho, runInSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, createActiveCounter, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, isSelfEcho, runInSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, mayPullAfterSweep, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -299,8 +299,9 @@ async function main(): Promise<void> {
   // start-up exit is already running: do not start the pull loop.
   if (!signals.ready(shutdown)) return;
 
-  // No task may start while the stale-workspace sweep is still running.
-  await sweep;
+  // No task may start while the stale-workspace sweep is still running, and none after a
+  // termination requested during it (the start-up exit is already running).
+  if (!(await mayPullAfterSweep(sweep, signals))) return;
 
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {

@@ -82,3 +82,13 @@ export function installStartupSignalHandlers(opts: StartupSignalOptions): Startu
     },
   };
 }
+
+/**
+ * Resolves once the stale-workspace sweep settled, to whether the knight may still start
+ * pulling. A termination requested during the sweep already runs the start-up exit, so
+ * subscribing after it would leave a pull loop that nothing stops: callers must return.
+ */
+export async function mayPullAfterSweep(sweep: Promise<unknown>, signals: StartupSignals): Promise<boolean> {
+  await sweep;
+  return signals.requested() === null;
+}
