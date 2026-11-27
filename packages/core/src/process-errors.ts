@@ -11,6 +11,7 @@ export interface ProcessErrorOptions {
   target?: Pick<NodeJS.Process, "on">;
 }
 
+/** A non-Error value (a thrown string, say) has no `stack`, so only its string form is logged. */
 function describe(err: unknown): { error: string; stack?: string } {
   if (err instanceof Error) return { error: err.message, ...(err.stack ? { stack: err.stack } : {}) };
   return { error: String(err) };

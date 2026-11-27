@@ -281,13 +281,33 @@ describe("Roster when the watch ends", () => {
     await roster.start();
     const warns = () => chunks.join("").split("\n").filter((l) => l.includes('"level":"warn"'));
     assert.equal(warns().length, 1, "the first failure is logged");
-    assert.match(warns()[0]!, /Roster watch ended/);
+    assert.match(warns()[0]!, /Roster watch failed or ended/);
     mock.timers.tick(ROSTER_RETRY_MIN_MS);
     await new Promise((r) => setImmediate(r));
     mock.timers.tick(ROSTER_RETRY_MIN_MS * 2);
     await new Promise((r) => setImmediate(r));
     assert.equal(st.watches, 3, "retries continue");
     assert.equal(warns().length, 1, "later retries are not logged");
+    roster.stop();
+  });
+
+  it("a stopped-then-restarted roster logs its first failure again, once", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const chunks: string[] = [];
+    setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+    initLogger("lancelot", "info");
+    const { source, st } = endable([card("galahad", "security")]);
+    const roster = new Roster({ self: "lancelot", source });
+    const warns = () => chunks.join("").split("\n").filter((l) => l.includes('"level":"warn"'));
+    st.failNext = true;
+    await roster.start();
+    assert.equal(warns().length, 1);
+    roster.stop();
+    await roster.start();
+    assert.equal(warns().length, 2, "the restarted roster logs its first failure");
+    mock.timers.tick(ROSTER_RETRY_MIN_MS);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(warns().length, 2, "retries after the restart stay quiet");
     roster.stop();
   });
 

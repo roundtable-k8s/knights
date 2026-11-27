@@ -239,6 +239,12 @@ test("taskLimitNote handles hours, one minute and sub-minute limits", () => {
   assert.match(taskLimitNote(30000, T0), /30 seconds, stopping at 14:02 UTC/);
 });
 
+test("taskLimitNote rounds to whole seconds before choosing the unit", () => {
+  assert.match(taskLimitNote(59999, T0), /Time limit for this task: 1 minute, stopping at 14:02 UTC/);
+  assert.match(taskLimitNote(59400, T0), /Time limit for this task: 59 seconds, stopping at 14:02 UTC/);
+  assert.match(taskLimitNote(119999, T0), /Time limit for this task: 2 minutes, stopping at 14:03 UTC/);
+});
+
 test("withTaskLimitNote appends after the task text and honours KNIGHT_TASK_LIMIT_NOTE=off", () => {
   const out = withTaskLimitNote("do it", 600000, T0, {});
   assert.ok(out.startsWith("do it\n\nTime limit for this task: 10 minutes"));

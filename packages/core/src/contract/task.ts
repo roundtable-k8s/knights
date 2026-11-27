@@ -139,11 +139,10 @@ export function promptWithRetryContext(task: Pick<ParsedTask, "task" | "attempt"
 }
 
 function formatLimit(timeoutMs: number): string {
-  if (timeoutMs < 60_000) {
-    const s = Math.max(1, Math.round(timeoutMs / 1000));
-    return `${s} second${s === 1 ? "" : "s"}`;
-  }
-  const total = Math.round(timeoutMs / 60_000);
+  // Round to whole seconds first, so 59.999 s reads "1 minute" rather than "60 seconds".
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const total = Math.round(seconds / 60);
   const h = Math.floor(total / 60);
   const m = total % 60;
   const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;

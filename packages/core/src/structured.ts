@@ -89,6 +89,7 @@ export function gitPushArgs(segment: string): string[] | undefined {
   return undefined;
 }
 
+/** Whether the segment is a `git push` (see `gitPushArgs`). */
 export const isGitPush = (segment: string): boolean => gitPushArgs(segment) !== undefined;
 
 /** Bash command that can open or update a PR; worth remembering until its output arrives. */
