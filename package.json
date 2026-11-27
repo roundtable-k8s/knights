@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @roundtable/knight-core && npm run build --workspaces --if-present",
+    "build": "npm run build -w @roundtable/knight-core && npm run build --workspace=pi-knight --workspace=claude-knight --if-present",
     "typecheck": "npm run build -w @roundtable/knight-core && npm run typecheck --workspaces --if-present && tsc -p scripts/dev && tsc -p tsconfig.tests.json",
     "test": "npm run build -w @roundtable/knight-core && npm run test --workspaces --if-present",
     "test:hermetic": "npm run build -w @roundtable/knight-core && npm run test:hermetic --workspaces --if-present",
