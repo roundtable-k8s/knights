@@ -21,6 +21,16 @@ describe("publishTaskOutcome", () => {
     assert.equal(built, 1);
   });
 
+  it("hands traceHeaders to publish, and none when unset", async () => {
+    const seen: Array<Record<string, string> | undefined> = [];
+    const base = { taskId: "t1", record: () => {}, payload: () => result, onPublishFailed: () => assert.fail("publish succeeded") };
+    const publish = async (_id: string, _p: TaskResult, o: { traceHeaders?: Record<string, string> }) => { seen.push(o.traceHeaders); };
+    const h = { traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" };
+    await publishTaskOutcome({ ...base, publish, traceHeaders: h });
+    await publishTaskOutcome({ ...base, publish });
+    assert.deepEqual(seen, [h, undefined]);
+  });
+
   it("calls onPublishFailed once and resolves when publish rejects", async () => {
     let failed = 0;
     await publishTaskOutcome({

@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -177,6 +177,8 @@ async function main(): Promise<void> {
       },
     });
 
+    // Trace headers of the task span, captured while it is active: the result is published after it ends.
+    let taskTrace: Record<string, string> | undefined;
     try {
       activity = new TaskActivity({
         knight: config.knightName,
@@ -201,6 +203,7 @@ async function main(): Promise<void> {
         { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
         () => {
           act.setTraceId(activeTraceId());
+          taskTrace = traceHeaders();
           act.started(); // after the trace id is known, so task.started carries it
           return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity });
         },
@@ -222,6 +225,7 @@ async function main(): Promise<void> {
           metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
           metrics.recordTokens(result.model, result.tokens);
         },
+        traceHeaders: taskTrace,
         payload: () => buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }),
         // Do not publish a made-up failure for a task that ran: the real result is lost.
         onPublishFailed: () => metrics.tasksTotal.labels("publish_failed").inc(),
@@ -235,7 +239,7 @@ async function main(): Promise<void> {
       await publishResult(taskId, buildResultPayload(
         failedTaskResult(errMsg, config.knightModel),
         { taskId, knight: config.knightName, durationMs, parsed: delivery.task },
-      )).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
+      ), { traceHeaders: taskTrace }).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
       metrics.recordRefusal(refusalCode(errMsg));
       metrics.tasksTotal.labels("error").inc();

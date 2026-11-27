@@ -31,7 +31,7 @@ Levels are `debug`, `info`, `warn`, `error`; `LOG_LEVEL` sets the minimum writte
 The messages below are the ones the code logs today; use them as search strings in Loki.
 - `NATS connected` / `NATS disconnected` / `NATS reconnected` — connection state changes
 - `Executing task` — task accepted by the agent (`model`, `taskLength`, `runId`, `workDir`)
-- `Result published` — result message sent (`taskId`, `subject`; `attempt` on retries)
+- `Result published` — result message sent (`taskId`, `subject`; `attempt` on retries). With tracing on, the result carries the task span's `traceparent`/`tracestate` headers. The operator does not read them yet (it rebuilds result spans from the Chain's `status.traceContext`), so the result span is not joined by these headers; tracked in roundtable-k8s/roundtable#900.
 - `Task failed` — task errored (`taskId`, `error`)
 - `Task delivered but never acked — reporting failure` — a task was delivered but not acknowledged in time, so a failure result is sent
 
