@@ -395,7 +395,12 @@ export class TaskActivity {
     return {
       turns: this.turns,
       ...(this.usageSeen
-        ? { inputTokens: Math.round(this.tokens.input), outputTokens: Math.round(this.tokens.output), ...(this.tokens.cacheWrite > 0 ? { cacheWriteTokens: Math.round(this.tokens.cacheWrite) } : {}), costUsd: this.cost }
+        ? {
+            inputTokens: Math.round(this.tokens.input),
+            outputTokens: Math.round(this.tokens.output),
+            ...(this.tokens.cacheWrite > 0 ? { cacheWriteTokens: Math.round(this.tokens.cacheWrite) } : {}),
+            costUsd: this.cost,
+          }
         : {}),
     };
   }

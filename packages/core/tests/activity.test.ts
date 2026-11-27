@@ -399,3 +399,12 @@ test("task.started carries attempt only for a retry (#36)", () => {
   make(none, {}).started();
   assert.ok(!("attempt" in none[0]!.ev));
 });
+
+test("finished carries cacheWriteTokens from the result tokens, and omits them when zero", () => {
+  const withWrites: Pub[] = [];
+  make(withWrites).finished({ success: true, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } });
+  assert.equal(withWrites[0]!.ev.cacheWriteTokens, 4);
+  const none: Pub[] = [];
+  make(none).finished({ success: true, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 0 } });
+  assert.equal(none[0]!.ev.cacheWriteTokens, undefined);
+});
