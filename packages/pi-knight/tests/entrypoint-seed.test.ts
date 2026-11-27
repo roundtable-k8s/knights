@@ -59,6 +59,24 @@ describe("entrypoint seeding (seed-data.sh)", () => {
     assert.match(out, /WARNING/);
   });
 
+  it("invalid base64 leaves no models.json (and no temp file) and says the decode failed", () => {
+    const root = mkdtempSync(join(tmpdir(), "seed-"));
+    try {
+      const target = join(root, "models.json");
+      writeFileSync(target, '{"keep":true}');
+      const out = run({ PI_MODELS_JSON_B64: "!!!not base64!!!" }, `rt_write_models_json "${target}"`);
+      assert.match(out, /base64 decode failed/);
+      assert.doesNotMatch(out, /cannot write/);
+      assert.equal(readFileSync(target, "utf8"), '{"keep":true}'); // existing file untouched
+      assert.deepEqual(readdirSync(root), ["models.json"]);
+      rmSync(target);
+      run({ PI_MODELS_JSON_B64: "!!!not base64!!!" }, `rt_write_models_json "${target}"`);
+      assert.deepEqual(readdirSync(root), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("entrypoint derives paths from KNIGHT_DATA_DIR and MODELS_JSON_PATH", () => {
     const src = readFileSync(resolve(import.meta.dirname, "..", "scripts", "entrypoint.sh"), "utf8");
     assert.match(src, /DATA_DIR="\$\{KNIGHT_DATA_DIR:-\/data\}"/);

@@ -82,7 +82,7 @@ async function main(): Promise<void> {
       const { skills, diagnostics } = loadSkills({
         cwd: dataPaths().dataDir,
         agentDir: "/config",
-        skillPaths: [process.env["KNIGHT_SKILLS_DIR"] ?? "/skills"], // same override as claude-knight
+        skillPaths: [config.skillsDir], // same override as claude-knight
         includeDefaults: true,
       });
       if (skills.length > 0) {
@@ -130,7 +130,7 @@ async function main(): Promise<void> {
       runtime: "pi-knight",
       version: readPackageVersion(import.meta.url),
       pod: config.hostname,
-      skillsDir: "/skills",
+      skillsDir: config.skillsDir,
       maxConcurrentTasks: config.maxConcurrentTasks,
       getActive: () => activeCount,
       getCounts: () => countsFromMetrics(metrics.tasksTotal, config.knightName),

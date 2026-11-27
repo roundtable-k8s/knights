@@ -20,6 +20,7 @@ test("pi-knight config defaults", () => {
   assert.equal(c.logLevel, "info");
   assert.equal(c.thinkingLevel, "off");
   assert.equal(c.activityContent, "preview");
+  assert.equal(c.skillsDir, "/skills");
 });
 
 test("pi-knight config env overrides and required vars", () => {

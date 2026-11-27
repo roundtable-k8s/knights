@@ -9,7 +9,7 @@ export interface TaskScopeOptions {
   heartbeatMs?: number;
   /** Runs after each `delivery.working()`. A throw is logged and does not stop later beats. */
   onHeartbeat?: () => void;
-  /** Runs once at start (e.g. bump the active count). */
+  /** Runs once at start (e.g. bump the active count). A throw is logged; `onClose` is then skipped. */
   onOpen?: () => void;
   /** Runs once on close, only if `onOpen` ran (e.g. drop the active count). */
   onClose?: () => void;
@@ -40,9 +40,14 @@ export function startTaskScope(opts: TaskScopeOptions): TaskScope {
     }
   };
 
-  // onOpen may throw: nothing is armed yet, so the caller's own cleanup is enough.
-  opts.onOpen?.();
-  opened = true;
+  // A throwing onOpen is logged, not propagated: the scope must still exist so the caller's
+  // finally can close it (ack once). onClose then does not run, as the open never completed.
+  try {
+    opts.onOpen?.();
+    opened = true;
+  } catch (e) {
+    log.error("Task scope onOpen failed", { error: String(e) });
+  }
 
   const heartbeat = setInterval(() => {
     guard("heartbeat", () => delivery.working());

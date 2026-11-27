@@ -22,6 +22,8 @@ export interface KnightConfig extends BaseKnightConfig {
   sessionRetentionDays: number;
   /** Task activity event content: `preview` (default) or `none` (no previews / argument summaries). */
   activityContent: "none" | "preview";
+  /** Skills directory (KNIGHT_SKILLS_DIR, default /skills): start-up wait, service card and SDK resource loader. */
+  skillsDir: string;
 }
 
 /** On-disk locations of a pi-knight, all under one data root unless overridden. */
@@ -73,5 +75,6 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     sessionRetentionMaxFiles: positiveIntEnv(env, "SESSION_RETENTION_MAX_FILES", 100, { min: 0 }),
     sessionRetentionDays: nonNegativeFloatEnv(env, "SESSION_RETENTION_DAYS", 30),
     activityContent: env["ACTIVITY_CONTENT"] === "none" ? "none" : "preview",
+    skillsDir: env["KNIGHT_SKILLS_DIR"] || "/skills",
   };
 }

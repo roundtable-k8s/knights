@@ -111,6 +111,20 @@ test("isClaudeAlias recognises claude-knight aliases and claude ids without a pr
   }
 });
 
+test("isClaudeAlias applies the routing suffix first", () => {
+  assert.equal(isClaudeAlias("sonnet:floor"), true);
+  assert.equal(isClaudeAlias("sonnet[1m]:nitro"), true);
+  assert.equal(isClaudeAlias("claude-sonnet-4-5:floor"), true);
+  assert.equal(isClaudeAlias("my-sonnet:floor"), false);
+});
+
+test("resolveModel words a typo'd claude-* id as a catalog miss, not a Claude Code alias", async () => {
+  await withEnv({}, async () => {
+    await assert.rejects(resolveModel("claude-sonet-9"), (e: Error) => /not in the model catalog/.test(e.message) && !/Claude Code alias/.test(e.message));
+    await assert.rejects(resolveModel("sonnet:floor"), /is a Claude Code alias/);
+  });
+});
+
 test("resolveModel rejects a bare Claude alias without a local endpoint instead of falling back to localhost", async () => {
   await withEnv({}, async () => {
     await assert.rejects(resolveModel("sonnet"), /is a Claude Code alias; pi-knight needs provider\/model, e.g. "anthropic\/claude-sonnet-4-5"/);

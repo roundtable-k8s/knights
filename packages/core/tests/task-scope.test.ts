@@ -30,6 +30,15 @@ test("heartbeat fires at the interval and stops after close", () => {
   assert.deepEqual(calls, []);
 });
 
+test("a throwing onOpen is contained: scope still closes, acks once, skips onClose", () => {
+  const { scope, calls } = setup({ onOpen: () => { throw new Error("boom"); } });
+  mock.timers.tick(150);
+  scope.close();
+  scope.close();
+  assert.deepEqual(calls, ["working", "beat", "ack"]);
+  mock.timers.reset();
+});
+
 test("timeout aborts the signal and sets timedOut; abort() does not", () => {
   const a = setup();
   assert.equal(a.scope.timedOut, false);

@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -63,6 +63,49 @@ test("SIGTERM during the skills wait: exits 0 within seconds, never connects to 
     assert.ok(elapsed < 5000, `took ${elapsed}ms`);
     assert.match(out, /Shutdown signal received during start-up/);
     assert.doesNotMatch(out, /Connecting to NATS|Pi-Knight ready|Task received/);
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("scrubAgentEnv runs at start-up: a production-mode switch is gone before the first signal handler runs", async () => {
+  const home = mkdtempSync(join(tmpdir(), "pk-scrub-"));
+  const work = join(home, "data");
+  mkdirSync(work);
+  mkdirSync(join(home, "skills"));
+  // Preloaded: registers its SIGTERM listener before the app's, so it reports the env the app left in place.
+  const probe = join(home, "probe.mjs");
+  writeFileSync(probe, `process.on("SIGTERM", () => console.log("PROBE NODE_ENV=" + process.env.NODE_ENV + " OMIT=" + process.env.npm_config_omit));\n`);
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    HOME: home,
+    NODE_ENV: "production",
+    npm_config_omit: "dev",
+    KNIGHT_NAME: "Scrub",
+    SUBSCRIBE_TOPICS: "rt.tasks.test.>",
+    KNIGHT_DATA_DIR: work,
+    KNIGHT_SKILLS: "x",
+    KNIGHT_SKILLS_DIR: join(home, "skills"),
+    KNIGHT_MODEL: "openrouter/deepseek/deepseek-v3.2",
+    OPENROUTER_API_KEY: "sk-or-fake-startup",
+    METRICS_PORT: String(await freePort()),
+    NATS_URL: "nats://127.0.0.1:1",
+  };
+  const child = spawn(process.execPath, ["--import", "tsx", "--import", probe, "src/index.ts"], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
+  let out = "";
+  child.stdout.on("data", (d) => (out += d));
+  child.stderr.on("data", (d) => (out += d));
+  const exited = new Promise<void>((r) => child.on("exit", () => r()));
+  try {
+    const deadline = Date.now() + 90_000;
+    while (!out.includes("No skills found, waiting for git-sync") && Date.now() < deadline && child.exitCode === null) await sleep(50);
+    assert.match(out, /No skills found, waiting for git-sync/, out);
+    child.kill("SIGTERM");
+    const killer = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    await exited;
+    clearTimeout(killer);
+    assert.match(out, /PROBE NODE_ENV=undefined OMIT=undefined/, out);
   } finally {
     child.kill("SIGKILL");
     rmSync(home, { recursive: true, force: true });

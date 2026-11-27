@@ -130,6 +130,37 @@ test("a rejecting abort() is caught and does not raise an unhandled rejection", 
   }
 });
 
+test("usage is recorded once on the abort-during-prompt path", async () => {
+  const model = "test/usage-abort-prompt";
+  const fake = fakeSession({ hold: true, inputTokens: 53 });
+  __setSubagentSessionFactoryForTests(async () => ({ session: fake.session, local: false }));
+  try {
+    const ac = new AbortController();
+    const pending = run(ac.signal, model);
+    await fake.promptStarted;
+    ac.abort();
+    await pending;
+    assert.match(await tokensLine(model, "input"), / 53$/);
+  } finally {
+    __setSubagentSessionFactoryForTests(null);
+  }
+});
+
+test("the spawn_subagent tool rejects a bare Claude alias with the provider/model hint", async () => {
+  __setSubagentSessionFactoryForTests(null); // real factory: resolveModel decides
+  const keys = ["KNIGHT_MODEL_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE"];
+  const saved = keys.map((k) => process.env[k]);
+  for (const k of keys) delete process.env[k];
+  try {
+    const text = textOf(await run(new AbortController().signal, "sonnet"));
+    assert.match(text, /^Sub-agent error: .*is a Claude Code alias; pi-knight needs provider\/model/);
+  } finally {
+    keys.forEach((k, i) => {
+      if (saved[i] !== undefined) process.env[k] = saved[i];
+    });
+  }
+});
+
 test("usage is recorded once when the prompt fails", async () => {
   const model = "test/usage-failed-prompt";
   const fake = fakeSession({ promptFails: true, inputTokens: 37 });

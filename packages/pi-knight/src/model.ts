@@ -138,7 +138,8 @@ export function createTrustedSettingsManager(cwd: string, agentDir: string): Set
  */
 export function isClaudeAlias(modelStr: string): boolean {
   if (modelStr.includes("/")) return false;
-  return /^(opus|sonnet|haiku|fable|opusplan)(\[[^\]]*\])?$/.test(modelStr) || modelStr.startsWith("claude-");
+  const { base } = splitRoutingSuffix(modelStr);
+  return /^(opus|sonnet|haiku|fable|opusplan)(\[[^\]]*\])?$/.test(base) || base.startsWith("claude-");
 }
 
 /** Parse "provider/model" → { provider, modelName }. Defaults provider to anthropic. */
@@ -229,8 +230,11 @@ export async function resolveModel(
   // A Claude alias that is not in the catalog and has no local endpoint configured would otherwise
   // be sent to the localhost:4000 fallback. Fail with the fix instead.
   if (!model && isClaudeAlias(modelStr) && !localBaseUrlFromEnv()) {
+    const hint = `pi-knight needs provider/model, e.g. "anthropic/claude-sonnet-4-5"`;
     throw new Error(
-      `Model "${modelStr}" is a Claude Code alias; pi-knight needs provider/model, e.g. "anthropic/claude-sonnet-4-5"`,
+      splitRoutingSuffix(modelStr).base.startsWith("claude-")
+        ? `Model "${modelStr}" is not in the model catalog or models.json (a typo in the id?); ${hint}`
+        : `Model "${modelStr}" is a Claude Code alias; ${hint}`,
     );
   }
 
