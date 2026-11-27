@@ -1,19 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { Writable } from "node:stream";
-import { initLogger, setLogStream } from "../src/logger.js";
+import { initLogger } from "../src/logger.js";
+import { captureLogs } from "./helpers/log-capture.js";
 import { installProcessErrorHandlers } from "../src/process-errors.js";
 import { TaskActivity } from "../src/activity.js";
 
 function setup() {
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  const logs = captureLogs();
   initLogger("k", "info");
   const target = new EventEmitter();
   const codes: number[] = [];
   installProcessErrorHandlers({ target: target as unknown as NodeJS.Process, exit: (c) => codes.push(c) });
-  const lines = () => chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+  const lines = () => logs.lines();
   return { target, codes, lines };
 }
 

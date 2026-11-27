@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect, createServer } from "node:net";
-import { Writable } from "node:stream";
 import { startHealthServer, stopHealthServer, setDegradedReason, getDegradedReason } from "../src/health.ts";
 import { createKnightMetrics } from "../src/metrics.ts";
-import { initLogger, setLogStream } from "../src/logger.ts";
+import { initLogger } from "../src/logger.ts";
+import { captureLogs } from "./helpers/log-capture.js";
 
 const freePort = () =>
   new Promise<number>((resolve) => {
@@ -111,14 +111,13 @@ test("health server logs a listen error (EADDRINUSE on a taken port) with the po
   const blocker = createServer();
   await new Promise<void>((resolve) => blocker.listen(0, resolve));
   const port = (blocker.address() as { port: number }).port;
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  const logs = captureLogs();
   initLogger("T", "info");
   const m = createKnightMetrics({ runtime: "test", knight: "T" });
   try {
     assert.doesNotThrow(() => startHealthServer({ knightName: "T", port, registry: m.registry }));
     await new Promise((r) => setTimeout(r, 50));
-    const failed = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.msg === "health server failed");
+    const failed = logs.find("health server failed");
     assert.ok(failed, "expected the listen error to be logged");
     assert.equal(failed.level, "error");
     assert.equal(failed.port, port);

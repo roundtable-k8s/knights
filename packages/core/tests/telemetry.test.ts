@@ -2,13 +2,13 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { Writable } from "node:stream";
 import { context, propagation, trace, metrics } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { initLogger, log, setLogStream } from "../src/logger.js";
+import { initLogger, log } from "../src/logger.js";
 import { startTelemetry, telemetryEnabled, type Telemetry, resourceDefaults, withTaskSpan } from "../src/telemetry.js";
 import { traceparentEnv } from "../src/trace-context.js";
-import { isolateOtelEnv } from "./helpers/otel-env.js";
+import { isolateOtelEnv, resetOtelApiGlobal } from "./helpers/otel-env.js";
+import { captureLogs } from "./helpers/log-capture.js";
 
 let restoreOtelEnv = (): void => {};
 beforeEach(() => {
@@ -106,8 +106,7 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
       // Traces only: starting the SDK must not swap in a meter provider.
       assert.equal(metrics.getMeterProvider(), meterProviderBefore);
 
-      const chunks: string[] = [];
-      setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+      const logs = captureLogs();
       initLogger("galahad", "info", "dev");
 
       let tp: Record<string, string> = {};
@@ -123,7 +122,7 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
       log.info("outside");
       await processor.forceFlush();
       const finished = exporter.getFinishedSpans(); // shutdown() resets the exporter
-      const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const lines = logs.text().split("\n").filter(Boolean).map((l) => JSON.parse(l));
       return { finished, lines, tp };
     },
   );
@@ -271,8 +270,7 @@ test("default OTLP path: with only OTEL_EXPORTER_OTLP_ENDPOINT the SDK exports s
 test("a stray percent sign in OTEL_RESOURCE_ATTRIBUTES does not stop telemetry; the value is kept as written and only the key is logged", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  const logs = captureLogs();
   initLogger("galahad", "info", "dev");
   const env = { OTEL_TRACES_EXPORTER: "otlp", OTEL_RESOURCE_ATTRIBUTES: "a=50%,b=ok,c=x%zz" };
   Object.assign(process.env, env);
@@ -284,7 +282,7 @@ test("a stray percent sign in OTEL_RESOURCE_ATTRIBUTES does not stop telemetry; 
   });
   assert.equal(spans.length, 1);
   assert.equal(spans[0]!.resource.attributes["roundtable.knight"], "k");
-  const logged = chunks.join("");
+  const logged = logs.text();
   assert.match(logged, /Invalid OTEL_RESOURCE_ATTRIBUTES entry, using it undecoded/);
   assert.doesNotMatch(logged, /50%|x%zz/);
   assert.deepEqual(resourceDefaults({ service: "s", knight: "k", env: { OTEL_RESOURCE_ATTRIBUTES: "a=50%" } }), {
@@ -298,8 +296,7 @@ test("a stray percent sign in OTEL_RESOURCE_ATTRIBUTES does not stop telemetry; 
 test("a throwing span outcome still resolves to the task result, and the span ends without error status", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  const logs = captureLogs();
   initLogger("galahad", "info", "dev");
   const [result, spans] = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
     const r = await withTaskSpan(
@@ -313,15 +310,14 @@ test("a throwing span outcome still resolves to the task result, and the span en
   assert.deepEqual(result, { ok: true });
   assert.equal(spans.length, 1);
   assert.notEqual(spans[0]!.status.code, 2);
-  const warned = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.msg === "Task span outcome could not be recorded");
+  const warned = logs.find("Task span outcome could not be recorded");
   assert.ok(warned, "expected the outcome warn line");
   assert.equal(warned.level, "warn");
   assert.match(warned.error, /outcome broke/);
 });
 
 test("a throwing SDK loader leaves telemetry disabled, logs a warning and does not throw", async () => {
-  const chunks: string[] = [];
-  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  const logs = captureLogs();
   initLogger("galahad", "info", "dev");
   const t = await startTelemetry({
     service: "pi-knight",
@@ -332,7 +328,7 @@ test("a throwing SDK loader leaves telemetry disabled, logs a warning and does n
   try {
     assert.equal(t.enabled, false);
     await t.shutdown(); // a no-op when disabled
-    const warned = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.msg === "OpenTelemetry could not start");
+    const warned = logs.find("OpenTelemetry could not start");
     assert.ok(warned, "expected the startup warn line");
     assert.equal(warned.level, "warn");
     assert.match(warned.error, /sdk missing/);
@@ -351,7 +347,7 @@ async function collect(run: () => void) {
   const provider = new MeterProvider({ readers: [reader] });
   metrics.disable();
   // An earlier SDK start can leave a global registered by another API copy; clear it so ours can register.
-  delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  resetOtelApiGlobal();
   assert.ok(metrics.setGlobalMeterProvider(provider));
   try {
     run();
@@ -359,7 +355,7 @@ async function collect(run: () => void) {
     return exporter.getMetrics().flatMap((r) => r.scopeMetrics.flatMap((s) => s.metrics));
   } finally {
     await provider.shutdown();
-    delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+    resetOtelApiGlobal();
   }
 }
 

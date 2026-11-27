@@ -24,3 +24,10 @@ export async function withCleanOtelEnv<T>(fn: () => Promise<T> | T): Promise<T> 
     restore();
   }
 }
+
+const OTEL_API_GLOBAL = Symbol.for("opentelemetry.js.api.1");
+
+/** Drop the shared @opentelemetry/api global so a different API copy's registration cannot block ours (wipes trace/context globals too). */
+export function resetOtelApiGlobal(): void {
+  delete (globalThis as any)[OTEL_API_GLOBAL];
+}
