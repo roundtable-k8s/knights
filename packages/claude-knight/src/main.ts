@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
-import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, createActiveCounter, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
 import { recordPublishFailed, recordReserveRefusal, recordTaskOutcome } from "./task-metrics.js";
@@ -94,7 +94,11 @@ export async function main(): Promise<void> {
   // Only the sdk runtime runs the tools in this process; the cli runtime's stdio MCP child starts its own roster.
   startParentRoster(config.runtime, process.env, config.knightName);
 
-  let activeCount = 0;
+  // Reports to the gauges before the count changes, so a throwing setter cannot leave it high.
+  const activeTasks = createActiveCounter((n) => {
+    setActiveTaskCount(n);
+    metrics.activeTasks.labels().set(n);
+  });
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
   // Discovery only: tasks stay on JetStream.
   let knightService: KnightService | null = null;
@@ -111,7 +115,7 @@ export async function main(): Promise<void> {
       pod: config.podName,
       skillsDir: config.skillsDir,
       maxConcurrentTasks: config.maxConcurrentTasks,
-      getActive: () => activeCount,
+      getActive: () => activeTasks.get(),
       getCounts: () => countsFromMetrics(metrics.tasksTotal, config.knightName),
     }).catch((e) => {
       log.warn("NATS micro service registration failed", { error: String(e) });
@@ -120,12 +124,6 @@ export async function main(): Promise<void> {
   }
   let shuttingDown = false;
   let puller: Awaited<ReturnType<typeof subscribe>> | null = null;
-
-  const setActive = (n: number) => {
-    activeCount = n;
-    setActiveTaskCount(n);
-    metrics.activeTasks.labels().set(n);
-  };
 
   // Abort handles of running tasks, for the forced shutdown path.
   const inflight = new Set<TaskScope>();
@@ -146,8 +144,8 @@ export async function main(): Promise<void> {
       delivery,
       timeoutMs,
       onHeartbeat: () => activity?.heartbeat(),
-      onOpen: () => setActive(activeCount + 1),
-      onClose: () => setActive(activeCount - 1),
+      onOpen: () => activeTasks.increment(),
+      onClose: () => activeTasks.decrement(),
     });
     inflight.add(scope);
     // Trace headers of the task span, captured while it is active: the result is published after it ends.
@@ -253,7 +251,7 @@ export async function main(): Promise<void> {
     },
     stopService: () => knightService?.stop(),
     stopPulling: async () => void (await puller?.stop()),
-    getActive: () => activeCount,
+    getActive: () => activeTasks.get(),
     maxWaitMs: config.drainTimeoutMs,
     // Grace period over with tasks still running: abort them so each publishes a failure
     // result (and acks) before exit, instead of being dead-lettered as lost later.
@@ -275,7 +273,7 @@ export async function main(): Promise<void> {
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {
     // Guard: never fetch once a termination was requested, even one that came during start-up.
-    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeCount),
+    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeTasks.get()),
     accept: (parsed) => {
       const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
       if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId });
