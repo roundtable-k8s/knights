@@ -30,6 +30,12 @@ on:
       - tsconfig.base.json
       - .github/workflows/claude-knight.yml
 
+# Cancel superseded pull request runs. Push and workflow_dispatch runs fall back to
+# their own sha, so they never share a group and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   REGISTRY: ghcr.io
   # Fixed: github.repository is now "knights", not the image name.
