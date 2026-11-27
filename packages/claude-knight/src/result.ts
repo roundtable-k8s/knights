@@ -55,6 +55,17 @@ export function backgroundJobsNote(tasks: ReadonlyMap<string, { description: str
   return `Note: ${tasks.size} background job(s) were still running when this turn ended and were stopped: ${descriptions}. Their output is not in this result.`;
 }
 
+/** Append the note, but keep a trailing `Verdict:` line last so it still reads as the final line. */
+function appendNote(text: string, note: string): string {
+  const lines = text.split("\n");
+  let i = lines.length - 1;
+  while (i >= 0 && !lines[i]!.trim()) i--;
+  if (i >= 0 && parseVerdict(lines[i]!)) {
+    return `${lines.slice(0, i).join("\n").trimEnd()}\n\n${note}\n\n${lines.slice(i).join("\n")}`.replace(/^\n+/, "");
+  }
+  return `${text}\n\n${note}`;
+}
+
 export function isUsageLimitMessage(text: string | undefined): boolean {
   if (!text) return false;
   return USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.trim().startsWith(p));
@@ -113,15 +124,15 @@ export function classifyResult(input: ClassifyInput): TaskResult {
   if (result && result.subtype === "success" && !result.is_error) {
     const text = (result.result ?? "").trim() || lastAssistantText;
     if (text) {
-      const declared = parseTaskFailure(text);
-      if (declared) return fail(declared, { result: text });
       const prs = resolvePrs(input.prs ?? [], text);
       const verdict = parseVerdict(text);
+      const declared = parseTaskFailure(text);
+      if (declared) return fail(declared, { result: text, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) });
       const pending = input.backgroundTasks;
       let finalText = text;
       if (pending?.size) {
         log.warn("Turn ended with background jobs still running", { taskIds: [...pending.keys()] });
-        finalText = `${text}\n\n${backgroundJobsNote(pending)}`;
+        finalText = appendNote(text, backgroundJobsNote(pending));
       }
       return { ...base, result: finalText, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };
     }

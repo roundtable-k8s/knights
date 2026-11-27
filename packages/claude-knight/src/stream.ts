@@ -35,6 +35,8 @@ export interface StreamState {
   toolCalls: number;
   /** Live (non-ambient) background tasks, task_id → description. Replaced on every background_tasks_changed. */
   backgroundTasks: Map<string, { description: string }>;
+  /** Copy of backgroundTasks taken when the result message arrived; later messages do not change it. */
+  frozenBackgroundTasks?: Map<string, { description: string }>;
 }
 
 export function newStreamState(): StreamState {
@@ -191,6 +193,7 @@ export function applyMessage(msg: SDKMessage, state: StreamState, ctx: StreamCon
       break;
     case "result":
       state.result = msg;
+      state.frozenBackgroundTasks = new Map(state.backgroundTasks);
       break;
   }
 }

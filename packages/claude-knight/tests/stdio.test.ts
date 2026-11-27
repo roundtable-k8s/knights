@@ -233,6 +233,36 @@ test("a transcript larger than the head and tail windows keeps its first prompt 
   assert.equal((await readTranscript(cfg, "/data", sid))!.length, 202);
 });
 
+test("a title near the top of a big transcript is found, and boundary-aligned edges keep their record", async () => {
+  const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-edge-"));
+  const dir = join(cfg, "projects", projectDirName("/data"));
+  mkdirSync(dir, { recursive: true });
+  const W = 64 * 1024;
+  const sid = "2a2b3c4d-1111-4222-8333-444455556666";
+  const pad = (n: number, uuid: string) => JSON.stringify({ type: "assistant", uuid, isSidechain: false, message: { role: "assistant", content: [{ type: "text", text: "x".repeat(n) }] } });
+  const first = JSON.stringify({ type: "user", uuid: "u1", isSidechain: false, message: { role: "user", content: "hello" } });
+  const title = JSON.stringify({ type: "ai-title", title: "Top title" });
+  const base = JSON.stringify({ type: "assistant", uuid: "h", isSidechain: false, message: { role: "assistant", content: [{ type: "text", text: "" }] } }).length;
+  // Title near the top, well inside the head window, but the tail has none.
+  const lines: string[] = [first, title];
+  for (let i = 0; i < 40; i++) lines.push(pad(4000, `m${i}`));
+  writeFileSync(join(dir, `${sid}.jsonl`), lines.join("\n") + "\n");
+  assert.ok(statSync(join(dir, `${sid}.jsonl`)).size > 2 * W);
+  const [info] = await listTranscripts(cfg, "/data", 1);
+  assert.equal(info!.summary, "Top title");
+  assert.equal(info!.firstPrompt, "hello");
+
+  // A head window cut exactly on a boundary keeps the last whole record (title at the very end).
+  const sid2 = "3a2b3c4d-1111-4222-8333-444455556666";
+  const fillLen = W - first.length - title.length - 3 - base;
+  const l2 = [first, pad(fillLen, "h"), title];
+  assert.equal(l2.join("\n").length + 1, W);
+  for (let i = 0; i < 20; i++) l2.push(pad(4000, `n${i}`));
+  writeFileSync(join(dir, `${sid2}.jsonl`), l2.join("\n") + "\n");
+  const infos = await listTranscripts(cfg, "/data", 5);
+  assert.equal(infos.find((i) => i.sessionId === sid2)!.summary, "Top title");
+});
+
 test("a missing projects directory lists no transcripts", async () => {
   const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-none-"));
   assert.deepEqual(await listTranscripts(cfg, "/data", 10), []);

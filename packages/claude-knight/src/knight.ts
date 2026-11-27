@@ -332,7 +332,7 @@ export async function executeTask(
       durationMs: Date.now() - started,
       prs: state.prs,
       toolCalls: state.toolCalls,
-      backgroundTasks: state.backgroundTasks,
+      backgroundTasks: state.frozenBackgroundTasks ?? state.backgroundTasks,
     });
     await removeWorkDir(!outcome.success);
     remember({
