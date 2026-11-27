@@ -432,7 +432,7 @@ export async function executeTask(
   if (signal) {
     abortHandler = () => {
       log.warn("Task aborted via signal");
-      sess.abort();
+      void sess.abort().catch((e) => log.warn("Session abort failed", { error: String(e) }));
     };
     signal.addEventListener("abort", abortHandler, { once: true });
   }

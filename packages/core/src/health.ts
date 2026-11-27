@@ -49,7 +49,7 @@ export interface HealthServerOptions {
  */
 export function startHealthServer(opts: HealthServerOptions): void {
   const startTime = Date.now();
-  server = http.createServer(async (req, res) => {
+  const handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> => {
     const json = (code: number, body: unknown, indent = 0) => {
       res.writeHead(code, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body, null, indent));
@@ -88,8 +88,15 @@ export function startHealthServer(opts: HealthServerOptions): void {
           return res.end("Not found");
       }
     } catch (err) {
-      json(500, { error: err instanceof Error ? err.message : String(err) });
+      return json(500, { error: err instanceof Error ? err.message : String(err) });
     }
+  };
+  server = http.createServer((req, res) => {
+    void handle(req, res).catch((e) => {
+      log.error("health handler failed", { error: String(e) });
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
   });
   server.on("error", (err) => {
     log.error("health server failed", { port: opts.port, error: err.message, code: (err as NodeJS.ErrnoException).code });

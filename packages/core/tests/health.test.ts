@@ -74,3 +74,32 @@ test("health server answers 400 to a malformed request URL and keeps serving", a
     await stopHealthServer();
   }
 });
+
+test("health server answers 500 when an extra route throws and keeps serving", async () => {
+  const port = await freePort();
+  const m = createKnightMetrics({ runtime: "test", knight: "T" });
+  startHealthServer({
+    knightName: "T",
+    port,
+    registry: m.registry,
+    routes: {
+      "/boom": () => {
+        throw new Error("kaboom");
+      },
+      "/boom-async": async () => {
+        throw new Error("async kaboom");
+      },
+    },
+  });
+  await new Promise((r) => setTimeout(r, 50));
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const r = await fetch(`${base}/boom`);
+    assert.equal(r.status, 500);
+    assert.equal((await r.json()).error, "kaboom");
+    assert.equal((await fetch(`${base}/boom-async`)).status, 500);
+    assert.equal((await fetch(`${base}/health`)).status, 200);
+  } finally {
+    await stopHealthServer();
+  }
+});

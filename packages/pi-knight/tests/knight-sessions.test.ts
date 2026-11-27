@@ -433,3 +433,34 @@ test("executeTask: a step whose auto-compaction shrinks the messages still succe
   assert.equal(r.result, "final");
   __setSessionFactoryForTests(null);
 });
+
+test("executeTask: a rejecting session.abort() on the abort signal is not an unhandled rejection", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (e: unknown) => void unhandled.push(e);
+  process.on("unhandledRejection", onUnhandled);
+  let abortCalls = 0;
+  __setSessionFactoryForTests(async () => {
+    const s: any = fakeSession(1, []);
+    s.abort = async () => {
+      abortCalls++;
+      throw new Error("session disposed");
+    };
+    s.prompt = async (t: string) => {
+      s.messages.push({ role: "user", content: t });
+      ac.abort();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      s.messages.push({ role: "assistant", content: "done" });
+    };
+    return s;
+  });
+  const ac = new AbortController();
+  try {
+    await executeTask("x", config, ac.signal);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    __setSessionFactoryForTests(null);
+  }
+  assert.equal(abortCalls, 1);
+  assert.deepEqual(unhandled, []);
+});
