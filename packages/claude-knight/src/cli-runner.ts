@@ -16,8 +16,9 @@
  * accepts without listing them (the Agent SDK passes --max-turns itself); the
  * end-to-end test in tests/cli-e2e.test.ts runs the real binary with all of them.
  */
-import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -166,6 +167,71 @@ export function parseStreamLine(line: string): SDKMessage | undefined {
   }
 }
 
+/**
+ * Signal the CLI's whole process group (it is spawned detached, so its pid is
+ * the group id): Claude Code's shell commands and background jobs die with it.
+ * Falls back to the single process when the group call fails.
+ */
+export function killTree(child: Pick<ChildProcess, "pid" | "kill">, signal: NodeJS.Signals): void {
+  if (child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "ESRCH" && code !== "EPERM") throw e;
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // already gone
+  }
+}
+
+/** Env var carrying a per-run token; every descendant of the CLI inherits it. */
+export const RUN_TOKEN_ENV = "ROUNDTABLE_RUN_TOKEN";
+
+/** Pids (other than this process) whose environment carries the run token, via /proc. */
+export function findByToken(token: string): number[] {
+  const needle = Buffer.from(`${RUN_TOKEN_ENV}=${token}\0`);
+  let entries: string[];
+  try {
+    entries = readdirSync("/proc");
+  } catch {
+    return []; // no procfs (not Linux): only the process group is cleaned up
+  }
+  const pids: number[] = [];
+  for (const e of entries) {
+    if (!/^\d+$/.test(e)) continue;
+    const pid = Number(e);
+    if (pid === process.pid) continue;
+    try {
+      if (readFileSync(`/proc/${pid}/environ`).includes(needle)) pids.push(pid);
+    } catch {
+      // gone, or not ours to read
+    }
+  }
+  return pids;
+}
+
+/**
+ * Signal every process of the run. Claude Code starts each shell command in
+ * its own session, so the CLI's process group misses them, and orphans are
+ * re-parented to pid 1; the env token finds them regardless.
+ */
+export function killByToken(token: string, signal: NodeJS.Signals): number {
+  const pids = findByToken(token);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, signal);
+    } catch {
+      // already gone
+    }
+  }
+  return pids.length;
+}
+
 /** Grace period between SIGTERM and SIGKILL when a task is aborted. */
 const KILL_GRACE_MS = 5000;
 const STDERR_TAIL = 4000;
@@ -179,7 +245,10 @@ const RESULT_EXIT_GRACE_MS = 10_000;
  * terminates the process.
  */
 export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: AbortSignal): AsyncGenerator<SDKMessage> {
-  const child = spawn(inv.bin, inv.args, { cwd: inv.cwd, env: inv.env, stdio: ["pipe", "pipe", "pipe"] });
+  const token = randomUUID();
+  const child = spawn(inv.bin, inv.args, { cwd: inv.cwd, env: { ...inv.env, [RUN_TOKEN_ENV]: token }, stdio: ["pipe", "pipe", "pipe"],
+    detached: true, // own process group, so killTree can stop everything the CLI started
+  });
   let spawnError: Error | undefined;
   child.on("error", (e) => (spawnError = e));
   const exited = new Promise<{ code: number | null; sig: NodeJS.Signals | null }>((resolve) =>
@@ -196,8 +265,12 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
   let killTimer: NodeJS.Timeout | undefined;
   const kill = () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
-    child.kill("SIGTERM");
-    killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    killTree(child, "SIGTERM");
+    killByToken(token, "SIGTERM");
+    killTimer = setTimeout(() => {
+      killTree(child, "SIGKILL");
+      killByToken(token, "SIGKILL");
+    }, KILL_GRACE_MS);
     killTimer.unref();
   };
   if (signal.aborted) kill();
@@ -231,6 +304,13 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
     signal.removeEventListener("abort", kill);
     kill(); // no-op when already exited; stops the CLI when the consumer bailed out early
     await exited;
+    // Leftovers (background jobs, test runs) that outlived the CLI: SIGTERM, then SIGKILL after the grace period.
+    if (killByToken(token, "SIGTERM") > 0) {
+      const deadline = Date.now() + KILL_GRACE_MS;
+      while (findByToken(token).length > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      killTree(child, "SIGKILL");
+      killByToken(token, "SIGKILL");
+    }
     if (killTimer) clearTimeout(killTimer);
   }
 }
