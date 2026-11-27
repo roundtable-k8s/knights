@@ -73,3 +73,30 @@ test("background jobs: live set noted on success, ambient ignored, notification 
   const clean = classifyResult({ result: ok("Done."), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1, backgroundTasks: state.backgroundTasks });
   assert.equal(clean.result, "Done.");
 });
+
+test("classifyResult: a declared failure keeps prs and verdict", () => {
+  const text = `Opened ${URL1}\nVerdict: needs changes\nOutcome: failed - could not file`;
+  const r = classifyResult({ result: ok(text), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
+  assert.equal(r.success, false);
+  assert.equal(r.prs?.[0]?.number, 20);
+  assert.equal(r.verdict, "needs_changes");
+});
+
+test("background jobs: frozen at the result message, a later notification does not change it", () => {
+  const state = newStreamState();
+  applyMessage(changed([{ task_id: "a", description: "make test" }]), state, sysCtx);
+  applyMessage(ok("Done.") , state, sysCtx);
+  applyMessage({ type: "system", subtype: "task_notification", task_id: "a", status: "completed" } as never, state, sysCtx);
+  applyMessage(changed([]), state, sysCtx);
+  assert.equal(state.backgroundTasks.size, 0);
+  assert.deepEqual([...state.frozenBackgroundTasks!.keys()], ["a"]);
+});
+
+test("background jobs: the note goes before a trailing Verdict line", () => {
+  const tasks = new Map([["a", { description: "make test" }]]);
+  const r = classifyResult({ result: ok("Looks fine.\nVerdict: SHIP IT"), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1, backgroundTasks: tasks });
+  const lines = r.result.split("\n");
+  assert.equal(lines.pop(), "Verdict: SHIP IT");
+  assert.match(r.result, /Looks fine\.\n\nNote: 1 background job\(s\)/);
+  assert.equal(r.verdict, "ship_it");
+});

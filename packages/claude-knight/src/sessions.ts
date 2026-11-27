@@ -132,13 +132,16 @@ async function readEdges(file: string, size: number): Promise<{ head: Buffer; ta
       const all = await readRange(fh, 0, size);
       return { head: all, tail: all };
     }
-    const head = await readRange(fh, 0, WINDOW_BYTES);
-    const tail = await readRange(fh, size - WINDOW_BYTES, WINDOW_BYTES);
-    const lastNewline = head.lastIndexOf(NEWLINE);
-    const firstNewline = tail.indexOf(NEWLINE);
+    // One extra byte on each side tells an edge that lands exactly on a line boundary
+    // (keep the record) from one that cuts a record (drop it).
+    const headRaw = await readRange(fh, 0, WINDOW_BYTES + 1);
+    const tailRaw = await readRange(fh, size - WINDOW_BYTES - 1, WINDOW_BYTES + 1);
+    const headCut = headRaw.length > WINDOW_BYTES && headRaw[WINDOW_BYTES] === NEWLINE ? WINDOW_BYTES : headRaw.subarray(0, WINDOW_BYTES).lastIndexOf(NEWLINE);
+    const firstNewline = tailRaw[0] === NEWLINE ? 0 : tailRaw.indexOf(NEWLINE);
+    const tailStart = firstNewline < 0 ? -1 : firstNewline + 1;
     return {
-      head: lastNewline < 0 ? Buffer.alloc(0) : head.subarray(0, lastNewline),
-      tail: firstNewline < 0 ? Buffer.alloc(0) : tail.subarray(firstNewline + 1),
+      head: headCut < 0 ? Buffer.alloc(0) : headRaw.subarray(0, headCut),
+      tail: tailStart < 0 ? Buffer.alloc(0) : tailRaw.subarray(tailStart),
     };
   } finally {
     await fh.close();
@@ -153,12 +156,13 @@ async function readEdges(file: string, size: number): Promise<{ head: Buffer; ta
 async function summarize(file: string, sessionId: string, st: { size: number; mtimeMs: number }): Promise<TranscriptInfo> {
   const { head, tail } = await readEdges(file, st.size);
   // Tool results carry no text blocks, so promptText skips them.
-  const firstUser = parseLines(head.toString("utf8")).find(
+  const headRecords = parseLines(head.toString("utf8"));
+  const firstUser = headRecords.find(
     (r) => isMainMessage(r) && r.type === "user" && promptText(r.message.content),
   );
-  const summaryRec = parseLines(tail.toString("utf8"))
-    .reverse()
-    .find((r) => r?.type === "summary" || r?.type === "custom-title" || r?.type === "ai-title");
+  const isTitle = (r: any) => r?.type === "summary" || r?.type === "custom-title" || r?.type === "ai-title";
+  const summaryRec =
+    parseLines(tail.toString("utf8")).reverse().find(isTitle) ?? headRecords.reverse().find(isTitle);
   return {
     sessionId,
     lastModified: st.mtimeMs,
