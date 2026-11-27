@@ -66,7 +66,7 @@ rt_write_models_json() {
     if ! printf '%s' "$PI_MODELS_JSON_B64" | base64 -d > "$tmp" 2>/dev/null; then
       rm -f "$tmp"
       log "  WARNING: base64 decode failed — skipping PI_MODELS_JSON_B64, $target not written (non-fatal)"
-    elif mv -f "$tmp" "$target" 2>/dev/null; then
+    elif chmod 644 "$tmp" 2>/dev/null && mv -f "$tmp" "$target" 2>/dev/null; then
       log "Phase 1.5: Wrote $target from PI_MODELS_JSON_B64"
     else
       rm -f "$tmp"
