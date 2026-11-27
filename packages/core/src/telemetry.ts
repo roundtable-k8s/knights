@@ -15,6 +15,8 @@ export interface TelemetryOptions {
   env?: NodeJS.ProcessEnv;
   /** Replace the OTLP exporter (tests). */
   spanProcessors?: SpanProcessor[];
+  /** Load the SDK module (tests inject a throwing loader). Default: the dynamic import of `@opentelemetry/sdk-node`. */
+  loadSdk?: () => Promise<Pick<typeof import("@opentelemetry/sdk-node"), "NodeSDK">>;
 }
 
 export interface Telemetry {
@@ -40,13 +42,13 @@ function parseResourceAttributes(raw: string | undefined): Record<string, string
     if (i <= 0) continue;
     const key = pair.slice(0, i).trim();
     if (!key) continue;
-    const raw = pair.slice(i + 1).trim();
+    const value = pair.slice(i + 1).trim();
     try {
-      out[key] = decodeURIComponent(raw);
+      out[key] = decodeURIComponent(value);
     } catch {
       // A stray percent sign (`50%`) is not valid escaping; keep the value as written rather than fail startup.
       log.warn("Invalid OTEL_RESOURCE_ATTRIBUTES entry, using it undecoded", { key });
-      out[key] = raw;
+      out[key] = value;
     }
   }
   return out;
@@ -78,7 +80,7 @@ export async function startTelemetry(opts: TelemetryOptions): Promise<Telemetry>
   let sdk: { start(): void; shutdown(): Promise<void> };
   try {
     // Loaded on demand so a knight with telemetry off never pays for the SDK.
-    const { NodeSDK } = await import("@opentelemetry/sdk-node");
+    const { NodeSDK } = await (opts.loadSdk ?? (() => import("@opentelemetry/sdk-node")))();
     sdk = new NodeSDK({
       // Traces only: no OTLP metrics (prom-client stays) or logs exporters.
       metricReaders: [],

@@ -292,6 +292,9 @@ test("a stray percent sign in OTEL_RESOURCE_ATTRIBUTES does not stop telemetry; 
 test("a throwing span outcome still resolves to the task result, and the span ends without error status", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);
+  const chunks: string[] = [];
+  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  initLogger("galahad", "info", "dev");
   const [result, spans] = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
     const r = await withTaskSpan(
       { taskId: "t", knight: "k" },
@@ -304,4 +307,30 @@ test("a throwing span outcome still resolves to the task result, and the span en
   assert.deepEqual(result, { ok: true });
   assert.equal(spans.length, 1);
   assert.notEqual(spans[0]!.status.code, 2);
+  const warned = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.msg === "Task span outcome could not be recorded");
+  assert.ok(warned, "expected the outcome warn line");
+  assert.equal(warned.level, "warn");
+  assert.match(warned.error, /outcome broke/);
+});
+
+test("a throwing SDK loader leaves telemetry disabled, logs a warning and does not throw", async () => {
+  const chunks: string[] = [];
+  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  initLogger("galahad", "info", "dev");
+  const t = await startTelemetry({
+    service: "pi-knight",
+    knight: "k",
+    env: { OTEL_TRACES_EXPORTER: "otlp" },
+    loadSdk: async () => { throw new Error("sdk missing"); },
+  });
+  try {
+    assert.equal(t.enabled, false);
+    await t.shutdown(); // a no-op when disabled
+    const warned = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.msg === "OpenTelemetry could not start");
+    assert.ok(warned, "expected the startup warn line");
+    assert.equal(warned.level, "warn");
+    assert.match(warned.error, /sdk missing/);
+  } finally {
+    resetOtelGlobals();
+  }
 });
