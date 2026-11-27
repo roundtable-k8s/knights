@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -158,12 +158,24 @@ async function main(): Promise<void> {
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
     const startTime = Date.now();
-    const controller = new AbortController();
     // Everything taken after the slot is released in the finally below, even when a step throws part-way.
     let activity: TaskActivity | undefined;
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let counted = false;
+    // Keep the message un-acked but alive while the task runs; the scope acks it on close.
+    const scope = startTaskScope({
+      delivery,
+      timeoutMs,
+      onHeartbeat: () => activity?.heartbeat(),
+      onOpen: () => {
+        activeCount++;
+        setActiveTaskCount(activeCount);
+        metrics.activeTasks.labels().set(activeCount);
+      },
+      onClose: () => {
+        activeCount--;
+        setActiveTaskCount(activeCount);
+        metrics.activeTasks.labels().set(activeCount);
+      },
+    });
 
     try {
       activity = new TaskActivity({
@@ -184,23 +196,13 @@ async function main(): Promise<void> {
         content: config.activityContent,
       });
       const act = activity;
-      // Keep the message un-acked but alive while the task runs; ack only when it finishes.
-      heartbeat = setInterval(() => {
-        delivery.working();
-        act.heartbeat();
-      }, HEARTBEAT_MS);
-      activeCount++;
-      counted = true;
-      setActiveTaskCount(activeCount);
-      metrics.activeTasks.labels().set(activeCount);
-      timeout = setTimeout(() => controller.abort(), timeoutMs);
 
       const result = await withTaskSpan(
         { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
         () => {
           act.setTraceId(activeTraceId());
           act.started(); // after the trace id is known, so task.started carries it
-          return executeTask(taskText, config, controller.signal, runId, taskId, { model, activity });
+          return executeTask(taskText, config, scope.signal, runId, taskId, { model, activity });
         },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );
@@ -239,16 +241,9 @@ async function main(): Promise<void> {
       metrics.tasksTotal.labels("error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
-      clearTimeout(timeout);
-      clearInterval(heartbeat);
+      scope.close(); // clears timers, drops the active count, then acks once
       activity?.close();
       knightService?.markTaskFinished();
-      delivery.ack();
-      if (counted) {
-        activeCount--;
-        setActiveTaskCount(activeCount);
-        metrics.activeTasks.labels().set(activeCount);
-      }
       puller?.wake();
     }
   }
