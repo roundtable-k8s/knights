@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
-import { installStartupSignalHandlers } from "../src/startup-signals.ts";
+import { installStartupSignalHandlers, mayPullAfterSweep, type StartupSignals } from "../src/startup-signals.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -177,5 +177,30 @@ describe("startup-signals.sh (entrypoint)", () => {
       assert.match(dockerfile, /COPY packages\/core\/scripts\/startup-signals\.sh \.\/scripts\/startup-signals\.sh/, pkg);
       assert.match(dockerfile, /COPY packages\/core\/scripts\/early-signals\.mjs \.\/scripts\/early-signals\.mjs/, pkg);
     }
+  });
+});
+
+describe("mayPullAfterSweep", () => {
+  const fakeSignals = (requested: () => string | null): StartupSignals => ({ requested, ready: () => true });
+
+  it("a SIGTERM during a hanging sweep: resolves false once the sweep settles, so no puller is created", async () => {
+    let requested: string | null = null;
+    let finishSweep!: () => void;
+    const sweep = new Promise<void>((r) => (finishSweep = r));
+    let settled = false;
+    const may = mayPullAfterSweep(sweep, fakeSignals(() => requested)).then((v) => ((settled = true), v));
+    requested = "SIGTERM"; // arrives while the sweep is still pending
+    await sleep(5);
+    assert.equal(settled, false, "must wait for the sweep");
+    finishSweep();
+    assert.equal(await may, false);
+  });
+
+  it("no signal during the sweep: resolves true", async () => {
+    assert.equal(await mayPullAfterSweep(Promise.resolve(), fakeSignals(() => null)), true);
+  });
+
+  it("a rejected sweep still rejects, so start-up fails instead of pulling", async () => {
+    await assert.rejects(mayPullAfterSweep(Promise.reject(new Error("sweep failed")), fakeSignals(() => null)), /sweep failed/);
   });
 });
