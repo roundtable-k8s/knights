@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { dataPaths, type KnightConfig } from "./config.js";
 import { compactionsTotal, llmRetriesTotal } from "./runtime-metrics.js";
-import { log, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
+import { log, sweepStaleTempFiles, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
 
@@ -122,10 +122,12 @@ async function updateSessionNotesLocked(
   // Ensure directories exist
   await ensureDir(SESSION_NOTES_DIR());
   await ensureDir(SCRATCH_DIR());
+  sweepStaleTempFiles(SESSION_NOTES_DIR());
 
   const now = new Date().toISOString();
   // Free text may contain lines that look like headings; escape them so they are never read back as sections.
-  const taskPreview = escapeHeadingLines(task.length > 200 ? task.slice(0, 200) + "…" : task);
+  const rawTaskPreview = task.length > 200 ? task.slice(0, 200) + "…" : task;
+  const taskPreview = escapeHeadingLines(rawTaskPreview);
   const resultPreview = escapeHeadingLines(result.length > 500 ? result.slice(0, 500) + "…" : result);
 
   // Read existing notes if any
@@ -141,7 +143,7 @@ async function updateSessionNotesLocked(
   const previousErrors = extractSection(existing, "Errors & Corrections");
   // Worklog accumulates (bounded) so that every task's entry survives; lost updates would drop lines here.
   const previousWorklog = extractSection(existing, "Worklog").split("\n").filter((l) => l.startsWith("- "));
-  const worklog = [...previousWorklog, `- ${now}: ${(taskPreview.split("\n")[0] ?? "").slice(0, 80)} → result (${result.length} chars)`]
+  const worklog = [...previousWorklog, `- ${now}: ${(rawTaskPreview.split("\n")[0] ?? "").slice(0, 80)} → result (${result.length} chars)`]
     .slice(-WORKLOG_MAX_ENTRIES)
     .join("\n");
 
@@ -224,7 +226,11 @@ function extractSection(markdown: string, sectionName: string): string {
   for (const name of walk) {
     const heading = new RegExp(`^#[ \\t]+${escapeRegExp(name)}[ \\t]*$`, "gm");
     heading.lastIndex = cursor;
-    const match = heading.exec(markdown);
+    let match = heading.exec(markdown);
+    if (match && name === sectionName && order === SESSION_NOTES_SECTIONS.length - 1) {
+      // Last template section: anything before the real heading may be an unescaped lookalike in older notes.
+      for (let next = heading.exec(markdown); next; next = heading.exec(markdown)) match = next;
+    }
     if (!match) {
       if (name === sectionName) return "";
       continue; // a template section missing from older notes does not stop the walk

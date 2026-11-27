@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { join } from "node:path";
-import { dailyLogName, memoryPromptSection, migrateMemory, resolveMemoryPaths, setupMemory, writeFileAtomic } from "../src/memory.js";
+import { dailyLogName, memoryPromptSection, migrateMemory, resolveMemoryPaths, setupMemory, sweepStaleTempFiles, writeFileAtomic } from "../src/memory.js";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "mem-"));
 
@@ -110,4 +110,17 @@ test("setupMemory: an unusable volume is reported and falls back to /data paths"
   assert.equal(cfg.memoryDir, undefined);
   assert.equal(cfg.memoryRoot, undefined);
   assert.equal(resolveMemoryPaths({ ...cfg, dataDir: data }).longTermFile, join(data, "MEMORY.md"));
+});
+
+test("sweepStaleTempFiles removes old .tmp files only", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "old.tmp"), "x");
+  writeFileSync(join(dir, "fresh.tmp"), "x");
+  writeFileSync(join(dir, "old.md"), "x");
+  const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  utimesSync(join(dir, "old.tmp"), past, past);
+  utimesSync(join(dir, "old.md"), past, past);
+  assert.equal(sweepStaleTempFiles(dir), 1);
+  assert.deepEqual(readdirSync(dir).sort(), ["fresh.tmp", "old.md"]);
+  assert.equal(sweepStaleTempFiles(join(dir, "missing")), 0);
 });

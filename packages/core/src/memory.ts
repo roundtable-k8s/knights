@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { log } from "./logger.js";
@@ -96,6 +96,31 @@ export function writeFileAtomic(file: string, data: string, ops: AtomicFsOps = d
     rmSync(tmp, { force: true });
     throw err;
   }
+}
+
+/**
+ * Remove `*.tmp` files in `dir` last modified more than `maxAgeMs` ago (default one hour): leftovers of a
+ * hard crash between writeFileAtomic's write and rename. Never throws; returns the number removed.
+ */
+export function sweepStaleTempFiles(dir: string, maxAgeMs = 60 * 60 * 1000, now = Date.now()): number {
+  let removed = 0;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".tmp")) continue;
+      const path = join(dir, name);
+      try {
+        if (now - statSync(path).mtimeMs > maxAgeMs) {
+          rmSync(path, { force: true });
+          removed++;
+        }
+      } catch {
+        // raced with another sweep or writer; ignore
+      }
+    }
+  } catch {
+    // directory missing or unreadable
+  }
+  return removed;
 }
 
 /**
