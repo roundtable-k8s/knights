@@ -237,3 +237,31 @@ test("compaction and retry events are no-ops without an SDK", () => {
   s.handle({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "x" });
   s.handle({ type: "auto_retry_end", success: true, attempt: 1 });
 });
+
+test("reading a SKILL.md marks the tool span, adds a task event and counts the skill", async () => {
+  const { registry } = await import("../src/runtime-metrics.ts");
+  const count = async (skill: string) => {
+    const line = (await registry.metrics()).split("\n").find((l) => l.startsWith("roundtable_knight_skill_activations_total") && l.includes(`skill="${skill}"`));
+    return line ? Number(line.split(" ").pop()) : 0;
+  };
+  const before = await count("review");
+  const { exporter, t, processor } = await setup();
+  await withTaskSpan({ taskId: "t", knight: "k" }, async () => {
+    const s = new SessionSpans("p/m", { knight: "k" }, undefined, undefined, "/skills");
+    s.handle({ type: "tool_execution_start", toolCallId: "a", toolName: "read", args: { path: "/skills/dev/review/SKILL.md" } });
+    s.handle({ type: "tool_execution_end", toolCallId: "a", isError: false, result: { content: "x" } });
+    s.handle({ type: "tool_execution_start", toolCallId: "b", toolName: "read", args: { path: "/skills/dev/review/other.md" } });
+    s.handle({ type: "tool_execution_end", toolCallId: "b", isError: false, result: { content: "x" } });
+    s.endAll();
+  });
+  await processor.forceFlush();
+  const spans = exporter.getFinishedSpans();
+  const tools = spans.filter((s) => s.name === "execute_tool read");
+  assert.equal(tools[0]!.attributes["roundtable.skill.name"], "review");
+  assert.equal(tools[0]!.attributes["roundtable.skill.category"], "dev");
+  assert.equal(tools[1]!.attributes["roundtable.skill.name"], undefined);
+  const root = spans.find((s) => s.name === "invoke_agent k")!;
+  assert.equal(root.events.filter((e) => e.name === "roundtable.skill.activated").length, 1);
+  assert.equal(await count("review"), before + 1);
+  await t.shutdown();
+});

@@ -1,4 +1,6 @@
 import { trace } from "@opentelemetry/api";
+import { skillFromToolCall } from "./skill-activation.js";
+import { skillActivationsTotal } from "./runtime-metrics.js";
 import { activeTraceContext, boundText, sliceWhole, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
 
 /**
@@ -40,6 +42,8 @@ export class SessionSpans {
     private readonly parent = activeTraceContext(),
     /** The session's system prompt, read when a chat span starts. */
     private readonly systemPrompt?: () => string | undefined,
+    /** Skills directory; skill activations are only marked when set. */
+    private readonly skillsDir?: string,
   ) {
     this.attrs = { "roundtable.knight": ids.knight, "roundtable.table": ids.table || "none" };
   }
@@ -109,6 +113,12 @@ export class SessionSpans {
           ),
         );
         this.setContent(this.tools.get(id)!, "gen_ai.tool.call.arguments", () => asText(e.args));
+        const skill = this.skillsDir ? skillFromToolCall(this.skillsDir, name, e.args) : undefined;
+        if (skill) {
+          this.tools.get(id)!.setAttributes({ "roundtable.skill.name": skill.skill, "roundtable.skill.category": skill.category });
+          this.event("roundtable.skill.activated", { "roundtable.skill.name": skill.skill, "roundtable.skill.category": skill.category });
+          skillActivationsTotal.labels(skill.skill).inc();
+        }
         break;
       }
       case "tool_execution_end": {
