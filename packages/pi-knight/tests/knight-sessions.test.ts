@@ -59,8 +59,8 @@ test("executeTask: two runId-less tasks do not share messages (#53)", async () =
   await executeTask("second", config);
   assert.equal(created.length, 2);
   assert.deepEqual(disposed, [], "idle sessions stay until LRU eviction");
-  assert.deepEqual(created[0].messages.map((m) => m.content), ["first", "done: first"]);
-  assert.deepEqual(created[1].messages.map((m) => m.content), ["second", "done: second"]);
+  assert.deepEqual(created[0]!.messages.map((m) => m.content), ["first", "done: first"]);
+  assert.deepEqual(created[1]!.messages.map((m) => m.content), ["second", "done: second"]);
   __setSessionFactoryForTests(null);
 });
 
@@ -69,13 +69,13 @@ test("executeTask: same runId shares a session, a different runId does not", asy
   await executeTask("a1", config, undefined, "run-a");
   await executeTask("a2", config, undefined, "run-a");
   assert.equal(created.length, 1);
-  assert.equal(created[0].messages.length, 4);
+  assert.equal(created[0]!.messages.length, 4);
   await executeTask("b1", config, undefined, "run-b");
   assert.equal(created.length, 2);
   // A run-less task after a run must not join that run's session.
   await executeTask("adhoc", config);
   assert.equal(created.length, 3);
-  assert.deepEqual(created[2].messages.map((m) => m.content), ["adhoc", "done: adhoc"]);
+  assert.deepEqual(created[2]!.messages.map((m) => m.content), ["adhoc", "done: adhoc"]);
   __setSessionFactoryForTests(null);
 });
 
@@ -84,13 +84,13 @@ test("executeTask: per-task model is applied for that task, then the default is 
   __setTaskModelResolverForTests(async (m) => ({ model: { id: m } as any }));
   const r1 = await executeTask("a1", config, undefined, "run-m", "tm1", { model: "anthropic/claude-opus-4-5" });
   assert.equal(r1.model, "anthropic/claude-opus-4-5");
-  assert.deepEqual(created[0].modelLog, ["anthropic/claude-opus-4-5", "default"]);
-  assert.equal(created[0].model.id, "default");
+  assert.deepEqual(created[0]!.modelLog, ["anthropic/claude-opus-4-5", "default"]);
+  assert.equal(created[0]!.model.id, "default");
   // Next step of the same run: no override, same session, knight default reported.
   const r2 = await executeTask("a2", config, undefined, "run-m", "tm2");
   assert.equal(r2.model, "x/y");
   assert.equal(created.length, 1);
-  assert.deepEqual(created[0].modelLog, ["anthropic/claude-opus-4-5", "default"]);
+  assert.deepEqual(created[0]!.modelLog, ["anthropic/claude-opus-4-5", "default"]);
   __setTaskModelResolverForTests(null);
   __setSessionFactoryForTests(null);
 });
@@ -307,8 +307,8 @@ test("executeTask: a failed model restore drops the run's session and slot; the 
   assert.equal(__slotKeysForTests().includes("run:run-rf2"), false, "no later step is waiting, so the slot is gone");
   const b = await executeTask("b2", config, undefined, "run-rf2", "rf3");
   assert.equal(sessions.length, 2, "next step of the run created a new session");
-  assert.equal(sessions[1].model.id, "default", "on the knight default");
-  assert.deepEqual(sessions[1].messages.map((m) => m.content), ["b2", "done: b2"]);
+  assert.equal(sessions[1]!.model.id, "default", "on the knight default");
+  assert.deepEqual(sessions[1]!.messages.map((m) => m.content), ["b2", "done: b2"]);
   assert.equal(b.model, "x/y");
   __setTaskModelResolverForTests(null);
   __setSessionFactoryForTests(null);

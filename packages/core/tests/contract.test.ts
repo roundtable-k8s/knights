@@ -84,7 +84,7 @@ test("parseTask treats a JSON array as plain task text", () => {
 });
 
 test("parseTask accepts every chain/step spelling the dispatchers use", () => {
-  for (const [c, s] of [["chainName", "stepName"], ["chain_name", "step_name"], ["chain", "step"]]) {
+  for (const [c, s] of [["chainName", "stepName"], ["chain_name", "step_name"], ["chain", "step"]] as [string, string][]) {
     const p = parseTask(JSON.stringify({ task: "x", [c]: "c1", [s]: "s1" }), "id");
     assert.deepEqual([p.chainName, p.stepName], ["c1", "s1"], c);
   }

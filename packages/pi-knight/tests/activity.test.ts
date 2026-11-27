@@ -58,22 +58,22 @@ test("pi session events map to activity events with redaction and bounds", () =>
     ["task.started", "tool.started", "tool.finished", "assistant.message", "task.heartbeat", "task.finished"]);
   assert.deepEqual(pubs.map((p) => p.ev.seq), [1, 2, 3, 4, 5, 6]);
   for (const p of pubs) assert.deepEqual(activityEventErrors(p.ev), [], `${p.ev.type} matches the activity v1 schema`);
-  assert.equal(pubs[0].subject, "rt.activity.k.t1");
-  assert.equal(pubs[0].ev.node, "node-1");
-  assert.equal(pubs[0].ev.slot, 0);
+  assert.equal(pubs[0]!.subject, "rt.activity.k.t1");
+  assert.equal(pubs[0]!.ev.node, "node-1");
+  assert.equal(pubs[0]!.ev.slot, 0);
   const all = JSON.stringify(pubs.map((p) => p.ev));
   assert.ok(!all.includes(GHP), "secret leaked");
   assert.ok(!all.includes("FILE CONTENTS"), "file content leaked");
-  assert.equal(pubs[1].ev.toolCallId, "1");
-  assert.ok(pubs[1].ev.argsSummary.length <= MAX_ARGS_CHARS);
-  assert.equal(pubs[1].ev.truncated, true);
-  assert.ok(pubs[2].ev.outputPreview.length <= MAX_PREVIEW_CHARS);
-  assert.equal(pubs[2].ev.durationMs, 12);
-  assert.equal(pubs[3].ev.preview, "hello");
-  assert.equal(pubs[4].ev.inputTokens, 10);
-  assert.equal(pubs[4].ev.outputTokens, 5);
-  assert.equal(pubs[4].ev.costUsd, 0.5);
-  assert.equal(pubs[4].ev.turns, 1);
+  assert.equal(pubs[1]!.ev.toolCallId, "1");
+  assert.ok(pubs[1]!.ev.argsSummary.length <= MAX_ARGS_CHARS);
+  assert.equal(pubs[1]!.ev.truncated, true);
+  assert.ok(pubs[2]!.ev.outputPreview.length <= MAX_PREVIEW_CHARS);
+  assert.equal(pubs[2]!.ev.durationMs, 12);
+  assert.equal(pubs[3]!.ev.preview, "hello");
+  assert.equal(pubs[4]!.ev.inputTokens, 10);
+  assert.equal(pubs[4]!.ev.outputTokens, 5);
+  assert.equal(pubs[4]!.ev.costUsd, 0.5);
+  assert.equal(pubs[4]!.ev.turns, 1);
   assert.equal(listInflight().length, 0);
 });
 
@@ -137,8 +137,8 @@ test("two concurrent runs produce separate event streams; introspect reports inf
     const mine = pubs.filter((p) => p.ev.taskId === taskId);
     assert.deepEqual(mine.map((p) => p.ev.type), ["task.started", "tool.started", "tool.finished", "task.finished"]);
     assert.ok(mine.every((p) => p.ev.runId === runId && p.subject === `rt.activity.k.${taskId}`));
-    assert.ok(mine[1].ev.argsSummary.includes(`run-${taskId}`));
-    assert.ok(mine[2].ev.outputPreview.includes(`out-${taskId}`));
+    assert.ok(mine[1]!.ev.argsSummary.includes(`run-${taskId}`));
+    assert.ok(mine[2]!.ev.outputPreview.includes(`out-${taskId}`));
   }
   assert.equal(((await handleIntrospect({ type: "stats" }, config)) as any).runtime.activeTasks, 0);
 });
