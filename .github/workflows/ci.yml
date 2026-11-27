@@ -87,10 +87,17 @@ jobs:
         env:
           NATS_VERSION: v2.15.3
         run: |
-          curl -fsSL -o /tmp/nats.tgz "https://github.com/nats-io/nats-server/releases/download/${NATS_VERSION}/nats-server-${NATS_VERSION}-linux-amd64.tar.gz"
-          tar -xzf /tmp/nats.tgz -C /tmp
+          set -euo pipefail
+          base="https://github.com/nats-io/nats-server/releases/download/${NATS_VERSION}"
+          tarball="nats-server-${NATS_VERSION}-linux-amd64.tar.gz"
+          mkdir -p /tmp/nats-dl
+          curl -fsSL -o "/tmp/nats-dl/${tarball}" "${base}/${tarball}"
+          curl -fsSL -o /tmp/nats-dl/SHA256SUMS "${base}/SHA256SUMS"
+          (cd /tmp/nats-dl && sha256sum -c --ignore-missing SHA256SUMS | grep -F "${tarball}: OK")
+          tar -xzf "/tmp/nats-dl/${tarball}" -C /tmp
           echo "NATS_SERVER_BIN=/tmp/nats-server-${NATS_VERSION}-linux-amd64/nats-server" >> "$GITHUB_ENV"
-      - run: npm run typecheck --workspace packages/core
+      - name: "Typecheck (root: all packages, scripts/dev, tests under strict flags)"
+        run: npm run typecheck
       - run: npm test --workspace packages/core
       - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
         run: npm run test:hermetic --workspace packages/core
@@ -107,7 +114,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace packages/core --if-present
-      - run: npm run typecheck --workspace packages/pi-knight
       - run: npm test --workspace packages/pi-knight
       - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
         run: npm run test:hermetic --workspace packages/pi-knight
@@ -125,7 +131,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build --workspace packages/core --if-present
-      - run: npm run typecheck --workspace packages/claude-knight
       - run: npm test --workspace packages/claude-knight
       - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
         run: npm run test:hermetic --workspace packages/claude-knight

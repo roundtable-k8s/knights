@@ -48,19 +48,19 @@ test("two turns and one tool call export chat/execute_tool children of invoke_ag
     assert.equal(c.attributes["roundtable.knight"], "k");
     assert.equal(c.attributes["roundtable.table"], "tbl");
   }
-  assert.equal(chats[0].attributes["gen_ai.operation.name"], "chat");
-  assert.equal(chats[0].attributes["gen_ai.request.model"], "p/m");
-  assert.equal(chats[0].attributes["gen_ai.response.model"], "m-resp");
-  assert.equal(chats[0].attributes["gen_ai.usage.input_tokens"], 10);
-  assert.equal(chats[1].attributes["gen_ai.usage.output_tokens"], 7);
-  assert.equal(tools[0].attributes["gen_ai.operation.name"], "execute_tool");
-  assert.equal(tools[0].attributes["gen_ai.tool.name"], "bash");
-  assert.equal(tools[0].attributes["gen_ai.tool.call.id"], "c1");
-  assert.equal(tools[0].status.code, SpanStatusCode.UNSET);
-  assert.match(String(chats[0].attributes["gen_ai.output.messages"]), /SECRET/);
-  assert.equal(tools[0].attributes["gen_ai.tool.call.arguments"], '{"cmd":"SECRET"}');
-  assert.equal(tools[0].attributes["gen_ai.tool.call.result"], "SECRET");
-  assert.equal(chats[0].attributes["gen_ai.system_instructions"], undefined);
+  assert.equal(chats[0]!.attributes["gen_ai.operation.name"], "chat");
+  assert.equal(chats[0]!.attributes["gen_ai.request.model"], "p/m");
+  assert.equal(chats[0]!.attributes["gen_ai.response.model"], "m-resp");
+  assert.equal(chats[0]!.attributes["gen_ai.usage.input_tokens"], 10);
+  assert.equal(chats[1]!.attributes["gen_ai.usage.output_tokens"], 7);
+  assert.equal(tools[0]!.attributes["gen_ai.operation.name"], "execute_tool");
+  assert.equal(tools[0]!.attributes["gen_ai.tool.name"], "bash");
+  assert.equal(tools[0]!.attributes["gen_ai.tool.call.id"], "c1");
+  assert.equal(tools[0]!.status.code, SpanStatusCode.UNSET);
+  assert.match(String(chats[0]!.attributes["gen_ai.output.messages"]), /SECRET/);
+  assert.equal(tools[0]!.attributes["gen_ai.tool.call.arguments"], '{"cmd":"SECRET"}');
+  assert.equal(tools[0]!.attributes["gen_ai.tool.call.result"], "SECRET");
+  assert.equal(chats[0]!.attributes["gen_ai.system_instructions"], undefined);
   await t.shutdown();
 });
 
@@ -162,10 +162,10 @@ test("the first chat span records the prompt (real event order: turn_start prece
     msg(),
   ]);
   const chats = spans.filter((s) => s.name === "chat p/m");
-  assert.deepEqual(JSON.parse(String(chats[0].attributes["gen_ai.input.messages"])), [{ role: "user", content: "please fix the bug" }]);
-  const second = JSON.parse(String(chats[1].attributes["gen_ai.input.messages"]));
+  assert.deepEqual(JSON.parse(String(chats[0]!.attributes["gen_ai.input.messages"])), [{ role: "user", content: "please fix the bug" }]);
+  const second = JSON.parse(String(chats[1]!.attributes["gen_ai.input.messages"]));
   assert.deepEqual(second.map((m: any) => m.role), ["user", "assistant", "toolResult"]);
-  const out = JSON.parse(String(chats[0].attributes["gen_ai.output.messages"]));
+  const out = JSON.parse(String(chats[0]!.attributes["gen_ai.output.messages"]));
   assert.deepEqual(out[0].tool_calls, [{ id: "c1", name: "bash", arguments: { cmd: "ls" } }]);
 });
 
@@ -179,10 +179,10 @@ test("input history keeps the newest messages when over the cap", async () => {
     msg(),
   ]);
   const chat = spans.filter((s) => s.name === "chat p/m")[1];
-  const input = String(chat.attributes["gen_ai.input.messages"]);
+  const input = String(chat!.attributes["gen_ai.input.messages"]);
   assert.match(input, /NEWEST/);
   assert.ok(!input.includes("OLDEST"));
-  assert.equal(chat.attributes["roundtable.content.truncated"], true);
+  assert.equal(chat!.attributes["roundtable.content.truncated"], true);
 });
 
 test("compaction and retry events land on the task span with redacted, bounded error text", async () => {
@@ -199,14 +199,14 @@ test("compaction and retry events land on the task span with redacted, bounded e
   const root = exporter.getFinishedSpans().find((s) => s.name === "invoke_agent k")!;
   const ev = root.events;
   assert.deepEqual(ev.map((e) => e.name), ["compaction", "llm.retry", "llm.retry"]);
-  assert.deepEqual(ev[0].attributes, { reason: "threshold", aborted: false, will_retry: true });
-  assert.equal(ev[1].attributes!["attempt"], 1);
-  assert.equal(ev[1].attributes!["max_attempts"], 3);
-  assert.equal(ev[1].attributes!["delay_ms"], 2000);
-  const err = String(ev[1].attributes!["error"]);
+  assert.deepEqual(ev[0]!.attributes, { reason: "threshold", aborted: false, will_retry: true });
+  assert.equal(ev[1]!.attributes!["attempt"], 1);
+  assert.equal(ev[1]!.attributes!["max_attempts"], 3);
+  assert.equal(ev[1]!.attributes!["delay_ms"], 2000);
+  const err = String(ev[1]!.attributes!["error"]);
   assert.ok(!err.includes("ghp_"));
   assert.ok(err.length <= 500);
-  assert.deepEqual(ev[2].attributes, { attempt: 3, success: false, error: "gave up" });
+  assert.deepEqual(ev[2]!.attributes, { attempt: 3, success: false, error: "gave up" });
   await t.shutdown?.();
 });
 

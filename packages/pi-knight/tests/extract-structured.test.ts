@@ -26,9 +26,9 @@ test("gh pr edit yields an updated PR; opened wins for the same PR", () => {
     "",
   );
   assert.equal(s.prs.length, 1);
-  assert.equal(s.prs[0].action, "opened");
+  assert.equal(s.prs[0]!.action, "opened");
   const e = extractStructured([call("1", "gh pr edit 71 -R a/b --body z"), res("1", URL1)], "");
-  assert.equal(e.prs[0].action, "updated");
+  assert.equal(e.prs[0]!.action, "updated");
 });
 
 test("failed gh commands are ignored", () => {
@@ -43,7 +43,7 @@ test("falls back to PR URLs in the final message; push marks them updated", () =
     [call("1", "git push origin HEAD"), res("1", "remote: https://github.com/o/r/pull/new/branch")],
     `Pushed fixes to ${URL1}`,
   );
-  assert.equal(pushed.prs[0].action, "updated");
+  assert.equal(pushed.prs[0]!.action, "updated");
   assert.equal(pushed.prs.length, 1);
 });
 
@@ -59,7 +59,7 @@ test("gh/git forms pi-knight handled before the move still work", () => {
   assert.deepEqual(e.prs, [{ repo: "a/b", number: 7, url: "https://github.com/a/b/pull/7", action: "updated" }]);
   // git with global options before push still marks fallback PRs updated
   const p = extractStructured([call("1", "git -C repo push origin HEAD"), res("1", "ok")], `See ${URL1}`);
-  assert.equal(p.prs[0].action, "updated");
+  assert.equal(p.prs[0]!.action, "updated");
 });
 
 test("stricter PR URL regex: /pull/N/files links are no longer reported (core regex)", () => {

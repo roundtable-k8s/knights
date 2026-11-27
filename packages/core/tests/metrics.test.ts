@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createKnightMetrics } from "../src/metrics.ts";
 
 const metricNames = (text: string) =>
-  [...text.matchAll(/^# TYPE (\S+)/gm)].map((m) => m[1]).filter((n) => /^roundtable_knight_/.test(n)).sort();
+  [...text.matchAll(/^# TYPE (\S+)/gm)].map((m) => m[1]!).filter((n) => /^roundtable_knight_/.test(n)).sort();
 
 const opts = { runtime: "pi", knight: "galahad" };
 
