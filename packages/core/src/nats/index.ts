@@ -13,9 +13,9 @@ import {
 import { log } from "../logger.js";
 import { RESULT_PUBLISH_RETRY_MS } from "../config.js";
 import { traceHeaders } from "../trace-context.js";
+import { RESULT_MAX_BYTES, assertTaskResult, capResultText, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 export { RESULT_PUBLISH_RETRY_MS };
-import { RESULT_MAX_BYTES, assertTaskResult, capResultText, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
 
 const decoder = new TextDecoder();
 

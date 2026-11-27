@@ -116,6 +116,7 @@ export const SHUTDOWN_MARGIN_MS = 20_000;
 
 export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
   const taskTimeoutMs = positiveIntEnv(env, "TASK_TIMEOUT_MS", 1_800_000);
+  const cardsBucket = cardsBucketFromEnv(env);
   return {
     knightName: requireEnv(env, "KNIGHT_NAME"),
     table: env["ROUNDTABLE_TABLE"]?.trim() || "none",
@@ -129,7 +130,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     drainTimeoutMs: positiveIntEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000 - SHUTDOWN_MARGIN_MS),
     ...(env["KNIGHT_MEMORY_DIR"] ? { memoryDir: env["KNIGHT_MEMORY_DIR"] } : {}),
     ...(env["KNIGHT_MEMORY_ROOT"] ? { memoryRoot: env["KNIGHT_MEMORY_ROOT"] } : {}),
-    ...(cardsBucketFromEnv(env) ? { cardsBucket: cardsBucketFromEnv(env) } : {}),
+    ...(cardsBucket ? { cardsBucket } : {}),
   };
 }
 

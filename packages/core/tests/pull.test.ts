@@ -117,7 +117,7 @@ describe("pull loop (fake fetch)", () => {
   });
 
   it("answers an empty, missing or whitespace-only task through onInvalid, then acks; terms it without onInvalid (#139)", async () => {
-    const bodies = [JSON.stringify({ taskId: "t1", task: "" }), JSON.stringify({ taskId: "t2" }), "   "];
+    const bodies = [JSON.stringify({ taskId: "t1", task: "" }), JSON.stringify({ taskId: "t2" }), "   ", JSON.stringify({ taskId: "t4", task: "   " })];
     const run = async (onInvalid?: (t: TaskDelivery["task"]) => Promise<void>) => {
       const calls: string[] = [];
       const mk = (body: string): PulledMsg => ({
@@ -137,16 +137,16 @@ describe("pull loop (fake fetch)", () => {
         onTask: (d) => ran.push(d.task.task),
         onInvalid,
       });
-      await waitFor(() => calls.filter((c) => c === "ack" || c === "term").length === 3);
+      await waitFor(() => calls.filter((c) => c === "ack" || c === "term").length === 4);
       await puller.stop();
       assert.deepEqual(ran, [], "an empty task never runs");
       return calls;
     };
     const answered: string[] = [];
     const calls = await run(async (t) => { answered.push(`${t.taskId}: ${t.invalid}`); });
-    assert.deepEqual(answered, ["t1: task: must not be empty", "t2: task: required", "subj: task: must not be empty"]);
-    assert.deepEqual(calls, ["ack", "ack", "ack"]);
-    assert.deepEqual(await run(), ["term", "term", "term"]);
+    assert.deepEqual(answered, ["t1: task: must not be empty", "t2: task: required", "subj: task: must not be empty", "t4: task: must not be empty"]);
+    assert.deepEqual(calls, ["ack", "ack", "ack", "ack"]);
+    assert.deepEqual(await run(), ["term", "term", "term", "term"]);
   });
 
   it("keeps reading the batch when one message's handler throws: that message is terminated, the rest run, no retry delay (#226)", async () => {
