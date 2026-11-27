@@ -130,6 +130,17 @@ export function createTrustedSettingsManager(cwd: string, agentDir: string): Set
   return SettingsManager.create(cwd, agentDir, { projectTrusted: true });
 }
 
+/**
+ * Claude Code model aliases (`sonnet`, `opus`, `haiku`, `fable`, `opusplan`, optionally with a
+ * `[1m]`-style context suffix) and bare `claude-*` ids. claude-knight accepts these; pi-knight
+ * needs `provider/model`, so a bare alias that misses the catalog is a config error, not a
+ * request for a local endpoint.
+ */
+export function isClaudeAlias(modelStr: string): boolean {
+  if (modelStr.includes("/")) return false;
+  return /^(opus|sonnet|haiku|fable|opusplan)(\[[^\]]*\])?$/.test(modelStr) || modelStr.startsWith("claude-");
+}
+
 /** Parse "provider/model" → { provider, modelName }. Defaults provider to anthropic. */
 export function parseModelStr(modelStr: string): { provider: string; modelName: string } {
   const slashIdx = modelStr.indexOf("/");
@@ -215,8 +226,18 @@ export async function resolveModel(
     model = { ...model, id: modelName } as Model<Api>;
   }
 
+  // A Claude alias that is not in the catalog and has no local endpoint configured would otherwise
+  // be sent to the localhost:4000 fallback. Fail with the fix instead.
+  if (!model && isClaudeAlias(modelStr) && !localBaseUrlFromEnv()) {
+    throw new Error(
+      `Model "${modelStr}" is a Claude Code alias; pi-knight needs provider/model, e.g. "anthropic/claude-sonnet-4-5"`,
+    );
+  }
+
   if (!model && opts.strict) {
-    throw new Error(`Unknown model "${modelStr}": not in the model catalog or models.json`);
+    throw new Error(
+      `Unknown model "${modelStr}": not in the model catalog or models.json; use provider/model (e.g. "anthropic/claude-sonnet-4-5") or a configured local endpoint`,
+    );
   }
 
   if (!model) {

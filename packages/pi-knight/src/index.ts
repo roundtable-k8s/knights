@@ -61,7 +61,12 @@ async function main(): Promise<void> {
   // startup probe passes) and retries with capped backoff until the endpoint answers.
   // Resolving here is throwaway (knight.ts re-resolves for the session) but shares the
   // same baseUrl/default logic, so what we probe is exactly what the session will use.
-  await preflightModelUntilReady((await resolveModel(config.knightModel)).model, {
+  const startupModel = await resolveModel(config.knightModel).catch((err: unknown) => {
+    // A bad KNIGHT_MODEL is a config error: name it in the log before the fatal exit.
+    log.error("Invalid KNIGHT_MODEL", { model: config.knightModel, error: String(err) });
+    throw err;
+  });
+  await preflightModelUntilReady(startupModel.model, {
     onAttemptFailed: (error) => setDegradedReason(`model preflight failed: ${error}`),
   });
   setDegradedReason(memoryProblem);

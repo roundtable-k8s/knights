@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseModelStr, splitRoutingSuffix, resolveModel, createTrustedSettingsManager } from "../src/model.ts";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseModelStr, splitRoutingSuffix, resolveModel, createTrustedSettingsManager, isClaudeAlias } from "../src/model.ts";
 
 test("parseModelStr splits provider from model, defaulting to anthropic", () => {
   assert.deepEqual(parseModelStr("openrouter/deepseek/deepseek-v3.2"), {
@@ -79,5 +82,88 @@ test("resolveModel honors an explicit OPENAI_BASE_URL over the ollama default", 
   } finally {
     if (prevBase !== undefined) process.env.OPENAI_BASE_URL = prevBase;
     else delete process.env.OPENAI_BASE_URL;
+  }
+});
+
+const ALIAS_ENV = ["KNIGHT_MODEL_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "MODELS_JSON_PATH"] as const;
+
+/** Run fn with the given env vars set (undefined = unset), restoring the originals afterwards. */
+async function withEnv(vars: Partial<Record<(typeof ALIAS_ENV)[number], string | undefined>>, fn: () => Promise<void>) {
+  const prev = Object.fromEntries(ALIAS_ENV.map((k) => [k, process.env[k]]));
+  for (const k of ALIAS_ENV) delete process.env[k];
+  for (const [k, v] of Object.entries(vars)) if (v !== undefined) process.env[k] = v;
+  try {
+    await fn();
+  } finally {
+    for (const k of ALIAS_ENV) {
+      if (prev[k] !== undefined) process.env[k] = prev[k];
+      else delete process.env[k];
+    }
+  }
+}
+
+test("isClaudeAlias recognises claude-knight aliases and claude ids without a provider", () => {
+  for (const name of ["sonnet", "opus", "haiku", "fable", "opusplan", "sonnet[1m]", "claude-sonnet-4-5"]) {
+    assert.equal(isClaudeAlias(name), true, name);
+  }
+  for (const name of ["anthropic/claude-sonnet-4-5", "sonnet/x", "deepseek-v3", "my-sonnet", "sonnet:high"]) {
+    assert.equal(isClaudeAlias(name), false, name);
+  }
+});
+
+test("resolveModel rejects a bare Claude alias without a local endpoint instead of falling back to localhost", async () => {
+  await withEnv({}, async () => {
+    await assert.rejects(resolveModel("sonnet"), /is a Claude Code alias; pi-knight needs provider\/model, e.g. "anthropic\/claude-sonnet-4-5"/);
+    await assert.rejects(resolveModel("sonnet", { strict: true }), /is a Claude Code alias/);
+    await assert.rejects(resolveModel("opusplan"), /is a Claude Code alias/);
+  });
+});
+
+test("resolveModel names the provider/model form for an unknown strict model", async () => {
+  await withEnv({}, async () => {
+    await assert.rejects(resolveModel("ollama/not-a-real-model", { strict: true }), /use provider\/model/);
+  });
+});
+
+test("resolveModel still resolves a Claude alias when a local base URL is configured", async () => {
+  await withEnv({ KNIGHT_MODEL_BASE_URL: "http://litellm.ai.svc.cluster.local:4000/v1" }, async () => {
+    const { model } = await resolveModel("sonnet");
+    assert.equal(model.baseUrl, "http://litellm.ai.svc.cluster.local:4000/v1");
+    assert.equal(model.id, "sonnet");
+  });
+});
+
+test("resolveModel leaves catalog provider/model ids unaffected", async () => {
+  await withEnv({}, async () => {
+    const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
+    assert.equal(provider, "anthropic");
+    assert.equal(modelName, "claude-sonnet-4-5");
+    assert.equal(model.id, "claude-sonnet-4-5");
+  });
+});
+
+test("resolveModel accepts a models.json entry named like an alias", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "model-alias-"));
+  const modelsPath = join(dir, "models.json");
+  writeFileSync(
+    modelsPath,
+    JSON.stringify({
+      providers: {
+        anthropic: {
+          baseUrl: "http://models.example.internal/v1",
+          api: "openai-completions",
+          apiKey: "test",
+          models: [{ id: "sonnet", name: "sonnet", contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    }),
+  );
+  try {
+    await withEnv({ MODELS_JSON_PATH: modelsPath }, async () => {
+      const { model } = await resolveModel("sonnet");
+      assert.equal(model.baseUrl, "http://models.example.internal/v1");
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
