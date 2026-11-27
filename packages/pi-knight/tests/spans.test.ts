@@ -4,6 +4,7 @@ import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { startTelemetry, withTaskSpan } from "@roundtable/knight-core";
 import { SessionSpans } from "../src/spans.ts";
+import { resetOtelApiGlobal } from "../../core/tests/helpers/otel-env.js";
 
 const keep = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
 const clear = () => { for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k]; };
@@ -273,7 +274,7 @@ test("a chat turn records one point in each GenAI histogram", async () => {
   const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 3_600_000 });
   const provider = new MeterProvider({ readers: [reader] });
   // An earlier SDK start can leave a global registered by another API copy; clear it so ours can register.
-  delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  resetOtelApiGlobal();
   assert.ok(metrics.setGlobalMeterProvider(provider));
   try {
     const s = new SessionSpans("p/m", { knight: "k", table: "tbl" });
@@ -288,6 +289,6 @@ test("a chat turn records one point in each GenAI histogram", async () => {
     assert.equal(tok.dataPoints.length, 2);
   } finally {
     await provider.shutdown();
-    delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+    resetOtelApiGlobal();
   }
 });
