@@ -22,7 +22,7 @@ const freePort = () =>
     });
   });
 
-test("SIGTERM during the skills wait: exits 0 within seconds, never connects to NATS or subscribes", async () => {
+test("SIGTERM during the skills wait: exits 0 within seconds, never connects to NATS or subscribes", { timeout: 180_000 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "pk-startup-"));
   const work = join(home, "data");
   mkdirSync(work);
@@ -46,9 +46,9 @@ test("SIGTERM during the skills wait: exits 0 within seconds, never connects to 
   child.stderr.on("data", (d) => (out += d));
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => child.on("exit", (code, signal) => r({ code, signal })));
   try {
-    // tsx compiles the whole tree on first run; under the parallel suite that can take well over 30 s.
-    const deadline = Date.now() + 90_000;
-    while (!out.includes("No skills found, waiting for git-sync") && Date.now() < deadline && child.exitCode === null) await sleep(50);
+    // tsx compiles the whole tree on first run; wait on the readiness line, bounded only by the
+    // test's own timeout, and stop early if the child dies.
+    while (!out.includes("No skills found, waiting for git-sync") && child.exitCode === null) await sleep(50);
     assert.match(out, /No skills found, waiting for git-sync/, out);
 
     const sentAt = Date.now();
