@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -45,6 +45,37 @@ describe("installStartupSignalHandlers", () => {
     await sleep(10);
     assert.deepEqual(events, ["shutdown:SIGINT"]);
     assert.equal(signals.requested(), "SIGINT");
+  });
+
+  it("honours a signal recorded by the early preload before the handlers were installed", async () => {
+    const g = globalThis as { __rtEarlySignal?: string };
+    g.__rtEarlySignal = "SIGTERM";
+    try {
+      const events: string[] = [];
+      const signals = installStartupSignalHandlers({
+        target: new EventEmitter() as unknown as NodeJS.Process,
+        cleanup: () => void events.push("cleanup"),
+        exit: (code) => void events.push(`exit:${code}`),
+      });
+      await sleep(10);
+      assert.deepEqual(events, ["cleanup", "exit:0"]);
+      assert.equal(signals.requested(), "SIGTERM");
+      assert.equal(signals.ready(async () => {}), false);
+    } finally {
+      delete g.__rtEarlySignal;
+    }
+  });
+
+  it("early-signals.mjs records SIGTERM that arrives while the app has no handler", async () => {
+    const preload = resolve(import.meta.dirname, "..", "scripts", "early-signals.mjs");
+    const child = spawn(process.execPath, ["--import", preload, "-e", 'console.log("up");setTimeout(()=>console.log("early="+globalThis.__rtEarlySignal),300)'], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    const exited = new Promise<number | null>((r) => child.on("exit", (code) => r(code)));
+    while (!out.includes("up")) await sleep(20);
+    child.kill("SIGTERM");
+    assert.equal(await exited, 0);
+    assert.match(out, /early=SIGTERM/);
   });
 
   it("exits even when cleanup hangs or throws", async () => {
@@ -118,6 +149,16 @@ describe("startup-signals.sh (entrypoint)", () => {
     assert.doesNotMatch(r.out, /non-fatal|Starting knight/);
   });
 
+  it("the start-up log line goes to the container stdout, not into a redirected phase output", async () => {
+    const out = join(tmpdir(), `build-out-${process.pid}-${Date.now()}`);
+    const r = await runShell(`rt_run bash -c 'echo building; echo phase-ready >&3; exec sleep 30' >${JSON.stringify(out)}`, "phase-ready");
+    const built = readFileSync(out, "utf8");
+    rmSync(out, { force: true });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /SIGTERM received during start-up/);
+    assert.doesNotMatch(built, /received during start-up/);
+  });
+
   it("rt_run returns the phase's exit status", async () => {
     const r = await runShell(`rt_run false || echo "rc=$?"\nrt_run true && echo ok\necho waiting\nsleep 0.2`, "waiting");
     assert.match(r.out, /rc=1/);
@@ -125,16 +166,16 @@ describe("startup-signals.sh (entrypoint)", () => {
   });
 
   it("both entrypoints source it as their first statement and exec the runtime", async () => {
-    const { readFileSync } = await import("node:fs");
     for (const pkg of ["claude-knight", "pi-knight"]) {
       const src = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "scripts", "entrypoint.sh"), "utf8");
       const statements = src.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#"));
       assert.equal(statements[0], '. "$(dirname "$0")/startup-signals.sh"', pkg);
       assert.doesNotMatch(src, /mise-\w+\.sh|rt_mise|\/config\/mise\.toml/, `${pkg}: per-knight mise installer removed`);
       assert.doesNotMatch(src, /rt_bootstrap_nix|nix build|nix-lib|nix-env/, `${pkg}: legacy Nix installers removed`);
-      assert.equal(statements.at(-1), "exec node dist/index.js", pkg);
+      assert.equal(statements.at(-1), "exec node --import ./scripts/early-signals.mjs dist/index.js 3>&-", pkg);
       const dockerfile = readFileSync(resolve(import.meta.dirname, "..", "..", pkg, "Dockerfile"), "utf8");
       assert.match(dockerfile, /COPY packages\/core\/scripts\/startup-signals\.sh \.\/scripts\/startup-signals\.sh/, pkg);
+      assert.match(dockerfile, /COPY packages\/core\/scripts\/early-signals\.mjs \.\/scripts\/early-signals\.mjs/, pkg);
     }
   });
 });

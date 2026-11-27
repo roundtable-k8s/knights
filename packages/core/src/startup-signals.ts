@@ -69,6 +69,10 @@ export function installStartupSignalHandlers(opts: StartupSignalOptions): Startu
   target.on("SIGTERM", () => onSignal("SIGTERM"));
   target.on("SIGINT", () => onSignal("SIGINT"));
 
+  // A signal that arrived before this ran was recorded by scripts/early-signals.mjs (--import preload).
+  const early = (globalThis as { __rtEarlySignal?: string }).__rtEarlySignal;
+  if (early) onSignal(early);
+
   return {
     requested: () => requested,
     ready(fn) {

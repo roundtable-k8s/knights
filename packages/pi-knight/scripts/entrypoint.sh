@@ -111,4 +111,4 @@ if [ -n "${GITHUB_TOKEN_FILE:-}" ]; then
 fi
 
 log "Phase 5: Starting pi-knight"
-exec node dist/index.js
+exec node --import ./scripts/early-signals.mjs dist/index.js 3>&-
