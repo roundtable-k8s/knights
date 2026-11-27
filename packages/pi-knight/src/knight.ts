@@ -126,6 +126,9 @@ export function warmSession(config: KnightConfig): void {
  * each persist their own JSONL file, so without this the PVC grows with every chain
  * run. Live sessions' files are always kept.
  */
+// Last retention warning logged, so a PVC that stays undeletable does not log on every run.
+let lastPruneWarning: string | undefined;
+
 export function pruneOldSessions(config: KnightConfig): void {
   const keep = new Set<string>();
   for (const s of getActiveSessions()) {
@@ -139,8 +142,27 @@ export function pruneOldSessions(config: KnightConfig): void {
     },
     keep,
   )
-    .then((removed) => {
+    .then(({ removed, failed, rootError }) => {
       if (removed.length > 0) log.info("Pruned old session files", { count: removed.length });
+      if (rootError !== undefined) {
+        const message = `sessions root cannot be read: ${rootError}`;
+        if (message !== lastPruneWarning) log.warn("Session retention cannot read the sessions root", { error: rootError });
+        lastPruneWarning = message;
+      } else if (failed.length > 0) {
+        const first = failed[0];
+        if (first !== undefined) {
+          if (first.error !== lastPruneWarning) {
+            log.warn("Could not delete old session files; the sessions volume will keep growing", {
+              count: failed.length,
+              path: first.path,
+              error: first.error,
+            });
+          }
+          lastPruneWarning = first.error;
+        }
+      } else {
+        lastPruneWarning = undefined;
+      }
     })
     .catch((err) => log.warn("Session retention prune failed", { error: String(err) }));
 }
