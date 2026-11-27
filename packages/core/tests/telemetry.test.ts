@@ -155,6 +155,24 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
   assert.equal(tp["TRACEPARENT"], `00-${s.spanContext().traceId}-${s.spanContext().spanId}-01`);
 });
 
+test("task span carries retry_of and queued_ms only when given, queue wait clamped to 0", async () => {
+  const exporter = new InMemorySpanExporter();
+  const processor = new SimpleSpanProcessor(exporter);
+  const spans = await withTelemetry({ service: "s", knight: "k", env: { OTEL_TRACES_EXPORTER: "otlp" }, spanProcessors: [processor] }, async () => {
+    await withTaskSpan({ taskId: "t2", attempt: 2, knight: "k", retryOf: "t1", queuedMs: 1234 }, async () => 1);
+    await withTaskSpan({ taskId: "t3", knight: "k" }, async () => 1);
+    await withTaskSpan({ taskId: "t4", knight: "k", queuedMs: -50 }, async () => 1);
+    await processor.forceFlush();
+    return exporter.getFinishedSpans();
+  });
+  const by = (id: string) => spans.find((x) => x.attributes["roundtable.task.id"] === id)!;
+  assert.equal(by("t2").attributes["roundtable.task.retry_of"], "t1");
+  assert.equal(by("t2").attributes["roundtable.task.queued_ms"], 1234);
+  assert.equal(by("t3").attributes["roundtable.task.retry_of"], undefined);
+  assert.equal(by("t3").attributes["roundtable.task.queued_ms"], undefined);
+  assert.equal(by("t4").attributes["roundtable.task.queued_ms"], 0);
+});
+
 test("a throwing task still ends its span with error status", async () => {
   const exporter = new InMemorySpanExporter();
   const processor = new SimpleSpanProcessor(exporter);

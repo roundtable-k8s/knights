@@ -212,7 +212,7 @@ async function main(): Promise<void> {
       const act = activity;
 
       const result = await withTaskSpan(
-        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName },
+        { taskId, runId, attempt, knight: config.knightName, table: config.table, model: model ?? config.knightModel, runtime: "pi", parent: delivery.traceContext, chain: delivery.task.chainName, step: delivery.task.stepName, retryOf: delivery.task.retryOf, queuedMs: queuedFor },
         () => {
           act.setTraceId(activeTraceId());
           taskTrace = traceHeaders();

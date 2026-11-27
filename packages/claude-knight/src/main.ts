@@ -191,7 +191,7 @@ export async function main(): Promise<void> {
       const outcome = reserve.blocked
         ? null
         : await withTaskSpan(
-            { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, runtime: "claude", parent: delivery.traceContext, chain: parsed.chainName, step: parsed.stepName },
+            { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, runtime: "claude", parent: delivery.traceContext, chain: parsed.chainName, step: parsed.stepName, retryOf: parsed.retryOf, queuedMs: queuedFor },
             () => {
               act.setTraceId(activeTraceId());
               taskTrace = traceHeaders();
