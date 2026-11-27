@@ -62,6 +62,9 @@ export interface ShutdownDeps {
   exit(code: number): void;
 }
 
+/** How long aborted tasks get to publish their failure result before NATS is drained. */
+export const DEFAULT_ABORT_GRACE_MS = 5000;
+
 /**
  * The shutdown sequence: setDraining → stop service → stop fetching → wait for in-flight → drain NATS → cleanup → exit.
  * Idempotent: a second signal while shutting down is ignored. This is the one function the
@@ -84,7 +87,7 @@ export function createShutdown(deps: ShutdownDeps): (signal: string) => Promise<
         // Let the aborted tasks' catch-branch publish their failure result before nc.drain()/exit.
         const stuck = await waitForInflight({
           getActive: deps.getActive,
-          maxWaitMs: deps.abortGraceMs ?? 5000,
+          maxWaitMs: deps.abortGraceMs ?? DEFAULT_ABORT_GRACE_MS,
           pollMs: deps.pollMs,
         });
         if (stuck > 0) log.warn("Aborted tasks did not finish in time", { activeCount: stuck });

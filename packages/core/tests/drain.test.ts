@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import { createServer } from "node:net";
 import { describe, it } from "node:test";
-import { createShutdown, installSignalHandlers, waitForInflight, ShutdownAbort, SHUTDOWN_ABORT_REASON } from "../src/drain.ts";
+import { createShutdown, installSignalHandlers, DEFAULT_ABORT_GRACE_MS, waitForInflight, ShutdownAbort, SHUTDOWN_ABORT_REASON } from "../src/drain.ts";
 import { loadBaseConfig, SHUTDOWN_MARGIN_MS } from "../src/config.ts";
 import { startHealthServer, stopHealthServer, setDraining } from "../src/health.ts";
 import { startPullLoop, type PulledMsg } from "../src/nats/index.ts";
@@ -19,7 +19,7 @@ const freePort = () =>
   });
 
 /** Wires the REAL createShutdown + installSignalHandlers + pull loop + health server to fakes for NATS/task. */
-async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: boolean }) {
+async function harness(opts: { taskMs?: number; maxWaitMs: number; abortable?: boolean }) {
   const events: string[] = [];
   let active = 0;
   let shuttingDown = false;
@@ -29,6 +29,7 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
   let heartbeats = 0;
   let exitCode: number | null = null;
   const aborters: Array<() => void> = [];
+  const finishers: Array<() => void> = [];
   const port = await freePort();
   startHealthServer({ knightName: "T", port, registry: createKnightMetrics({ runtime: "test", knight: "T" }).registry });
 
@@ -53,7 +54,8 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
       void (async () => {
         let aborted = false;
         await Promise.race([
-          sleep(opts.taskMs), // the long fake task
+          // the long fake task: a timer, or (no taskMs) a gate the test opens with finish()
+          opts.taskMs === undefined ? new Promise<void>((r) => finishers.push(r)) : sleep(opts.taskMs),
           new Promise<void>((r) => aborters.push(() => { aborted = true; r(); })),
         ]);
         if (aborted) await sleep(50); // the failure result is published asynchronously
@@ -82,7 +84,9 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
 
   return {
     events, port, proc,
+    finish: () => finishers.forEach((f) => f()),
     active: () => active,
+    draining: () => shuttingDown,
     heartbeats: () => heartbeats,
     fetchesAfterSigterm: () => fetchesAfterSigterm,
     fetches: () => fetches,
@@ -92,11 +96,12 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
 
 describe("drain on SIGTERM (real shutdown handler)", () => {
   it("SIGTERM mid-task: /ready 503, no new fetch, result published + acked, then NATS drain and exit", async () => {
-    const h = await harness({ taskMs: 400, maxWaitMs: 5000 });
+    // The task is gated (no timer), so a slow /ready request under load cannot let it finish early.
+    const h = await harness({ maxWaitMs: 5000 });
     while (h.active() === 0) await sleep(10);
 
     h.proc.emit("SIGTERM"); // exactly what the process signal path does
-    await sleep(30);
+    while (!h.draining()) await sleep(5);
 
     // Mid-drain: still running, not exited, /ready is 503 draining.
     assert.equal(h.exitCode(), null, "must not exit while a task is in flight");
@@ -105,13 +110,15 @@ describe("drain on SIGTERM (real shutdown handler)", () => {
     assert.equal(((await res.json()) as { status: string }).status, "draining");
     const fetchesAtSigterm = h.fetches();
     const hbAtSigterm = h.heartbeats();
+    while (h.heartbeats() === hbAtSigterm) await sleep(5); // a heartbeat is sent while draining
+    assert.equal(h.exitCode(), null, "still draining after the heartbeat");
+    h.finish();
 
     while (h.exitCode() === null) await sleep(10);
     assert.deepEqual(h.events, ["result:long", "ack:long", "nats-drain", "cleanup", "exit"]);
     assert.equal(h.exitCode(), 0);
     assert.equal(h.fetchesAfterSigterm(), 0, "no fetch after SIGTERM");
     assert.ok(h.fetches() - fetchesAtSigterm <= 0, "no fetches during the drain");
-    assert.ok(h.heartbeats() > hbAtSigterm, "kept heartbeating while draining");
     setDraining(false);
   });
 
@@ -153,7 +160,7 @@ describe("drain on SIGTERM (real shutdown handler)", () => {
 
 describe("shutdown timing", () => {
   it("default drain bound plus abort grace ends before the pod grace period", () => {
-    const abortGraceMs = 5000;
+    const abortGraceMs = DEFAULT_ABORT_GRACE_MS;
     for (const t of ["1000", "600000", "1800000"]) {
       const c = loadBaseConfig({ KNIGHT_NAME: "k", TASK_TIMEOUT_MS: t });
       const grace = Number(t) + 60_000;

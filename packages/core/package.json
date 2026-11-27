@@ -10,7 +10,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --import ../../scripts/test/hermetic-env.ts tests/*.test.ts",
-    "test:hermetic": "ROUNDTABLE_TABLE=x KNIGHT_NAME=y npm test",
+    "test:hermetic": "ROUNDTABLE_TABLE=x KNIGHT_NAME=y NATS_URL=nats://127.0.0.1:4222 METRICS_PORT=3000 OTEL_SDK_DISABLED=false SUBSCRIBE_TOPICS=rt.tasks.x TASK_TIMEOUT_MS=1000 POD_NAMESPACE=x npm test",
     "contract:export": "tsx scripts/export-contract.ts"
   },
   "dependencies": {
