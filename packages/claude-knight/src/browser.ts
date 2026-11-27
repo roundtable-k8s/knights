@@ -51,7 +51,9 @@ export const browserShapes = {
 };
 
 /** Parsed arguments of each browser tool, so a schema change fails typecheck wherever a caller relies on the old shape. */
-export type BrowserArgs = { [K in keyof typeof browserShapes]: z.infer<z.ZodObject<(typeof browserShapes)[K]>> };
+export type BrowserArgs = {
+  [K in keyof typeof browserShapes]: keyof (typeof browserShapes)[K] extends never ? Record<string, never> : z.infer<z.ZodObject<(typeof browserShapes)[K]>>;
+};
 
 export const browserTools = [
   tool(

@@ -6,12 +6,14 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
+// The child runs the compiled dist/, built once here: spawning `tsx src/index.ts` cold-compiles the whole
+// import graph, which exceeded the budget under a parallel `npm test`. The budgets are also generous on purpose.
 const PKG = resolve(import.meta.dirname, "..");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () =>
@@ -22,7 +24,16 @@ const freePort = () =>
     });
   });
 
+function buildDist() {
+  const tsc = resolve(PKG, "../../node_modules/typescript/bin/tsc");
+  const outDir = join(PKG, "dist"); // inside the package so @roundtable/knight-core resolves from node_modules (gitignored)
+  const r = spawnSync(process.execPath, [tsc, "-p", PKG, "--outDir", outDir, "--noEmitOnError", "false", "--incremental", "false"], { cwd: PKG, encoding: "utf8" });
+  return { outDir, r };
+}
+
 test("SIGTERM during the skills wait: exits 0 within seconds, never connects to NATS or subscribes", async () => {
+  const { outDir, r: build } = buildDist();
+  assert.ok(existsSync(join(outDir, "index.js")), `tsc build failed:\n${build.stdout}${build.stderr}`);
   const home = mkdtempSync(join(tmpdir(), "ck-startup-"));
   const work = join(home, "data");
   mkdirSync(work);
@@ -40,13 +51,13 @@ test("SIGTERM during the skills wait: exits 0 within seconds, never connects to 
     METRICS_PORT: String(await freePort()),
     NATS_URL: "nats://127.0.0.1:1",
   };
-  const child = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [join(outDir, "index.js")], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => child.on("exit", (code, signal) => r({ code, signal })));
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + 60_000;
     while (!out.includes("waiting for git-sync") && Date.now() < deadline && child.exitCode === null) await sleep(50);
     assert.match(out, /waiting for git-sync/, out);
 
