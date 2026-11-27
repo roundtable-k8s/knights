@@ -1,5 +1,7 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
+  describeNoDeliverable,
+  type NoDeliverableFacts,
   isGitPush,
   mergePrs,
   parseVerdict,
@@ -123,14 +125,34 @@ export function describeSessionFailure(
 export function resolveTaskOutcome(
   deliverable: string | undefined,
   failureReason?: string,
+  facts?: NoDeliverableFacts,
 ): {
   result: string;
   success: boolean;
   error?: string;
 } {
   if (deliverable != null) return { result: deliverable, success: true };
-  const error = failureReason ?? "Agent produced no deliverable output";
+  const error = failureReason ?? describeNoDeliverable(facts);
   return { result: error, success: false, error };
+}
+
+/** How the task's last assistant message ended, from stop reason and part types only (never content). */
+export function describeSessionEnd(sess: AgentSession, fromIndex = 0): string | undefined {
+  const messages = (sess as unknown as { messages?: Array<{ role?: string; content?: unknown; stopReason?: string }> }).messages;
+  if (!Array.isArray(messages)) return undefined;
+  for (let i = messages.length - 1; i >= fromIndex; i--) {
+    const msg = messages[i];
+    if (msg?.role !== "assistant") continue;
+    const types = new Set<string>();
+    if (Array.isArray(msg.content)) for (const p of msg.content) types.add((p as { type?: string })?.type ?? "unknown");
+    let shape: string;
+    if (types.size === 0) shape = "the last message was empty";
+    else if (types.size === 1 && types.has("toolCall")) shape = "the last message had only tool calls";
+    else if (types.size === 1 && types.has("thinking")) shape = "the last message was thinking only";
+    else shape = `the last message had ${[...types].sort().join(", ")} parts`;
+    return msg.stopReason ? `${shape}, stop reason ${msg.stopReason}` : shape;
+  }
+  return undefined;
 }
 
 /**
