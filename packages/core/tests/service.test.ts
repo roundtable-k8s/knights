@@ -11,6 +11,7 @@ import {
   domainFromTopics,
   parseSkillFrontmatter,
   readSkills,
+  resolveSkillName,
   skillsMetadataJson,
   startKnightService,
   type KnightService,
@@ -38,6 +39,22 @@ describe("skills metadata", () => {
       { name: "report-generator", description: "Make reports", category: "shared" },
     ]);
     assert.deepEqual(readSkills("/nonexistent/skills"), []);
+  });
+
+  it("renames a colliding skill to <category>-<name>", () => {
+    const root = mkdtempSync(join(tmpdir(), "core-skills-"));
+    for (const cat of ["a", "b"]) {
+      mkdirSync(join(root, cat, "deploy"), { recursive: true });
+      writeFileSync(join(root, cat, "deploy", "SKILL.md"), "---\nname: deploy\n---\n");
+    }
+    assert.deepEqual(readSkills(root).map((s) => [s.category, s.name]), [["a", "deploy"], ["b", "b-deploy"]]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("resolveSkillName skips names still taken after renaming", () => {
+    const taken = new Set<string>(["x", "c-x"]);
+    assert.equal(resolveSkillName(taken, "c", "x"), null);
+    assert.equal(resolveSkillName(taken, "d", "x"), "d-x");
   });
 
   it("caps the JSON at 8 KB, truncating descriptions before dropping skills", () => {

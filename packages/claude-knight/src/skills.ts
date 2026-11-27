@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { log, skillsExpected, waitForSkills as waitForSkillsCore } from "@roundtable/knight-core";
+import { log, resolveSkillName, skillsExpected, waitForSkills as waitForSkillsCore } from "@roundtable/knight-core";
 
 /**
  * Expose the operator's skill tree to Claude Code.
@@ -40,13 +40,12 @@ export function discoverSkills(skillsDir: string): Array<{ name: string; path: s
     } catch {
       continue; // dangling category symlink while git-sync swaps worktrees
     }
-    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (e.name.startsWith(".")) continue;
       const skillPath = join(catPath, e.name);
       if (!existsSync(join(skillPath, "SKILL.md"))) continue;
-      const name = taken.has(e.name) ? `${category}-${e.name}` : e.name;
-      if (taken.has(name)) continue;
-      taken.add(name);
+      const name = resolveSkillName(taken, category, e.name);
+      if (!name) continue;
       found.push({ name, path: skillPath, category });
     }
   }
