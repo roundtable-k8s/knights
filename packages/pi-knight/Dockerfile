@@ -10,6 +10,7 @@ COPY packages/core/src/ ./packages/core/src/
 COPY packages/pi-knight/tsconfig.json ./packages/pi-knight/
 COPY packages/pi-knight/src/ ./packages/pi-knight/src/
 RUN npm run build --workspace packages/core --workspace packages/pi-knight
+RUN npm ci --omit=dev --workspace packages/pi-knight --workspace packages/core --include-workspace-root
 # Flatten into the layout the runtime stage expects: nested workspace deps
 # (kept out of the hoisted root by version conflicts) are merged over the root
 # node_modules, and the dangling workspace symlinks are dropped. The shared core is installed as a real
@@ -22,6 +23,9 @@ RUN mkdir -p /out \
     && cp -a packages/core/package.json packages/core/dist /out/node_modules/@roundtable/knight-core/
 
 FROM node:22.19-slim
+LABEL org.opencontainers.image.source="https://github.com/roundtable-k8s/knights" \
+      org.opencontainers.image.description="pi-knight: universal base agent runtime for the Knights of the Round Table" \
+      org.opencontainers.image.licenses="Apache-2.0"
 WORKDIR /app
 
 # System packages — minimal base
@@ -33,7 +37,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Mise (baseline tools) ────────────────────────────────────────
-RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+# renovate: datasource=github-releases depName=jdx/mise
+ARG MISE_VERSION=v2026.11.6
+RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
 COPY packages/pi-knight/mise.toml /app/mise.toml
 ENV MISE_DATA_DIR=/app/.mise \
     MISE_CONFIG_FILE=/app/mise.toml \
@@ -41,7 +47,8 @@ ENV MISE_DATA_DIR=/app/.mise \
 RUN mise install --cd /app && mise reshim
 
 # ── agent-browser CLI (token-efficient browser automation) ────────
-RUN npm install -g agent-browser 2>/dev/null || true
+ARG AGENT_BROWSER_VERSION=0.43.0
+RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION}
 
 # ── App code ──────────────────────────────────────────────────────
 COPY --from=builder /app/packages/pi-knight/dist ./dist
@@ -67,6 +74,9 @@ ENV MISE_DATA_DIR=/data/.mise \
 # Smoke check: baseline shims resolve offline from an empty data dir (shims, not
 # `mise exec`, which falls back to same-named binaries on the system PATH).
 RUN MISE_OFFLINE=1 MISE_DATA_DIR=/tmp/empty-mise MISE_CONFIG_FILE=/app/mise.toml sh -c 'for t in rg python yq; do /app/.mise/shims/$t --version || exit 1; done'
+
+# Smoke check: runtime dependencies resolve (a dev-only import fails the build).
+RUN node --input-type=module -e "await import('@roundtable/knight-core'); await import('@earendil-works/pi-coding-agent'); await import('@opentelemetry/api')"
 
 # Non-root
 USER node
