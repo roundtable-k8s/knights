@@ -240,35 +240,35 @@ export async function startKnightService(opts: KnightServiceOptions): Promise<Kn
   let refreshChain: Promise<unknown> = Promise.resolve();
 
   async function refresh(): Promise<boolean> {
-      if (stopped) return false;
-      let next: string;
-      try {
-        next = skillsMetadataJson(readSkills(opts.skillsDir));
-      } catch (e) {
-        log.warn("Skill refresh failed", { error: String(e) });
-        return false;
+    if (stopped) return false;
+    let next: string;
+    try {
+      next = skillsMetadataJson(readSkills(opts.skillsDir));
+    } catch (e) {
+      log.warn("Skill refresh failed", { error: String(e) });
+      return false;
+    }
+    if (next === skillsJson) return false;
+    // Commit the new list only once add() succeeded, so a failure is retried on the next call.
+    const previous = skillsJson;
+    skillsJson = next;
+    try {
+      await svc?.stop();
+      svc = null;
+      if (stopped) return true;
+      const added = await add();
+      if (stopped) {
+        // stop() ran while add() was pending: don't leave a service answering after shutdown.
+        await added.stop().catch((e) => log.warn("NATS micro service stop failed", { error: String(e) }));
+        return true;
       }
-      if (next === skillsJson) return false;
-      // Commit the new list only once add() succeeded, so a failure is retried on the next call.
-      const previous = skillsJson;
-      skillsJson = next;
-      try {
-        await svc?.stop();
-        svc = null;
-        if (stopped) return true;
-        const added = await add();
-        if (stopped) {
-          // stop() ran while add() was pending: don't leave a service answering after shutdown.
-          await added.stop().catch((e) => log.warn("NATS micro service stop failed", { error: String(e) }));
-          return true;
-        }
-        svc = added;
-        log.info("NATS micro service re-registered: skills changed");
-      } catch (e) {
-        skillsJson = previous;
-        log.warn("NATS micro service re-register failed", { error: String(e) });
-      }
-      return true;
+      svc = added;
+      log.info("NATS micro service re-registered: skills changed");
+    } catch (e) {
+      skillsJson = previous;
+      log.warn("NATS micro service re-register failed", { error: String(e) });
+    }
+    return true;
   }
 
   return {

@@ -253,22 +253,23 @@ export function startIntrospect<E>(opts: StartIntrospectOptions<E>): Subscriptio
   const podSubject = `${base}.${podSubjectToken(opts.identity.pod)}`;
   const subs = [nc.subscribe(base, { queue: "introspect" }), nc.subscribe(podSubject)];
   log.info("Introspect responder started", { subjects: [base, podSubject], pod: opts.identity.pod });
-  for (const sub of subs) void serve(sub, opts);
+  const maxPayload = () => nc.info?.max_payload;
+  for (const sub of subs) void serve(sub, opts, maxPayload);
   return subs;
 }
 
-async function serve<E>(sub: Subscription, opts: IntrospectOptions<E>): Promise<void> {
+async function serve<E>(sub: Subscription, opts: IntrospectOptions<E>, maxPayload: () => number | undefined): Promise<void> {
   for await (const msg of sub) {
     // One bad message must not end the loop: a rejection here would leave the responder dead.
     try {
-      await answer(msg, opts);
+      await answer(msg, opts, maxPayload);
     } catch (err) {
       log.error("Introspect responder failed to answer", { error: errorMessage(err) });
     }
   }
 }
 
-async function answer<E>(msg: Msg, opts: IntrospectOptions<E>): Promise<void> {
+async function answer<E>(msg: Msg, opts: IntrospectOptions<E>, maxPayload: () => number | undefined): Promise<void> {
   let req: IntrospectRequest = { type: "stats" };
   try {
     const parsed = JSON.parse(decoder.decode(msg.data));
@@ -293,10 +294,19 @@ async function answer<E>(msg: Msg, opts: IntrospectOptions<E>): Promise<void> {
     const bytes = new TextEncoder().encode(payload).length;
     log.error("Introspect reply failed", { error: cause, bytes });
     const error = /max_payload/i.test(cause)
-      ? `reply too large (${bytes} bytes): request fewer entries (limit=...)`
+      ? oversizedMessage(bytes, req, maxPayload())
       : `reply failed: ${cause}`;
     msg.respond(JSON.stringify(errorBody(opts, error)));
   }
+}
+
+/** Names the size, the server's limit and a concrete smaller entry count (estimated from the caller's limit). */
+function oversizedMessage(bytes: number, req: IntrospectRequest, max: number | undefined): string {
+  const limit = max ? ` (server max_payload ${max} bytes)` : "";
+  const head = `reply too large (${bytes} bytes)${limit}`;
+  const fit = max && req.limit !== undefined && req.limit >= 1 ? Math.floor((req.limit * max) / bytes) : NaN;
+  if (!(fit >= 1) || fit >= req.limit!) return `${head}: request fewer entries with a smaller limit`;
+  return `${head}: request at most ${fit} entries (limit=${fit})`;
 }
 
 function errorBody<E>(opts: IntrospectOptions<E>, error: string): Record<string, unknown> {

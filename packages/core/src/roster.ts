@@ -185,6 +185,8 @@ export const ROSTER_RETRY_MAX_MS = 60_000;
 export class Roster {
   private readonly cache = new Map<string, { card: KnightCard | null; revision: number }>();
   private watching = false;
+  /** A watch failure was logged since the last successful load; later retries stay quiet. */
+  private failureLogged = false;
   private stopWatch: (() => void) | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
   private retryMs = ROSTER_RETRY_MIN_MS;
@@ -215,6 +217,7 @@ export class Roster {
         () => {
           if (gen !== this.generation) return;
           this.watching = true;
+          this.failureLogged = false;
           this.retryMs = ROSTER_RETRY_MIN_MS;
           log.info("Roster watch loaded", { knights: this.cachedCards().length });
         },
@@ -238,7 +241,11 @@ export class Roster {
     this.cache.clear();
     this.generation++; // drop callbacks from the dead watch
     this.stopWatch = null;
-    if (wasWatching) log.warn("Roster watch ended — reading cards directly", { error: err === undefined ? undefined : String(err) });
+    // Log the first failure of each outage (including a watch that never loaded); retries stay quiet.
+    if (wasWatching || !this.failureLogged) {
+      log.warn("Roster watch ended — reading cards directly", { error: err === undefined ? undefined : String(err) });
+    }
+    this.failureLogged = true;
     if (this.retryTimer) return;
     const delay = this.retryMs;
     this.retryMs = Math.min(this.retryMs * 2, ROSTER_RETRY_MAX_MS);
