@@ -156,12 +156,13 @@ async function readEdges(file: string, size: number): Promise<{ head: Buffer; ta
 async function summarize(file: string, sessionId: string, st: { size: number; mtimeMs: number }): Promise<TranscriptInfo> {
   const { head, tail } = await readEdges(file, st.size);
   // Tool results carry no text blocks, so promptText skips them.
-  const firstUser = parseLines(head.toString("utf8")).find(
+  const headRecords = parseLines(head.toString("utf8"));
+  const firstUser = headRecords.find(
     (r) => isMainMessage(r) && r.type === "user" && promptText(r.message.content),
   );
   const isTitle = (r: any) => r?.type === "summary" || r?.type === "custom-title" || r?.type === "ai-title";
   const summaryRec =
-    parseLines(tail.toString("utf8")).reverse().find(isTitle) ?? parseLines(head.toString("utf8")).reverse().find(isTitle);
+    parseLines(tail.toString("utf8")).reverse().find(isTitle) ?? headRecords.reverse().find(isTitle);
   return {
     sessionId,
     lastModified: st.mtimeMs,

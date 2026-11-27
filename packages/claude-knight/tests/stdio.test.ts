@@ -252,15 +252,36 @@ test("a title near the top of a big transcript is found, and boundary-aligned ed
   assert.equal(info!.summary, "Top title");
   assert.equal(info!.firstPrompt, "hello");
 
-  // A head window cut exactly on a boundary keeps the last whole record (title at the very end).
+  // A head window whose last record ends at byte W-1 with the newline at byte W (just outside the window) keeps that record.
   const sid2 = "3a2b3c4d-1111-4222-8333-444455556666";
-  const fillLen = W - first.length - title.length - 3 - base;
+  const fillLen = W - first.length - title.length - 2 - base;
   const l2 = [first, pad(fillLen, "h"), title];
-  assert.equal(l2.join("\n").length + 1, W);
+  assert.equal(l2.join("\n").length, W); // newline is byte W, one past the head window
   for (let i = 0; i < 20; i++) l2.push(pad(4000, `n${i}`));
   writeFileSync(join(dir, `${sid2}.jsonl`), l2.join("\n") + "\n");
   const infos = await listTranscripts(cfg, "/data", 5);
   assert.equal(infos.find((i) => i.sessionId === sid2)!.summary, "Top title");
+});
+
+test("a tail window starting exactly on a record boundary keeps that record", async () => {
+  const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-tail-"));
+  const dir = join(cfg, "projects", projectDirName("/data"));
+  mkdirSync(dir, { recursive: true });
+  const W = 64 * 1024;
+  const pad = (n: number, uuid: string) => JSON.stringify({ type: "assistant", uuid, isSidechain: false, message: { role: "assistant", content: [{ type: "text", text: "x".repeat(n) }] } });
+  const first = JSON.stringify({ type: "user", uuid: "u1", isSidechain: false, message: { role: "user", content: "hello" } });
+  const base = pad(0, "t").length;
+  // The newline before the title is byte size-W-1, so the tail window starts on the title record.
+  const sid3 = "4a2b3c4d-1111-4222-8333-444455556666";
+  const tailTitle = JSON.stringify({ type: "ai-title", title: "Tail title" });
+  const tailPad = pad(W - tailTitle.length - 2 - base, "t");
+  const l3 = [first];
+  for (let i = 0; i < 40; i++) l3.push(pad(4000, `p${i}`));
+  const body = l3.join("\n") + "\n" + tailTitle + "\n" + tailPad + "\n";
+  assert.equal(Buffer.byteLength(tailTitle + "\n" + tailPad + "\n"), W);
+  writeFileSync(join(dir, `${sid3}.jsonl`), body);
+  const infos3 = await listTranscripts(cfg, "/data", 5);
+  assert.equal(infos3.find((i) => i.sessionId === sid3)!.summary, "Tail title");
 });
 
 test("a missing projects directory lists no transcripts", async () => {
