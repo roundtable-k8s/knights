@@ -37,6 +37,28 @@ test("connect runs first and its failure is ignored", async () => {
   assert.deepEqual(calls[1], { bin: "/bin/ab", args: ["snapshot"] });
 });
 
+test("a failing command after a failed connect names the sidecar", async () => {
+  process.env.BROWSER_CDP_URL = "http://cdp:2";
+  setBrowserExec(async (_b, args) => {
+    if (args[0] === "connect") throw new Error("connect refused");
+    throw new Error("daemon not running");
+  });
+  await assert.rejects(
+    runBrowser(["click", "@e1"]),
+    (err: Error) =>
+      err.message ===
+      "daemon not running (could not connect to the browser at http://cdp:2; is the browser sidecar running?)",
+  );
+});
+
+test("a failing command after a successful connect keeps its own message", async () => {
+  setBrowserExec(async (_b, args) => {
+    if (args[0] === "connect") return "";
+    throw new Error("element not found");
+  });
+  await assert.rejects(runBrowser(["click", "@e1"]), (err: Error) => err.message === "element not found");
+});
+
 test("a failing command rejects", async () => {
   setBrowserExec(async (_b, args) => {
     if (args[0] === "open") throw new Error("boom");

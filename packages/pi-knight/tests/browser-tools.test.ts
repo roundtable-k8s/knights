@@ -60,11 +60,23 @@ test("tools pass argv arrays, hostile text stays one element", async () => {
   assert.deepEqual(calls.at(-1), ["close"]);
 });
 
-test("empty output keeps the default messages; errors are prefixed", async () => {
+test("empty output keeps the default messages", async () => {
   process.env.BROWSER_ENABLED = "true";
   fake("");
   assert.equal((await run("browser_open", { url: "http://a" })).content[0].text, "Navigated to http://a");
   assert.equal((await run("browser_close", {})).content[0].text, "Browser closed");
+});
+
+test("a failing command rejects so the SDK records a tool error", async () => {
+  process.env.BROWSER_ENABLED = "true";
   setBrowserExec(async (_b, a) => { if (a[0] === "connect") return ""; throw new Error("bad"); });
-  assert.equal((await run("browser_close", {})).content[0].text, "Error: bad");
+  await assert.rejects(run("browser_close", {}), /bad/);
+  await assert.rejects(run("browser_click", { ref: "@e1" }), /bad/);
+});
+
+test("an unreachable sidecar is named in the rejection", async () => {
+  process.env.BROWSER_ENABLED = "true";
+  process.env.BROWSER_CDP_URL = "http://cdp:9";
+  setBrowserExec(async (_b, a) => { if (a[0] === "connect") throw new Error("refused"); throw new Error("no daemon"); });
+  await assert.rejects(run("browser_snapshot", {}), /could not connect to the browser at http:\/\/cdp:9; is the browser sidecar running\?\)$/);
 });
