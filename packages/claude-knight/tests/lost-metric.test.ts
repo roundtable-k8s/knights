@@ -19,9 +19,10 @@ test("observeQueuedFor computes and records the wait for a task with publishedAt
   assert.equal(observeQueuedFor(undefined, 5_000), undefined);
   assert.equal(observeQueuedFor(10_000, 5_000), 0); // clock skew never goes negative
   const before = await registry.getSingleMetricAsString("roundtable_knight_task_queue_seconds");
+  const bucket300 = (m: string) => Number(/task_queue_seconds_bucket\{le="300"[^}]*\} (\d+)/.exec(m)?.[1] ?? NaN);
   const count = (m: string) => Number(/task_queue_seconds_count\{[^}]*\} (\d+)/.exec(m)?.[1] ?? 0);
   assert.equal(observeQueuedFor(1_000, 121_000), 120_000);
   const after = await registry.getSingleMetricAsString("roundtable_knight_task_queue_seconds");
   assert.equal(count(after), count(before) + 1);
-  assert.match(after, /task_queue_seconds_bucket\{le="300"/);
+  assert.equal(bucket300(after), bucket300(before) + 1); // 120 s falls in le="300"
 });

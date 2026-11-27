@@ -27,13 +27,14 @@ const freePort = () =>
 function buildDist() {
   const tsc = resolve(PKG, "../../node_modules/typescript/bin/tsc");
   const outDir = join(PKG, "dist"); // inside the package so @roundtable/knight-core resolves from node_modules (gitignored)
-  const r = spawnSync(process.execPath, [tsc, "-p", PKG, "--outDir", outDir, "--noEmitOnError", "false", "--incremental", "false"], { cwd: PKG, encoding: "utf8" });
+  const r = spawnSync(process.execPath, [tsc, "-p", PKG, "--outDir", outDir, "--incremental", "false"], { cwd: PKG, encoding: "utf8" });
   return { outDir, r };
 }
 
 test("SIGTERM during the skills wait: exits 0 within seconds, never connects to NATS or subscribes", async () => {
   const { outDir, r: build } = buildDist();
-  assert.ok(existsSync(join(outDir, "index.js")), `tsc build failed:\n${build.stdout}${build.stderr}`);
+  assert.equal(build.status, 0, `tsc build failed:\n${build.stdout}${build.stderr}`);
+  assert.ok(existsSync(join(outDir, "index.js")), `tsc produced no index.js:\n${build.stdout}${build.stderr}`);
   const home = mkdtempSync(join(tmpdir(), "ck-startup-"));
   const work = join(home, "data");
   mkdirSync(work);
