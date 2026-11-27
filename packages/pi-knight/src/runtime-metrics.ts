@@ -16,6 +16,7 @@ export const {
   natsConnected,
   natsReconnects,
   setNatsConnected,
+  setInfo,
   activeTasks,
   toolCallDuration,
   toolCallsTotal,

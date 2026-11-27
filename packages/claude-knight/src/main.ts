@@ -105,6 +105,7 @@ export async function main(): Promise<void> {
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
   // Discovery only: tasks stay on JetStream.
   let knightService: KnightService | null = null;
+  metrics.setInfo(readPackageVersion(import.meta.url), config.claudeModel ?? "");
   const nc = getConnection();
   if (nc) {
     knightService = await startKnightService({
