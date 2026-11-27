@@ -13,7 +13,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { containsSecret, redactSecrets } from "@roundtable/knight-core";
 import { findBlockedBashReason, toolHooksExtension } from "../src/hooks.ts";
-
 import { toolCallsBlocked } from "../src/runtime-metrics.ts";
 
 async function blockedCount(reason: string): Promise<number> {
@@ -180,6 +179,8 @@ test("a docs-style Authorization header example write is blocked (current behavi
   const dir = mkdtempSync(join(tmpdir(), "hooks-"));
   try {
     const target = join(dir, "doc.md");
+    // The bearer value is wrapped in a ${"..."} expression so this test file itself does not contain
+    // a token-shaped literal that the knight write hook would block.
     const example = `curl -H 'Authorization: Bearer ${"abcdefgh123"}' https://x`;
     const session = await runWithHooks(dir, [
       fauxAssistantMessage([fauxToolCall("write", { path: target, content: example }, { id: "w1" })]),

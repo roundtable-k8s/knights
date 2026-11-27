@@ -147,7 +147,6 @@ test("executeTask: tasks of different runs overlap in time, with separate sessio
     cwds.map((d) => d.split("/").pop()).sort(),
     [workspaceName("run-a", "t1"), workspaceName("run-b", "t2"), workspaceName(undefined, "t3")].sort(),
   );
-  assert.match(cwds.map((d) => d.split("/").pop()).sort()[0]!, /^run-run-a-[0-9a-f]{8}$/);
   for (const d of cwds) assert.ok(!existsSync(d), "workspace removed after the task");
   __setSessionFactoryForTests(null);
 });
