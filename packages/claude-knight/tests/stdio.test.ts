@@ -5,7 +5,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -177,7 +177,7 @@ test("`index.js mcp` serves over stdio to an SDK Client and exits cleanly when s
 
 // ── transcripts for introspect ─────────────────────────────────────
 
-test("transcripts are read from $CLAUDE_CONFIG_DIR/projects/<sanitized cwd>/<id>.jsonl", () => {
+test("transcripts are read from $CLAUDE_CONFIG_DIR/projects/<sanitized cwd>/<id>.jsonl", async () => {
   const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-"));
   const dir = join(cfg, "projects", projectDirName("/data"));
   assert.equal(projectDirName("/data"), "-data");
@@ -195,19 +195,48 @@ test("transcripts are read from $CLAUDE_CONFIG_DIR/projects/<sanitized cwd>/<id>
   ];
   writeFileSync(join(dir, `${sid}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n{partial");
 
-  const list = listTranscripts(cfg, "/data", 10);
+  const list = await listTranscripts(cfg, "/data", 10);
   assert.equal(list.length, 1);
   assert.equal(list[0]!.sessionId, sid);
   assert.equal(list[0]!.firstPrompt, "Scan the cluster");
   assert.ok(list[0]!.fileSize > 0);
 
-  const msgs = readTranscript(cfg, "/data", sid)!;
+  const msgs = (await readTranscript(cfg, "/data", sid))!;
   assert.deepEqual(msgs.map((m) => m.uuid), ["u1", "m1", "u2", "m2"]);
   assert.equal(msgs[0]!.timestamp, "2026-11-22T10:00:00Z");
-  assert.equal(readTranscript(cfg, "/data", "../../etc/passwd"), null);
-  assert.equal(readTranscript(cfg, "/data", "00000000-0000-0000-0000-000000000000"), null);
+  assert.equal(await readTranscript(cfg, "/data", "../../etc/passwd"), null);
+  assert.equal(await readTranscript(cfg, "/data", "00000000-0000-0000-0000-000000000000"), null);
   // A transcript under another project dir (e.g. a hashed long path) is still found.
-  assert.equal(readTranscript(cfg, "/somewhere/else", sid)!.length, 4);
+  assert.equal((await readTranscript(cfg, "/somewhere/else", sid))!.length, 4);
+});
+
+test("a transcript larger than the head and tail windows keeps its first prompt and summary", async () => {
+  const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-big-"));
+  const dir = join(cfg, "projects", projectDirName("/data"));
+  mkdirSync(dir, { recursive: true });
+  const sid = "1a2b3c4d-1111-4222-8333-444455556666";
+  const filler = { type: "assistant", uuid: "f", sessionId: sid, isSidechain: false, message: { role: "assistant", content: [{ type: "text", text: "x".repeat(4000) }] } };
+  const lines = [
+    { type: "user", uuid: "u1", sessionId: sid, isSidechain: false, message: { role: "user", content: "Find the disk leak" } },
+    ...Array.from({ length: 200 }, (_, i) => ({ ...filler, uuid: `f${i}` })),
+    { type: "summary", summary: "Disk leak triage" },
+    { type: "assistant", uuid: "last", sessionId: sid, isSidechain: false, message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+  ];
+  writeFileSync(join(dir, `${sid}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  assert.ok(statSync(join(dir, `${sid}.jsonl`)).size > 2 * 64 * 1024);
+
+  const [info] = await listTranscripts(cfg, "/data", 1);
+  assert.equal(info!.sessionId, sid);
+  assert.equal(info!.firstPrompt, "Find the disk leak");
+  assert.equal(info!.summary, "Disk leak triage");
+  // Reading a session still returns every main-thread message, not just the windows.
+  assert.equal((await readTranscript(cfg, "/data", sid))!.length, 202);
+});
+
+test("a missing projects directory lists no transcripts", async () => {
+  const cfg = mkdtempSync(join(tmpdir(), "ck-sessions-none-"));
+  assert.deepEqual(await listTranscripts(cfg, "/data", 10), []);
+  assert.equal(await readTranscript(cfg, "/data", "0f3c9a5e-1111-4222-8333-444455556666"), null);
 });
 
 // ── auth: egress injection ─────────────────────────────────────────

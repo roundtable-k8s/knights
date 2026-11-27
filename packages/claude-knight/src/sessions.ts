@@ -6,8 +6,12 @@
  * the working directory with every non-alphanumeric character replaced by "-"
  * (/data → -data). Lines carry many record types; only the main-thread user
  * and assistant messages matter here.
+ *
+ * All file access is asynchronous so a Session Explorer request cannot stall
+ * the event loop (and with it a running task's heartbeats). Listing only stats
+ * files; summaries read just the head and tail of each transcript.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { open, readdir, readFile, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 
 /** Same shape as the Agent SDK's SessionMessage, so introspect can map both alike. */
@@ -29,6 +33,11 @@ export interface TranscriptInfo {
 }
 
 const SESSION_FILE_RE = /^([0-9a-fA-F-]{8,})\.jsonl$/;
+/** Bytes read from the start (first prompt) and the end (title/summary) of a transcript. */
+const WINDOW_BYTES = 64 * 1024;
+/** Files stat'ed at once while listing; bounds open descriptors on a busy PVC. */
+const STAT_CONCURRENCY = 16;
+const NEWLINE = 0x0a;
 
 export function projectDirName(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -39,15 +48,32 @@ function projectsRoot(configDir: string): string {
 }
 
 /** Project directories to look in: the one for workDir first, then any other (long paths get hashed names). */
-function candidateDirs(configDir: string, workDir: string): string[] {
+async function candidateDirs(configDir: string, workDir: string): Promise<string[]> {
   const root = projectsRoot(configDir);
-  if (!existsSync(root)) return [];
-  const own = join(root, projectDirName(workDir));
-  const others = readdirSync(root, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => join(root, d.name))
-    .filter((d) => d !== own);
-  return existsSync(own) ? [own, ...others] : others;
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const own = projectDirName(workDir);
+  const names = entries.filter((d) => d.isDirectory()).map((d) => d.name);
+  const others = names.filter((n) => n !== own).map((n) => join(root, n));
+  return names.includes(own) ? [join(root, own), ...others] : others;
+}
+
+/** Run fn over items with at most `limit` in flight; results keep the input order. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 function parseLines(raw: string): any[] {
@@ -89,12 +115,50 @@ export function toTranscriptMessages(records: any[]): TranscriptMessage[] {
   }));
 }
 
-function summarize(file: string, sessionId: string): TranscriptInfo {
-  const st = statSync(file);
-  const records = parseLines(readFileSync(file, "utf8"));
+async function readRange(fh: FileHandle, position: number, length: number): Promise<Buffer> {
+  const buf = Buffer.alloc(length);
+  const { bytesRead } = await fh.read(buf, 0, length, position);
+  return buf.subarray(0, bytesRead);
+}
+
+/**
+ * The first and last WINDOW_BYTES of a transcript, cut back to whole lines.
+ * A file that fits in two windows is returned whole as both parts.
+ */
+async function readEdges(file: string, size: number): Promise<{ head: Buffer; tail: Buffer }> {
+  const fh = await open(file, "r");
+  try {
+    if (size <= 2 * WINDOW_BYTES) {
+      const all = await readRange(fh, 0, size);
+      return { head: all, tail: all };
+    }
+    const head = await readRange(fh, 0, WINDOW_BYTES);
+    const tail = await readRange(fh, size - WINDOW_BYTES, WINDOW_BYTES);
+    const lastNewline = head.lastIndexOf(NEWLINE);
+    const firstNewline = tail.indexOf(NEWLINE);
+    return {
+      head: lastNewline < 0 ? Buffer.alloc(0) : head.subarray(0, lastNewline),
+      tail: firstNewline < 0 ? Buffer.alloc(0) : tail.subarray(firstNewline + 1),
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Summaries come from the head and tail only. The first prompt is found in the
+ * head, so a first record longer than the window leaves firstPrompt unset; the
+ * title/summary record is taken from the tail.
+ */
+async function summarize(file: string, sessionId: string, st: { size: number; mtimeMs: number }): Promise<TranscriptInfo> {
+  const { head, tail } = await readEdges(file, st.size);
   // Tool results carry no text blocks, so promptText skips them.
-  const firstUser = records.find((r) => isMainMessage(r) && r.type === "user" && promptText(r.message.content));
-  const summaryRec = [...records].reverse().find((r) => r?.type === "summary" || r?.type === "custom-title" || r?.type === "ai-title");
+  const firstUser = parseLines(head.toString("utf8")).find(
+    (r) => isMainMessage(r) && r.type === "user" && promptText(r.message.content),
+  );
+  const summaryRec = parseLines(tail.toString("utf8"))
+    .reverse()
+    .find((r) => r?.type === "summary" || r?.type === "custom-title" || r?.type === "ai-title");
   return {
     sessionId,
     lastModified: st.mtimeMs,
@@ -104,29 +168,50 @@ function summarize(file: string, sessionId: string): TranscriptInfo {
   };
 }
 
-/** Sessions newest first. */
-export function listTranscripts(configDir: string, workDir: string, limit: number): TranscriptInfo[] {
-  const files: Array<{ file: string; id: string; mtime: number }> = [];
+interface SessionFile {
+  file: string;
+  id: string;
+  size: number;
+  mtimeMs: number;
+}
+
+/** Every session file across the project dirs, newest first. Files that vanish mid-listing are skipped. */
+async function listSessionFiles(configDir: string, workDir: string): Promise<SessionFile[]> {
+  const candidates: Array<{ file: string; id: string }> = [];
   const seen = new Set<string>();
-  for (const dir of candidateDirs(configDir, workDir)) {
-    for (const name of readdirSync(dir)) {
+  for (const dir of await candidateDirs(configDir, workDir)) {
+    const names = await readdir(dir).catch(() => [] as string[]);
+    for (const name of names) {
       const m = name.match(SESSION_FILE_RE);
       if (!m || seen.has(m[1]!)) continue;
       seen.add(m[1]!);
-      const file = join(dir, name);
-      files.push({ file, id: m[1]!, mtime: statSync(file).mtimeMs });
+      candidates.push({ file: join(dir, name), id: m[1]! });
     }
   }
-  files.sort((a, b) => b.mtime - a.mtime);
-  return files.slice(0, Math.max(0, limit)).map((f) => summarize(f.file, f.id));
+  const stats = await mapLimit(candidates, STAT_CONCURRENCY, (c) => stat(c.file).then((st) => st, () => null));
+  const files: SessionFile[] = [];
+  candidates.forEach((c, i) => {
+    const st = stats[i];
+    if (st) files.push({ ...c, size: st.size, mtimeMs: st.mtimeMs });
+  });
+  return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+/** Sessions newest first. Only the newest `limit` are summarized. */
+export async function listTranscripts(configDir: string, workDir: string, limit: number): Promise<TranscriptInfo[]> {
+  const newest = (await listSessionFiles(configDir, workDir)).slice(0, Math.max(0, limit));
+  const summaries = await mapLimit(newest, STAT_CONCURRENCY, (f) =>
+    summarize(f.file, f.id, f).then((s) => s, () => null),
+  );
+  return summaries.filter((s): s is TranscriptInfo => s !== null);
 }
 
 /** Main-thread messages of one session, or null when there is no such transcript. */
-export function readTranscript(configDir: string, workDir: string, sessionId: string): TranscriptMessage[] | null {
+export async function readTranscript(configDir: string, workDir: string, sessionId: string): Promise<TranscriptMessage[] | null> {
   if (!/^[0-9a-fA-F-]+$/.test(sessionId)) return null;
-  for (const dir of candidateDirs(configDir, workDir)) {
-    const file = join(dir, `${sessionId}.jsonl`);
-    if (existsSync(file)) return toTranscriptMessages(parseLines(readFileSync(file, "utf8")));
+  for (const dir of await candidateDirs(configDir, workDir)) {
+    const raw = await readFile(join(dir, `${sessionId}.jsonl`), "utf8").catch(() => null);
+    if (raw !== null) return toTranscriptMessages(parseLines(raw));
   }
   return null;
 }

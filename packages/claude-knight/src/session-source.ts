@@ -31,7 +31,7 @@ type Config = Pick<
 async function sessionList(config: Config, limit: number): Promise<SessionSummary[]> {
   if (config.runtime === "cli") {
     try {
-      return listTranscripts(config.claudeConfigDir, config.workDir, limit);
+      return await listTranscripts(config.claudeConfigDir, config.workDir, limit);
     } catch {
       return [];
     }
@@ -42,7 +42,7 @@ async function sessionList(config: Config, limit: number): Promise<SessionSummar
 async function sessionMessages(config: Config, id: string): Promise<SessionMessage[] | null> {
   if (config.runtime === "cli") {
     try {
-      return readTranscript(config.claudeConfigDir, config.workDir, id) as unknown as SessionMessage[] | null;
+      return (await readTranscript(config.claudeConfigDir, config.workDir, id)) as unknown as SessionMessage[] | null;
     } catch {
       return null;
     }
