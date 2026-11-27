@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, HEARTBEAT_MS, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -206,19 +206,19 @@ async function main(): Promise<void> {
       // Metrics first: a result that cannot be published must not lose them or turn a success into an error. (#91)
       // Token/cost are recorded regardless — a no-output task still spent them. Only the
       // task-outcome counter reflects the honest success/failure. (#31)
-      metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
-      metrics.recordRefusal(result.refused);
-      metrics.taskDuration.labels().observe(durationMs / 1000);
-      metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
-      metrics.recordTokens(result.model, result.tokens);
-
-      try {
-        await publishResult(taskId, buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }));
-      } catch (e) {
-        // Do not publish a made-up failure for a task that ran: the real result is lost, say so.
-        log.error("Failed to publish task result — result lost", { taskId, error: e instanceof Error ? e.message : String(e) });
-        metrics.tasksTotal.labels("publish_failed").inc();
-      }
+      await publishTaskOutcome({
+        taskId,
+        record: () => {
+          metrics.tasksTotal.labels(result.success ? "success" : "error").inc();
+          metrics.recordRefusal(result.refused);
+          metrics.taskDuration.labels().observe(durationMs / 1000);
+          metrics.llmCost.labels(result.model, result.billing ?? metrics.BILLING).inc(result.cost);
+          metrics.recordTokens(result.model, result.tokens);
+        },
+        payload: () => buildResultPayload(result, { taskId, knight: config.knightName, durationMs, parsed: delivery.task }),
+        // Do not publish a made-up failure for a task that ran: the real result is lost.
+        onPublishFailed: () => metrics.tasksTotal.labels("publish_failed").inc(),
+      });
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;
       const errMsg = err instanceof Error ? err.message : String(err);

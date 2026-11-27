@@ -26,3 +26,4 @@ export * from "./workdirs.js";
 export * from "./skill-wait.js";
 export * from "./browser.js";
 export * from "./process-errors.js";
+export * from "./task-outcome.js";
