@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { TaskResult } from "../src/contract/index.ts";
 import { publishTaskOutcome } from "../src/task-outcome.ts";
+import { setLogStream } from "../src/logger.ts";
 
 const result = { task_id: "t1", knight: "K", success: true, result: "ok", duration_ms: 1, cost: 0 } as TaskResult;
 
@@ -53,12 +54,23 @@ describe("publishTaskOutcome", () => {
 
   it("still resolves when onPublishFailed throws after a failed publish", async () => {
     let failed = 0;
-    await publishTaskOutcome({
-      taskId: "t1", record: () => {}, payload: () => result,
-      publish: async () => { throw new Error("nats down"); },
-      onPublishFailed: () => { failed++; throw new Error("callback broke"); },
-    });
+    const lines: string[] = [];
+    setLogStream({ write: (s: string) => { lines.push(s); return true; } } as unknown as NodeJS.WritableStream);
+    try {
+      await publishTaskOutcome({
+        taskId: "t1", record: () => {}, payload: () => result,
+        publish: async () => { throw new Error("nats down"); },
+        onPublishFailed: () => { failed++; throw new Error("callback broke"); },
+      });
+    } finally {
+      setLogStream(process.stdout);
+    }
     assert.equal(failed, 1);
+    const entry = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((e) => e["msg"] === "onPublishFailed threw");
+    assert.ok(entry, `onPublishFailed threw line logged: ${lines.join("")}`);
+    assert.equal(entry["level"], "error");
+    assert.equal(entry["taskId"], "t1");
+    assert.equal(entry["error"], "callback broke");
   });
 
   it("resolves when payload construction throws", async () => {
