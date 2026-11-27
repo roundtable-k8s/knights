@@ -5,9 +5,10 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
-import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
+import { recordPublishFailed, recordReserveRefusal, recordTaskOutcome } from "./task-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { waitForSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -127,7 +128,7 @@ export async function main(): Promise<void> {
   };
 
   // Abort handles of running tasks, for the forced shutdown path.
-  const inflight = new Set<AbortController>();
+  const inflight = new Set<TaskScope>();
   // Concurrency slots (0-based) in use, reported on task.started.
   const slots = new SlotPool();
 
@@ -136,14 +137,19 @@ export async function main(): Promise<void> {
     // Skills may have changed (git-sync): re-read and re-register the service if so.
     // Not awaited: the slot must be counted synchronously so the next fetch sees it.
     void knightService?.refreshSkills();
-    // Keep the message un-acked but alive while the task runs; ack only when it finishes.
     const started = Date.now();
-    const controller = new AbortController();
+    const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
     // Everything taken after the slot is released in the finally below, even when a step throws part-way.
     let activity: TaskActivity | undefined;
-    let heartbeat: ReturnType<typeof setInterval> | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let counted = false;
+    // Keep the message un-acked but alive while the task runs; the scope acks it on close.
+    const scope = startTaskScope({
+      delivery,
+      timeoutMs,
+      onHeartbeat: () => activity?.heartbeat(),
+      onOpen: () => setActive(activeCount + 1),
+      onClose: () => setActive(activeCount - 1),
+    });
+    inflight.add(scope);
 
     try {
       activity = new TaskActivity({
@@ -166,15 +172,6 @@ export async function main(): Promise<void> {
       });
       const act = activity;
       activity.started();
-      heartbeat = setInterval(() => {
-        delivery.working();
-        act.heartbeat();
-      }, HEARTBEAT_MS);
-      setActive(activeCount + 1);
-      counted = true;
-      const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
-      timer = setTimeout(() => controller.abort(), timeoutMs);
-      inflight.add(controller);
 
       // Plan reserve: refuse new work before spawning Claude Code at all.
       const reserve: { blocked: boolean; reason?: string } =
@@ -189,7 +186,7 @@ export async function main(): Promise<void> {
             { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, runtime: "claude", parent: delivery.traceContext, chain: parsed.chainName, step: parsed.stepName },
             () => {
               act.setTraceId(activeTraceId());
-              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
+              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, scope.signal, parsed.runId, { model: parsed.model });
             },
             (o) => ({ success: o.success, cost: o.cost, model: o.model, tokens: o.tokens, error: o.error }),
           );
@@ -197,23 +194,18 @@ export async function main(): Promise<void> {
       if (!outcome) {
         log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
         activity?.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
-        metrics.usageLimitHits.labels().inc();
-        metrics.tasksTotal.labels("refused").inc();
-        try {
-          await publishResult(
-            parsed.taskId,
+        await publishTaskOutcome({
+          taskId: parsed.taskId,
+          record: recordReserveRefusal,
+          payload: () =>
             buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
               taskId: parsed.taskId,
               knight: config.knightName,
               durationMs: Date.now() - started,
               parsed,
             }),
-          );
-        } catch (e) {
-          // Same as the normal path: do not fall into the outer catch and publish a made-up failure.
-          log.error("Failed to publish task result — result lost", { taskId: parsed.taskId, error: e instanceof Error ? e.message : String(e) });
-          metrics.tasksTotal.labels("publish_failed").inc();
-        }
+          onPublishFailed: recordPublishFailed,
+        });
         return;
       }
 
@@ -221,19 +213,13 @@ export async function main(): Promise<void> {
       activity?.finished({ success: outcome.success, error: outcome.error, errorClass: outcome.usageLimited ? "model_error" : undefined, cost: outcome.cost, tokens: outcome.tokens, turns: outcome.turns });
 
       // Metrics first: a result that cannot be published must not lose them or turn a success into an error. (#91)
-      metrics.tasksTotal.labels(outcome.success ? "success" : "error").inc();
-      metrics.taskDuration.labels().observe(durationMs / 1000);
-      metrics.llmCost.labels(outcome.model, outcome.billing).inc(outcome.cost);
-      metrics.recordTokens(outcome.model, outcome.tokens);
-      if (outcome.usageLimited) metrics.usageLimitHits.labels().inc();
-
-      try {
-        await publishResult(parsed.taskId, buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }));
-      } catch (e) {
-        // Do not publish a made-up failure for a task that ran: the real result is lost, say so.
-        log.error("Failed to publish task result — result lost", { taskId: parsed.taskId, error: e instanceof Error ? e.message : String(e) });
-        metrics.tasksTotal.labels("publish_failed").inc();
-      }
+      // Do not publish a made-up failure for a task that ran: the real result is lost.
+      await publishTaskOutcome({
+        taskId: parsed.taskId,
+        record: () => recordTaskOutcome(outcome, durationMs),
+        payload: () => buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }),
+        onPublishFailed: recordPublishFailed,
+      });
     } catch (err) {
       const durationMs = Date.now() - started;
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -247,13 +233,10 @@ export async function main(): Promise<void> {
       metrics.tasksTotal.labels("error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
-      clearTimeout(timer);
-      inflight.delete(controller);
-      clearInterval(heartbeat);
+      inflight.delete(scope);
+      scope.close(); // clears timers, drops the active count, then acks once
       activity?.close();
       knightService?.markTaskFinished();
-      delivery.ack();
-      if (counted) setActive(activeCount - 1);
       puller?.wake();
     }
   }
@@ -270,7 +253,7 @@ export async function main(): Promise<void> {
     // Grace period over with tasks still running: abort them so each publishes a failure
     // result (and acks) before exit, instead of being dead-lettered as lost later.
     abortInflight: () => {
-      for (const c of inflight) c.abort(new ShutdownAbort());
+      for (const s of inflight) s.abort(new ShutdownAbort());
     },
     drainNats: drain,
     cleanup: async () => {
