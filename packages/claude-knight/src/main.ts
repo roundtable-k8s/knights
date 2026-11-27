@@ -152,9 +152,9 @@ export async function main(): Promise<void> {
     let taskTrace: Record<string, string> | undefined;
 
     const queuedFor = parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined;
-    metrics.observeQueueWait(queuedFor);
 
     try {
+      metrics.observeQueueWait(queuedFor);
       activity = new TaskActivity({
         knight: config.knightName,
         table: config.table,

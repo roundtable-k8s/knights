@@ -173,7 +173,6 @@ async function main(): Promise<void> {
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
     const startTime = Date.now();
     const queuedFor = Number.isFinite(sentAt) ? Math.max(0, startTime - sentAt) : undefined;
-    metrics.observeQueueWait(queuedFor);
     // Everything taken after the slot is released in the finally below, even when a step throws part-way.
     let activity: TaskActivity | undefined;
     // Keep the message un-acked but alive while the task runs; the scope acks it on close.
@@ -189,6 +188,7 @@ async function main(): Promise<void> {
     let taskTrace: Record<string, string> | undefined;
     openScopes.add(scope);
     try {
+      metrics.observeQueueWait(queuedFor);
       activity = new TaskActivity({
         knight: config.knightName,
         table: config.table,

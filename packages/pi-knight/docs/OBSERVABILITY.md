@@ -45,6 +45,8 @@ Expose metrics on `/metrics` endpoint (HTTP, same port as health check).
 
 `roundtable_knight_tasks_total` is labelled by `status`. A task whose result cannot be published is counted twice: once as its outcome (`success` or `error`, recorded before the publish) and once as `publish_failed` (the result itself is lost and logged as such). Do not sum over `status` for a task total; use `status!="publish_failed"` or a single status.
 
+`roundtable_knight_task_queue_seconds` observes every start, so a task that is delivered again is counted again, and its wait includes the run time of the earlier attempt.
+
 Every series carries the constant labels `table` (`ROUNDTABLE_TABLE`, `none` when unset),
 `knight` and `runtime` (`pi`). The names are shared with claude-knight (`runtime="claude"`).
 
