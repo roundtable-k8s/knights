@@ -10,6 +10,7 @@ const base: TaskResult = {
   tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
   model: "p/m",
   toolCalls: 0,
+  turns: 0,
 };
 const meta = { taskId: "t1", knight: "k", durationMs: 5, timestamp: "2026-01-01T00:00:00Z" };
 
@@ -67,6 +68,7 @@ const run: TaskResult = {
   tokens: { input: 1200, output: 340, cacheRead: 800, cacheWrite: 0 },
   model: "claude-opus-5-5",
   toolCalls: 4,
+  turns: 3,
 };
 
 test("fixture result.success: buildResultPayload matches", () => {
@@ -127,4 +129,16 @@ test("ordinary failures and refusals are not transient", () => {
 test("cache usage: tokens.cacheRead and cacheWrite are published, input stays uncached", () => {
   const p = buildResultPayload({ ...run, tokens: { input: 6, output: 340, cacheRead: 800, cacheWrite: 120 } }, fx);
   assert.deepEqual(p.tokens, { input: 6, output: 340, cacheRead: 800, cacheWrite: 120 });
+});
+
+test("payload publishes runtime pi-knight and the task's turns", () => {
+  const p = buildResultPayload({ ...base, success: true, turns: 5 }, meta);
+  assert.equal(p.runtime, "pi-knight");
+  assert.equal(p.turns, 5);
+});
+
+test("failure payload has turns 0 and runtime pi-knight", () => {
+  const p = buildResultPayload(failedTaskResult("boom", "p/m"), meta);
+  assert.equal(p.turns, 0);
+  assert.equal(p.runtime, "pi-knight");
 });

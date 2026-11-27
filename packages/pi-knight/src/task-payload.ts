@@ -14,6 +14,7 @@ export function failedTaskResult(errMsg: string, model: string): TaskResult {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     model,
     toolCalls: 0,
+    turns: 0,
     ...(refused ? { refused } : {}),
     ...(transient ? { transient } : {}),
   };
@@ -40,6 +41,8 @@ export function buildResultPayload(
     tokens: result.tokens,
     model: result.model,
     tool_calls: result.toolCalls,
+    turns: result.turns,
+    runtime: "pi-knight",
     ...(result.prs ? { prs: result.prs } : {}),
     ...(result.verdict ? { verdict: result.verdict } : {}),
     ...(result.refused ? { refused: result.refused } : {}),
