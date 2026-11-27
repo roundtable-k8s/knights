@@ -6,13 +6,26 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PKG = resolve(import.meta.dirname, "..");
+// The children run the compiled dist/, built once here: spawning `tsx src/index.ts` cold-compiles the whole
+// import graph, which made the first-line wait depend on machine load. dist/ is gitignored.
+function buildDist() {
+  const tsc = resolve(PKG, "../../node_modules/typescript/bin/tsc");
+  const outDir = join(PKG, "dist");
+  const r = spawnSync(process.execPath, [tsc, "-p", PKG, "--outDir", outDir, "--incremental", "false"], { cwd: PKG, encoding: "utf8" });
+  assert.equal(r.status, 0, `tsc build failed:\n${r.stdout}${r.stderr}`);
+  assert.ok(existsSync(join(outDir, "index.js")), `tsc produced no index.js:\n${r.stdout}${r.stderr}`);
+  return join(outDir, "index.js");
+}
+let entryPromise: Promise<string> | undefined;
+const entry = () => (entryPromise ??= Promise.resolve().then(buildDist));
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const freePort = () =>
   new Promise<number>((done) => {
@@ -23,6 +36,7 @@ const freePort = () =>
   });
 
 test("SIGTERM during the skills wait: exits 0 within seconds, never connects to NATS or subscribes", { timeout: 180_000 }, async () => {
+  const index = await entry();
   const home = mkdtempSync(join(tmpdir(), "pk-startup-"));
   const work = join(home, "data");
   mkdirSync(work);
@@ -40,14 +54,13 @@ test("SIGTERM during the skills wait: exits 0 within seconds, never connects to 
     METRICS_PORT: String(await freePort()),
     NATS_URL: "nats://127.0.0.1:1",
   };
-  const child = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [index], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => child.on("exit", (code, signal) => r({ code, signal })));
   try {
-    // tsx compiles the whole tree on first run; wait on the readiness line, bounded only by the
-    // test's own timeout, and stop early if the child dies.
+    // Wait on the readiness line, bounded only by the test's own timeout; stop early if the child dies.
     while (!out.includes("No skills found, waiting for git-sync") && child.exitCode === null) await sleep(50);
     assert.match(out, /No skills found, waiting for git-sync/, out);
 
@@ -69,7 +82,8 @@ test("SIGTERM during the skills wait: exits 0 within seconds, never connects to 
   }
 });
 
-test("scrubAgentEnv runs at start-up: a production-mode switch is gone before the first signal handler runs", async () => {
+test("scrubAgentEnv runs at start-up: a production-mode switch is gone before the first signal handler runs", { timeout: 180_000 }, async () => {
+  const index = await entry();
   const home = mkdtempSync(join(tmpdir(), "pk-scrub-"));
   const work = join(home, "data");
   mkdirSync(work);
@@ -92,14 +106,13 @@ test("scrubAgentEnv runs at start-up: a production-mode switch is gone before th
     METRICS_PORT: String(await freePort()),
     NATS_URL: "nats://127.0.0.1:1",
   };
-  const child = spawn(process.execPath, ["--import", "tsx", "--import", probe, "src/index.ts"], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["--import", probe, index], { cwd: PKG, env, stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   child.stdout.on("data", (d) => (out += d));
   child.stderr.on("data", (d) => (out += d));
   const exited = new Promise<void>((r) => child.on("exit", () => r()));
   try {
-    const deadline = Date.now() + 90_000;
-    while (!out.includes("No skills found, waiting for git-sync") && Date.now() < deadline && child.exitCode === null) await sleep(50);
+    while (!out.includes("No skills found, waiting for git-sync") && child.exitCode === null) await sleep(50);
     assert.match(out, /No skills found, waiting for git-sync/, out);
     child.kill("SIGTERM");
     const killer = setTimeout(() => child.kill("SIGKILL"), 15_000);
