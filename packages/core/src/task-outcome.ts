@@ -8,7 +8,9 @@ export interface TaskOutcome {
   record: () => void;
   /** Builds the result payload; called once, after `record`. */
   payload: () => TaskResult;
-  /** Defaults to `publishResult`; injectable for tests. */
+  /** Trace headers captured while the task span was active; see PublishResultOptions.traceHeaders. */
+  traceHeaders?: Record<string, string>;
+  /** Defaults to `publishResult` (with `traceHeaders`); injectable for tests. */
   publish?: (taskId: string, result: TaskResult) => Promise<void>;
   /** Called once when the publish fails (the result is lost). */
   onPublishFailed: () => void;
@@ -21,7 +23,8 @@ const errText = (e: unknown): string => (e instanceof Error ? e.message : String
  * the metrics or turn a finished task into a made-up failure (#91), so this never rejects.
  */
 export async function publishTaskOutcome(o: TaskOutcome): Promise<void> {
-  const { taskId, record, payload, publish = publishResult, onPublishFailed } = o;
+  const { taskId, record, payload, traceHeaders, onPublishFailed } = o;
+  const publish = o.publish ?? ((id: string, r: TaskResult) => publishResult(id, r, { traceHeaders }));
   try {
     record();
   } catch (e) {

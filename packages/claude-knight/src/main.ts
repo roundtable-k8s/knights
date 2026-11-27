@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
-import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
 import { recordPublishFailed, recordReserveRefusal, recordTaskOutcome } from "./task-metrics.js";
@@ -150,6 +150,8 @@ export async function main(): Promise<void> {
       onClose: () => setActive(activeCount - 1),
     });
     inflight.add(scope);
+    // Trace headers of the task span, captured while it is active: the result is published after it ends.
+    let taskTrace: Record<string, string> | undefined;
 
     try {
       activity = new TaskActivity({
@@ -186,6 +188,7 @@ export async function main(): Promise<void> {
             { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, runtime: "claude", parent: delivery.traceContext, chain: parsed.chainName, step: parsed.stepName },
             () => {
               act.setTraceId(activeTraceId());
+              taskTrace = traceHeaders();
               return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, scope.signal, parsed.runId, { model: parsed.model });
             },
             (o) => ({ success: o.success, cost: o.cost, model: o.model, tokens: o.tokens, error: o.error }),
@@ -218,6 +221,7 @@ export async function main(): Promise<void> {
         taskId: parsed.taskId,
         record: () => recordTaskOutcome(outcome, durationMs),
         payload: () => buildResultPayload(outcome, { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }),
+        traceHeaders: taskTrace,
         onPublishFailed: recordPublishFailed,
       });
     } catch (err) {
@@ -228,6 +232,7 @@ export async function main(): Promise<void> {
       await publishResult(
         parsed.taskId,
         buildResultPayload(failedOutcome(errMsg, config), { taskId: parsed.taskId, knight: config.knightName, durationMs, parsed }),
+        { traceHeaders: taskTrace },
       ).catch((e) => log.error("Failed to publish error result", { error: String(e) }));
 
       metrics.tasksTotal.labels("error").inc();

@@ -1,4 +1,4 @@
-import { connect as natsConnect, InvalidArgumentError, type NatsConnection } from "@nats-io/transport-node";
+import { connect as natsConnect, headers as natsHeaders, InvalidArgumentError, type NatsConnection } from "@nats-io/transport-node";
 import {
   jetstream,
   jetstreamManager,
@@ -12,6 +12,7 @@ import {
 } from "@nats-io/jetstream";
 import { log } from "../logger.js";
 import { RESULT_PUBLISH_RETRY_MS } from "../config.js";
+import { traceHeaders } from "../trace-context.js";
 
 export { RESULT_PUBLISH_RETRY_MS };
 import { RESULT_MAX_BYTES, assertTaskResult, capResultText, encodeResult, parseTask, type ParsedTask, type TaskResult } from "../contract/index.js";
@@ -633,6 +634,12 @@ export interface PublishResultOptions {
   noRespondersRetryMs?: number;
   /** Connection state probe (tests). Default: the live connection. */
   isConnected?: () => boolean;
+  /**
+   * W3C trace headers to send with the result, captured while the task span was active. Default:
+   * the headers of the active span now (none outside a trace). Callers that publish after their
+   * span has ended must pass them in.
+   */
+  traceHeaders?: Record<string, string>;
   initialDelayMs?: number;
   maxDelayMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -721,10 +728,14 @@ export async function publishResult(
   // Same msgID on every attempt: a timed-out publish may have been stored, and JetStream
   // drops the duplicate (default duplicate window 2 min > the retry budget).
   const msgID = `result-${taskId}`;
+  // Same trace headers on every attempt, like the msgID.
+  const trace = opts.traceHeaders ?? traceHeaders();
+  const hdrs = Object.keys(trace).length > 0 ? natsHeaders() : undefined;
+  if (hdrs) for (const [k, v] of Object.entries(trace)) hdrs.set(k, v);
 
   for (let attempt = 1; ; attempt++) {
     try {
-      await client.publish(subject, payload, { msgID });
+      await client.publish(subject, payload, hdrs ? { msgID, headers: hdrs } : { msgID });
       log.info("Result published", { taskId, subject, ...(attempt > 1 ? { attempt } : {}) });
       return;
     } catch (err) {
