@@ -358,7 +358,7 @@ export function onSessionEvent(activity: TaskActivity, e: any): void {
       const m = e.message;
       if (m?.role !== "assistant") break;
       const u = m.usage;
-      if (u) activity.addUsage({ input: u.input, output: u.output, cacheRead: u.cacheRead, cost: u.cost?.total });
+      if (u) activity.addUsage({ input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite, cost: u.cost?.total });
       activity.assistantMessage(contentText(m.content));
       break;
     }
