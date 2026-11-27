@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
-import { test, mock } from "node:test";
+import { afterEach, test, mock } from "node:test";
 import { startTaskScope } from "../src/task-scope.ts";
 
+// Timers are restored after each test, whatever it did; no test resets them itself.
+afterEach(() => mock.timers.reset());
+
 function setup(extra: Partial<Parameters<typeof startTaskScope>[0]> = {}) {
-  mock.timers.reset();
   mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
   const calls: string[] = [];
   const scope = startTaskScope({
@@ -26,7 +28,6 @@ test("heartbeat fires at the interval and stops after close", () => {
   calls.length = 0;
   mock.timers.tick(500);
   assert.deepEqual(calls, []);
-  mock.timers.reset();
 });
 
 test("timeout aborts the signal and sets timedOut; abort() does not", () => {
@@ -36,12 +37,12 @@ test("timeout aborts the signal and sets timedOut; abort() does not", () => {
   assert.equal(a.scope.signal.aborted, true);
   assert.equal(a.scope.timedOut, true);
   a.scope.close();
+  mock.timers.reset(); // the second setup() enables the mock again
   const b = setup();
   b.scope.abort();
   assert.equal(b.scope.signal.aborted, true);
   assert.equal(b.scope.timedOut, false);
   b.scope.close();
-  mock.timers.reset();
 });
 
 test("close twice acks once, onClose runs before ack", () => {
@@ -49,7 +50,6 @@ test("close twice acks once, onClose runs before ack", () => {
   scope.close();
   scope.close();
   assert.deepEqual(calls, ["open", "close", "ack"]);
-  mock.timers.reset();
 });
 
 test("close clears the timeout", () => {
@@ -57,7 +57,6 @@ test("close clears the timeout", () => {
   scope.close();
   mock.timers.tick(5000);
   assert.equal(scope.signal.aborted, false);
-  mock.timers.reset();
 });
 
 test("a throwing onHeartbeat does not stop later beats", () => {
@@ -72,12 +71,10 @@ test("a throwing onHeartbeat does not stop later beats", () => {
   assert.equal(n, 3);
   assert.equal(calls.filter((c) => c === "working").length, 3);
   scope.close();
-  mock.timers.reset();
 });
 
 test("a throwing onClose still acks", () => {
   const { scope, calls } = setup({ onClose: () => { throw new Error("x"); } });
   scope.close();
   assert.equal(calls.at(-1), "ack");
-  mock.timers.reset();
 });

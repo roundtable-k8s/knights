@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Writable } from "node:stream";
-import { trace, metrics } from "@opentelemetry/api";
+import { context, propagation, trace, metrics } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { initLogger, log, setLogStream } from "../src/logger.js";
 import { startTelemetry, telemetryEnabled, type Telemetry, resourceDefaults, withTaskSpan } from "../src/telemetry.js";
@@ -15,9 +15,16 @@ beforeEach(() => {
   restoreOtelEnv = isolateOtelEnv();
 });
 afterEach(() => {
-  trace.disable();
+  resetOtelGlobals();
   restoreOtelEnv();
 });
+
+/** Drop every global OTel registration (tracer, propagator, context manager) so one SDK start cannot leak into the next. */
+function resetOtelGlobals(): void {
+  trace.disable();
+  propagation.disable();
+  context.disable();
+}
 
 /** Start telemetry, run fn, and always shut down and unregister the global tracer provider. */
 async function withTelemetry<T>(opts: Parameters<typeof startTelemetry>[0], fn: (t: Telemetry) => Promise<T>): Promise<T> {
@@ -26,7 +33,7 @@ async function withTelemetry<T>(opts: Parameters<typeof startTelemetry>[0], fn: 
     return await fn(t);
   } finally {
     await t.shutdown();
-    trace.disable();
+    resetOtelGlobals();
   }
 }
 
@@ -177,7 +184,7 @@ test("a valid traceparent makes the task span its child", async () => {
 
 test("missing or malformed trace headers give a root span", async () => {
   for (const parent of [undefined, {}, { traceparent: "garbage" }, { traceparent: `00-${"0".repeat(32)}-${"0".repeat(16)}-01` }]) {
-    trace.disable(); // a fresh SDK per case
+    resetOtelGlobals(); // a fresh SDK per case
     const s = await spanWithParent(parent);
     assert.equal(s.parentSpanContext, undefined);
   }

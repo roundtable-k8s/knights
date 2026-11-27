@@ -103,3 +103,20 @@ test("health server answers 500 when an extra route throws and keeps serving", a
     await stopHealthServer();
   }
 });
+
+test("health server ends the response and keeps serving when /metrics fails after its headers are sent", async () => {
+  const port = await freePort();
+  // The 200 header goes out before the scrape fails, so the error path cannot write a 500: the outer catch must just end the response.
+  const registry = { contentType: "text/plain", metrics: async () => Promise.reject(new Error("scrape failed")) };
+  startHealthServer({ knightName: "T", port, registry: registry as never });
+  await new Promise((r) => setTimeout(r, 50));
+  const base = `http://127.0.0.1:${port}`;
+  try {
+    const metrics = await fetch(`${base}/metrics`);
+    assert.equal(metrics.status, 200);
+    assert.equal(await metrics.text(), "");
+    assert.equal((await (await fetch(`${base}/health`)).json()).status, "ok");
+  } finally {
+    await stopHealthServer();
+  }
+});
