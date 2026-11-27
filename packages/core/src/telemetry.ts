@@ -132,6 +132,10 @@ export interface TaskSpanAttributes {
   chain?: string;
   /** Chain step name; absent for ask-a-knight tasks. */
   step?: string;
+  /** Id of the task this one retries (attempt 2 and up). */
+  retryOf?: string;
+  /** Milliseconds the task waited in the queue before starting; negative (clock skew) is clamped to 0. */
+  queuedMs?: number;
 }
 
 export interface TaskSpanOutcome {
@@ -179,6 +183,8 @@ export function withTaskSpan<T>(
   if (attrs.runtime) attributes["roundtable.knight.runtime"] = attrs.runtime;
   if (attrs.chain) attributes["roundtable.chain"] = attrs.chain;
   if (attrs.step) attributes["roundtable.chain.step"] = attrs.step;
+  if (attrs.retryOf) attributes["roundtable.task.retry_of"] = attrs.retryOf;
+  if (attrs.queuedMs !== undefined && Number.isFinite(attrs.queuedMs)) attributes["roundtable.task.queued_ms"] = Math.max(0, Math.round(attrs.queuedMs));
   let parentCtx = context.active();
   let root = true;
   if (attrs.parent?.traceparent) {
