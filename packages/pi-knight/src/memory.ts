@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { dataPaths, type KnightConfig } from "./config.js";
 import { compactionsTotal, llmRetriesTotal } from "./runtime-metrics.js";
-import { log, sweepStaleTempFiles, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
+import { log, redactSecrets, sweepStaleTempFiles, writeFileAtomic, type AtomicFsOps } from "@roundtable/knight-core";
 
 // ─── Directories ────────────────────────────────────────────────
 
@@ -39,14 +39,25 @@ export function setupCompactionHook(session: AgentSession, config: KnightConfig)
       });
     }
     if (event.type === "compaction_end") {
-      compactionsTotal.inc({ reason: String(event.reason), outcome: event.aborted ? "aborted" : "completed" });
-      log.info("Context compaction complete", {
-        knight: config.knightName,
-        reason: event.reason,
-        aborted: event.aborted,
-        hasResult: !!event.result,
-        willRetry: event.willRetry,
-      });
+      if (event.errorMessage) {
+        compactionsTotal.inc({ reason: String(event.reason), outcome: "failed" });
+        log.warn("Context compaction failed", {
+          knight: config.knightName,
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          error: redactSecrets(event.errorMessage),
+        });
+      } else {
+        compactionsTotal.inc({ reason: String(event.reason), outcome: event.aborted ? "aborted" : "completed" });
+        log.info("Context compaction complete", {
+          knight: config.knightName,
+          reason: event.reason,
+          aborted: event.aborted,
+          hasResult: !!event.result,
+          willRetry: event.willRetry,
+        });
+      }
     }
     if (event.type === "auto_retry_start") {
       log.warn("LLM auto-retry triggered", {
