@@ -255,7 +255,7 @@ test("describeAbortedTask: timeout and shutdown without abort context never say 
   assert.equal(describeAbortedTask(aborted, true, "half"), "Task timed out. Partial output: half");
   assert.equal(describeAbortedTask(aborted, true, undefined), "Task timed out before producing output");
   const shut = { reason: new ShutdownAbort(), elapsedMs: 5000, timeoutMs: 60_000 };
-  assert.equal(describeAbortedTask(aborted, true, "half", 0, shut).includes("before producing output"), false);
+  assert.equal((describeAbortedTask(aborted, true, "half", 0, shut) ?? "").includes("before producing output"), false);
   const noContext = describeAbortedTask(aborted, true, "half") ?? "";
   assert.equal(noContext.includes("before producing output") && noContext.includes("Partial output"), false);
 });
