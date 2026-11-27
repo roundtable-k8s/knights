@@ -27,6 +27,7 @@
     "turns": {"type": "integer", "minimum": 0},
     "inputTokens": {"type": "integer", "minimum": 0},
     "outputTokens": {"type": "integer", "minimum": 0},
+    "cacheWriteTokens": {"type": "integer", "minimum": 0},
     "costUsd": {"type": "number", "minimum": 0},
     "currentTool": {"type": "string"},
     "tool": {"type": "string"},

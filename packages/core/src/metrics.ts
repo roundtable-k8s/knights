@@ -94,7 +94,7 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
 
   const usageLimitHits = new client.Counter({
     name: `${prefix}_usage_limit_hits_total`,
-    help: "Tasks that failed because the Claude plan or credit limit was reached",
+    help: "Tasks that failed because the model provider's plan, credit or usage limit was reached",
     registers: [registry],
   });
 

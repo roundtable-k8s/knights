@@ -226,6 +226,7 @@ export const ActivityEvent = Type.Object(
     turns: Type.Optional(nonNegInt),
     inputTokens: Type.Optional(nonNegInt),
     outputTokens: Type.Optional(nonNegInt),
+    cacheWriteTokens: Type.Optional(nonNegInt),
     costUsd: Type.Optional(Type.Number({ minimum: 0 })),
     currentTool: Type.Optional(Type.String()),
     tool: Type.Optional(Type.String()),

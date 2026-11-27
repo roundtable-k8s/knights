@@ -286,6 +286,7 @@ export interface Usage {
   input?: number;
   output?: number;
   cacheRead?: number;
+  cacheWrite?: number;
   /** USD */
   cost?: number;
 }
@@ -314,7 +315,7 @@ export class TaskActivity {
   private seq = 0;
   private done = false;
   private turns = 0;
-  private tokens = { input: 0, output: 0, cacheRead: 0 };
+  private tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private cost = 0;
   private usageSeen = false;
   private currentTool: string | undefined;
@@ -397,7 +398,12 @@ export class TaskActivity {
     return {
       turns: this.turns,
       ...(this.usageSeen
-        ? { inputTokens: Math.round(this.tokens.input), outputTokens: Math.round(this.tokens.output), costUsd: this.cost }
+        ? {
+            inputTokens: Math.round(this.tokens.input),
+            outputTokens: Math.round(this.tokens.output),
+            ...(this.tokens.cacheWrite > 0 ? { cacheWriteTokens: Math.round(this.tokens.cacheWrite) } : {}),
+            costUsd: this.cost,
+          }
         : {}),
     };
   }
@@ -430,6 +436,7 @@ export class TaskActivity {
     this.tokens.input += num(u.input);
     this.tokens.output += num(u.output);
     this.tokens.cacheRead += num(u.cacheRead);
+    this.tokens.cacheWrite += num(u.cacheWrite);
     this.cost += num(u.cost);
   }
 
@@ -472,7 +479,7 @@ export class TaskActivity {
     error?: string;
     errorClass?: string;
     cost?: number;
-    tokens?: { input: number; output: number; cacheRead?: number };
+    tokens?: { input: number; output: number; cacheRead?: number; cacheWrite?: number };
     turns?: number;
   }): void {
     if (this.done) return; // a late publishResult failure must not emit a second task.finished
@@ -480,7 +487,7 @@ export class TaskActivity {
     this.done = true;
     if (r.tokens || r.cost != null) {
       this.usageSeen = true;
-      if (r.tokens) this.tokens = { input: num(r.tokens.input), output: num(r.tokens.output), cacheRead: num(r.tokens.cacheRead) };
+      if (r.tokens) this.tokens = { input: num(r.tokens.input), output: num(r.tokens.output), cacheRead: num(r.tokens.cacheRead), cacheWrite: num(r.tokens.cacheWrite) };
       if (r.cost != null) this.cost = num(r.cost);
     }
     if (r.turns != null) this.turns = Math.max(0, Math.round(r.turns));

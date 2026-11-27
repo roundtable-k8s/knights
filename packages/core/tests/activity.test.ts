@@ -179,7 +179,7 @@ test("events carry identity and a seq starting at 1; previews are redacted and b
   a.toolStarted("u1", "Bash", { command: "echo ghp_" + "z".repeat(40) + " " + "y".repeat(5000), env: { SECRET: "s3cr3t" } });
   a.toolFinished("u1", "Bash", false, "o".repeat(20000));
   a.assistantMessage("hello Authorization: Bearer abcdefghijklmnop1234");
-  a.addUsage({ input: 10, output: 5, cacheRead: 2, cost: 0.25 });
+  a.addUsage({ input: 10, output: 5, cacheRead: 2, cacheWrite: 3, cost: 0.25 });
   a.heartbeat();
   a.finished({ success: true, cost: 0.5, tokens: { input: 20, output: 7 }, turns: 3 });
   assert.deepEqual(out.map((o) => o.ev.type), ["task.started", "tool.started", "tool.finished", "assistant.message", "task.heartbeat", "task.finished"]);
@@ -197,9 +197,10 @@ test("events carry identity and a seq starting at 1; previews are redacted and b
   assert.ok(out[1]!.ev.argsSummary.length <= MAX_ARGS_CHARS);
   assert.equal(out[2]!.ev.outputPreview.length, MAX_PREVIEW_CHARS);
   assert.equal(out[2]!.ev.truncated, true);
-  assert.deepEqual([out[4]!.ev.turns, out[4]!.ev.inputTokens, out[4]!.ev.outputTokens, out[4]!.ev.costUsd], [1, 10, 5, 0.25]);
+  assert.deepEqual([out[4]!.ev.turns, out[4]!.ev.inputTokens, out[4]!.ev.outputTokens, out[4]!.ev.cacheWriteTokens, out[4]!.ev.costUsd], [1, 10, 5, 3, 0.25]);
   const fin = out[5]!.ev;
   assert.deepEqual([fin.success, fin.turns, fin.inputTokens, fin.outputTokens, fin.costUsd, fin.errorClass], [true, 3, 20, 7, 0.5, undefined]);
+  assert.equal(fin.cacheWriteTokens, undefined);
 });
 
 test("heartbeats omit token counters until usage is known", () => {
@@ -397,4 +398,13 @@ test("task.started carries attempt only for a retry (#36)", () => {
   const none: Pub[] = [];
   make(none, {}).started();
   assert.ok(!("attempt" in none[0]!.ev));
+});
+
+test("finished carries cacheWriteTokens from the result tokens, and omits them when zero", () => {
+  const withWrites: Pub[] = [];
+  make(withWrites).finished({ success: true, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } });
+  assert.equal(withWrites[0]!.ev.cacheWriteTokens, 4);
+  const none: Pub[] = [];
+  make(none).finished({ success: true, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 0 } });
+  assert.equal(none[0]!.ev.cacheWriteTokens, undefined);
 });
