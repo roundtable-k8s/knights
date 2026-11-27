@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { updateSessionNotes } from "../src/memory.ts";
+import { Writable } from "node:stream";
+import { initLogger, setLogStream } from "@roundtable/knight-core";
 
 function setup(): string {
   const dir = mkdtempSync(join(tmpdir(), "notes-"));
@@ -173,4 +175,29 @@ test("stale .tmp files are swept once per process, not on every notes update", a
   utimesSync(second, past, past);
   await updateSessionNotes("k", "t2", "r2");
   assert.ok(existsSync(second), "a later update in the same process does not sweep again");
+});
+
+test("a failed compaction logs a warn with the redacted error and never counts as completed", async () => {
+  const { setupCompactionHook } = await import("../src/memory.ts");
+  const { registry } = await import("../src/runtime-metrics.ts");
+  const chunks: string[] = [];
+  setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+  initLogger("k", "info");
+  const secret = "sk-ant-api03-" + "b".repeat(40);
+  let listener: (e: any) => void = () => {};
+  setupCompactionHook({ subscribe: (l: any) => { listener = l; return () => {}; } } as any, { knightName: "k" } as any);
+  const value = async (labels: Record<string, string>) =>
+    (await registry.getMetricsAsJSON()).find((m) => m.name === "roundtable_knight_compactions_total")?.values.find((v) => Object.entries(labels).every(([k, x]) => v.labels[k] === x))?.value ?? 0;
+  const before = await value({ reason: "overflow", outcome: "completed" });
+  listener({ type: "compaction_end", reason: "overflow", aborted: false, willRetry: false, errorMessage: `summarisation boom ${secret}` });
+  const lines = chunks.join("").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const entry = lines.find((l) => l.msg === "Context compaction failed");
+  assert.ok(entry, "warn logged");
+  assert.equal(entry.level, "warn");
+  assert.match(entry.error, /summarisation boom/);
+  assert.ok(!entry.error.includes(secret), "token redacted");
+  assert.ok(!chunks.join("").includes(secret));
+  assert.equal(await value({ reason: "overflow", outcome: "completed" }), before);
+  assert.equal(await value({ reason: "overflow", outcome: "failed" }) >= 1, true);
+  setLogStream(process.stdout);
 });

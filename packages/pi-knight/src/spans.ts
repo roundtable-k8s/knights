@@ -46,6 +46,8 @@ export class SessionSpans {
     private readonly systemPrompt?: () => string | undefined,
     /** Skills directory; skill activations are only marked when set. */
     private readonly skillsDir?: string,
+    /** The session cwd the read tool resolves relative paths against; defaults to the skills directory. */
+    private readonly cwd?: string,
   ) {
     this.ids = ids;
     this.attrs = { "roundtable.knight": ids.knight, "roundtable.table": ids.table || "none" };
@@ -130,7 +132,7 @@ export class SessionSpans {
           ),
         );
         this.setContent(this.tools.get(id)!, "gen_ai.tool.call.arguments", () => asText(e.args));
-        const skill = this.skillsDir ? skillFromToolCall(this.skillsDir, name, e.args) : undefined;
+        const skill = this.skillsDir ? skillFromToolCall(this.skillsDir, name, e.args, this.cwd) : undefined;
         if (skill) {
           this.tools.get(id)!.setAttributes({ "roundtable.skill.name": skill.skill, "roundtable.skill.category": skill.category });
           this.event("roundtable.skill.activated", { "roundtable.skill.name": skill.skill, "roundtable.skill.category": skill.category });

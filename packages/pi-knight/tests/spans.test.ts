@@ -4,12 +4,11 @@ import { SpanStatusCode, trace } from "@opentelemetry/api";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { startTelemetry, withTaskSpan } from "@roundtable/knight-core";
 import { SessionSpans } from "../src/spans.ts";
-import { resetOtelApiGlobal } from "../../core/tests/helpers/otel-env.js";
+import { isolateOtelEnv, resetOtelApiGlobal } from "../../core/tests/helpers/otel-env.js";
 
-const keep = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("OTEL_")));
-const clear = () => { for (const k of Object.keys(process.env)) if (k.startsWith("OTEL_")) delete process.env[k]; };
-beforeEach(clear);
-afterEach(() => { trace.disable(); clear(); Object.assign(process.env, keep); });
+let restoreOtelEnv: () => void = () => {};
+beforeEach(() => { restoreOtelEnv = isolateOtelEnv(); });
+afterEach(() => { trace.disable(); restoreOtelEnv(); });
 
 const msg = (extra: any = {}) => ({ type: "message_end", message: { role: "assistant", model: "m-resp", usage: { input: 10, output: 5 }, content: [{ type: "text", text: "SECRET" }], ...extra } });
 const events = (toolError = false): any[] => [
