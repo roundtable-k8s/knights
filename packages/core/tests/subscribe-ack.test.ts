@@ -66,6 +66,7 @@ test("trackDelivery: working() after ack still reaches the tracker only as a tou
   wrapped.ack();
   wrapped.working();
   assert.equal(calls.filter((c) => c === "finished:t1").length, 1);
+  assert.equal(calls.filter((c) => c === "touch:t1").length, 1);
 });
 
 test("trackDelivery keeps the rest of the delivery (task, trace context)", () => {
