@@ -18,7 +18,7 @@ import {
   resetPlanLimits,
 } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
-import { ShutdownAbort, formatRequestResponse } from "@roundtable/knight-core";
+import { readSkills, ShutdownAbort, formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/session-source.js";
 // Shared with the core telemetry tests; tsx resolves the cross-package relative import.
@@ -245,6 +245,13 @@ test("skills are discovered two levels deep with collisions namespaced", () => {
   const { skills } = skillTree();
   const names = discoverSkills(skills).map((s) => s.name).sort();
   assert.deepEqual(names, ["morning-security-brief", "report-generator", "shared-report-generator"]);
+});
+
+test("linkSkills links exactly the names readSkills advertises", () => {
+  const { skills, config } = skillTree();
+  const linked = linkSkills(skills, config).names.sort();
+  assert.deepEqual(readSkills(skills).map((s) => s.name).sort(), linked);
+  assert.deepEqual(readdirSync(join(config, "skills")).sort(), linked);
 });
 
 test("linkSkills links, is idempotent, removes stale links, keeps the knight's own skills", () => {

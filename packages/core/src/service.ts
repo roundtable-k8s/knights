@@ -46,6 +46,17 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
 }
 
 /**
+ * The one skill-name collision rule: a taken name becomes `<category>-<name>`; if that is
+ * taken too the skill is skipped (null). Records the chosen name in `taken`.
+ */
+export function resolveSkillName(taken: Set<string>, category: string, name: string): string | null {
+  const resolved = taken.has(name) ? `${category}-${name}` : name;
+  if (taken.has(resolved)) return null;
+  taken.add(resolved);
+  return resolved;
+}
+
+/**
  * Read the skill tree laid out by the skill-filter sidecar: `<dir>/<category>/<skill>/SKILL.md`.
  * Skills without a readable SKILL.md are skipped; the name falls back to the directory name.
  * Sorted by category then name so the list is stable between reads.
@@ -53,6 +64,7 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
 export function readSkills(skillsDir: string): SkillInfo[] {
   if (!existsSync(skillsDir)) return [];
   const skills: SkillInfo[] = [];
+  const taken = new Set<string>();
   let categories: string[];
   try {
     categories = readdirSync(skillsDir, { withFileTypes: true })
@@ -73,7 +85,8 @@ export function readSkills(skillsDir: string): SkillInfo[] {
     for (const dir of entries.sort()) {
       try {
         const fm = parseSkillFrontmatter(readFileSync(join(skillsDir, category, dir, "SKILL.md"), "utf8"));
-        skills.push({ name: fm?.name || dir, description: fm?.description ?? "", category });
+        const name = resolveSkillName(taken, category, fm?.name || dir);
+        if (name) skills.push({ name, description: fm?.description ?? "", category });
       } catch {
         // no SKILL.md (or mid-swap): not a skill
       }
