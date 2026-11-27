@@ -207,7 +207,7 @@ async function main(): Promise<void> {
           act.setTraceId(activeTraceId());
           taskTrace = traceHeaders();
           act.started(); // after the trace id is known, so task.started carries it
-          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity, timeoutMs });
+          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity, timeoutMs, startedAt: startTime });
         },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );

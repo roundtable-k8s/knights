@@ -362,12 +362,12 @@ export async function executeTask(
   signal?: AbortSignal,
   runId?: string,
   taskId?: string,
-  opts: { model?: string; activity?: TaskActivity; timeoutMs?: number } = {},
+  opts: { model?: string; activity?: TaskActivity; timeoutMs?: number; startedAt?: number } = {},
 ): Promise<TaskResult> {
   // Same runId → same session, queued behind that run's earlier steps; anything else
   // runs on its own session, concurrently. Run-less tasks never share one (#31, #53).
   const id = taskId || randomUUID();
-  const startedAt = Date.now();
+  const startedAt = opts.startedAt ?? Date.now();
   const slot = getSlot(runId ? `run:${runId}` : `task:${id}`, runId || undefined, config);
   const prevLock = slot.lock;
   let releaseLock!: () => void;

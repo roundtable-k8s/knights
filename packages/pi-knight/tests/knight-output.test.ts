@@ -146,6 +146,11 @@ test("describeSessionFailure reports an abort as a timeout when the task signal 
   );
 });
 
+test("describeSessionFailure without abort context does not invent a limit", () => {
+  const aborted = session([{ role: "assistant", content: [], stopReason: "aborted" }]) as any;
+  assert.equal(describeSessionFailure(aborted, true), "Task timed out before producing output");
+});
+
 test("describeSessionFailure returns undefined for a normal stop with no output", () => {
   const reason = describeSessionFailure(
     session([

@@ -86,7 +86,8 @@ export function describeSessionFailure(
 ): string | undefined {
   const abortedText = (): string => {
     if (abort?.reason instanceof ShutdownAbort) return SHUTDOWN_INTERRUPTED_MESSAGE;
-    return taskAborted ? taskTimeoutMessage(abort?.elapsedMs ?? 0, abort?.timeoutMs ?? 0) : "Task aborted before producing output";
+    if (!taskAborted) return "Task aborted before producing output";
+    return abort ? taskTimeoutMessage(abort.elapsedMs, abort.timeoutMs) : "Task timed out before producing output";
   };
   const messages = (sess as AgentSession & { messages?: Array<{ role?: string; stopReason?: string; errorMessage?: string }> }).messages;
   if (Array.isArray(messages)) {

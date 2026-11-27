@@ -296,7 +296,7 @@ export async function executeTask(
         abortReason: signal.reason,
         config,
         durationMs: Date.now() - started,
-      timeoutMs: over.timeoutMs,
+        timeoutMs: over.timeoutMs,
         toolCalls: state.toolCalls,
         backgroundTasks: state.frozenBackgroundTasks ?? state.backgroundTasks,
       });
