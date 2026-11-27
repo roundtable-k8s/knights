@@ -27,3 +27,10 @@ export const {
   recordLostTask,
   recordTokens,
 } = metrics;
+
+/** Time a task sat in the queue before this knight started it (undefined when the publisher sent no timestamp); records it in the queue-wait histogram. */
+export function observeQueuedFor(publishedAtMs: number | undefined, startedMs: number): number | undefined {
+  const queuedFor = publishedAtMs ? Math.max(0, startedMs - publishedAtMs) : undefined;
+  observeQueueWait(queuedFor);
+  return queuedFor;
+}

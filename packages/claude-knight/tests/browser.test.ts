@@ -91,3 +91,14 @@ test("enabled browser adds tool ids and prompt guidance", () => {
   assert.match(buildPreamble(cfg), /mcp__roundtable__browser_\*/);
   assert.match(buildPreamble(cfg), /spawn_subagent, use the Agent tool/);
 });
+
+test("BrowserArgs: tools with an empty shape reject extra keys at type level", () => {
+  const ok: BrowserArgs["browser_snapshot"] = {};
+  // @ts-expect-error extra keys are not allowed for browser_snapshot
+  const bad: BrowserArgs["browser_snapshot"] = { extra: "x" };
+  // @ts-expect-error extra keys are not allowed for browser_close
+  const bad2: BrowserArgs["browser_close"] = { extra: 1 };
+  assert.deepEqual(ok, {});
+  void bad;
+  void bad2;
+});

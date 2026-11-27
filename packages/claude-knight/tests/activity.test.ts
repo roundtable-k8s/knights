@@ -96,3 +96,21 @@ test("toolCalls counts every tool_use block, with countTools off (sdk runtime) a
   applyMessage({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "1", content: "x" }] } } as never, state, ctx);
   assert.equal(state.toolCalls, 3);
 });
+
+test("task.finished carries cacheWriteTokens from the result's cache_creation_input_tokens", async () => {
+  const { classifyResult } = await import("../src/result.js");
+  const config = { authMode: "api", claudeModel: "m" } as never;
+  const out: Pub[] = [];
+  const a = make("CW", out);
+  a.started();
+  const r = classifyResult({
+    result: { type: "result", subtype: "success", is_error: false, result: "done", total_cost_usd: 0.01, num_turns: 1, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 42 } },
+    lastAssistantText: "done",
+    config,
+  } as never);
+  assert.equal(r.tokens?.cacheWrite, 42);
+  a.finished({ success: r.success, cost: r.cost, tokens: r.tokens, turns: r.turns });
+  const fin = out.find((o) => o.ev.type === "task.finished")!.ev;
+  assert.equal(fin.cacheWriteTokens, 42);
+  assert.equal(fin.inputTokens, 10);
+});
