@@ -11,6 +11,7 @@ import {
   resolveTaskOutcome,
   describeSessionEnd,
   summarizeSessionTail,
+  taskStartIndex,
 } from "../src/result-extraction.ts";
 
 type MockMessage = {
@@ -265,6 +266,36 @@ test("describeAbortedTask reports timeout/error with partial output, and nothing
 test("describeAbortedTask does not claim 'before producing output' next to partial output", () => {
   const s = session([{ role: "assistant", content: [], stopReason: "aborted" }]);
   assert.equal(describeAbortedTask(s as any, false, "narration"), "Task aborted. Partial output: narration");
+});
+
+test("describeAbortedTask: timeout and shutdown without abort context never say 'before producing output' next to partial output", () => {
+  const aborted = session([{ role: "assistant", content: [], stopReason: "aborted" }]) as any;
+  assert.equal(describeAbortedTask(aborted, true, "half"), "Task timed out. Partial output: half");
+  assert.equal(describeAbortedTask(aborted, true, undefined), "Task timed out before producing output");
+  const shut = { reason: new ShutdownAbort(), elapsedMs: 5000, timeoutMs: 60_000 };
+  assert.equal((describeAbortedTask(aborted, true, "half", 0, shut) ?? "").includes("before producing output"), false);
+  const noContext = describeAbortedTask(aborted, true, "half") ?? "";
+  assert.equal(noContext.includes("before producing output") && noContext.includes("Partial output"), false);
+});
+
+test("taskStartIndex: a missing anchor starts after the last compaction summary", () => {
+  const anchor = { role: "user", content: "gone" };
+  const withSummary = session([
+    { role: "compactionSummary", content: "summary" },
+    { role: "user", content: "step prompt" },
+  ]) as any;
+  assert.equal(taskStartIndex(withSummary, anchor), 1);
+  // A step that produced no text after compaction has nothing to return.
+  const noOutput = session([
+    { role: "assistant", content: [{ type: "text", text: "earlier step" }], stopReason: "stop" },
+    { role: "compactionSummary", content: "summary" },
+  ]) as any;
+  assert.equal(taskStartIndex(noOutput, anchor), noOutput.messages.length);
+  // Without any summary the old fallback to 0 remains.
+  assert.equal(taskStartIndex(session([{ role: "user", content: "x" }]) as any, anchor), 0);
+  // A present anchor still wins.
+  const found = session([{ role: "user", content: "a" }, anchor]) as any;
+  assert.equal(taskStartIndex(found, anchor), 2);
 });
 
 test("describeAbortedTask: shutdown and timeout, with and without partial output", () => {
