@@ -305,6 +305,9 @@ export function getActivity(taskId: string): TaskActivity | undefined {
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
 /** Activity stream for one task. All methods are safe to call at any time and never throw. */
+/** A session-like object whose event stream can optionally be followed; `subscribe` returns the unsubscribe function. */
+export type Subscribable<E> = { subscribe?: (listener: (e: E) => void) => () => void };
+
 export class TaskActivity {
   readonly taskId: string;
   readonly subject: string;
@@ -502,7 +505,7 @@ export class TaskActivity {
   }
 
   /** Follow a session's events with `listener` until `detach`/`finished`. No-op for sessions without `subscribe`. */
-  attach<E>(session: { subscribe?: (l: (e: E) => void) => () => void }, listener: (e: E) => void): void {
+  attach<E>(session: Subscribable<E>, listener: (e: E) => void): void {
     this.detach();
     try {
       this.unsub = session.subscribe?.((e) => {

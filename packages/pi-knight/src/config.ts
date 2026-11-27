@@ -1,15 +1,16 @@
 import os from "node:os";
 import { join } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { loadBaseConfig, log, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
 
 /** Thinking levels the SDK accepts (ThinkingLevel in pi-agent-core). */
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ThinkingLevel[];
 
 /** KNIGHT_THINKING: an unset or empty value is "off"; an unknown value warns and is "off". */
-function thinkingLevelEnv(env: Env): string {
+function thinkingLevelEnv(env: Env): ThinkingLevel {
   const raw = env["KNIGHT_THINKING"];
   if (!raw) return "off";
-  if ((THINKING_LEVELS as readonly string[]).includes(raw)) return raw;
+  if ((THINKING_LEVELS as readonly string[]).includes(raw)) return raw as ThinkingLevel;
   log.warn(`Invalid KNIGHT_THINKING, using off. Accepted: ${THINKING_LEVELS.join(", ")}`, { name: "KNIGHT_THINKING", value: raw, accepted: THINKING_LEVELS, fallback: "off" });
   return "off";
 }
@@ -30,7 +31,7 @@ export interface KnightConfig extends BaseKnightConfig {
   natsResultsStream: string;
   maxConcurrentTasks: number;
   hostname: string;
-  thinkingLevel: string;
+  thinkingLevel: ThinkingLevel;
   maxRetryDelayMs: number;
   /** HTTP request timeout for model calls (MODEL_REQUEST_TIMEOUT_MS). Local models can take minutes to a first token. */
   modelRequestTimeoutMs: number;
