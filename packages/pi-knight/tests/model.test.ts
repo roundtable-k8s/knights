@@ -85,7 +85,7 @@ test("resolveModel honors an explicit OPENAI_BASE_URL over the ollama default", 
   }
 });
 
-const ALIAS_ENV = ["KNIGHT_MODEL_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "MODELS_JSON_PATH"] as const;
+const ALIAS_ENV = ["KNIGHT_MODEL_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "MODELS_JSON_PATH", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"] as const;
 
 /** Run fn with the given env vars set (undefined = unset), restoring the originals afterwards. */
 async function withEnv(vars: Partial<Record<(typeof ALIAS_ENV)[number], string | undefined>>, fn: () => Promise<void>) {
@@ -148,31 +148,16 @@ test("resolveModel still resolves a Claude alias when a local base URL is config
 });
 
 test("resolveModel leaves catalog provider/model ids unaffected", async () => {
-  await withEnv({}, () =>
-    withOneEnv("ANTHROPIC_API_KEY", "test-key", async () => {
-      const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
-      assert.equal(provider, "anthropic");
-      assert.equal(modelName, "claude-sonnet-4-5");
-      assert.equal(model.id, "claude-sonnet-4-5");
-    }),
-  );
+  await withEnv({ ANTHROPIC_API_KEY: "test-key" }, async () => {
+    const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
+    assert.equal(provider, "anthropic");
+    assert.equal(modelName, "claude-sonnet-4-5");
+    assert.equal(model.id, "claude-sonnet-4-5");
+  });
 });
 
-/** Run fn with one env var set (undefined = unset), restoring the original afterwards. */
-async function withOneEnv(name: string, value: string | undefined, fn: () => Promise<void>) {
-  const prev = process.env[name];
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
-  try {
-    await fn();
-  } finally {
-    if (prev !== undefined) process.env[name] = prev;
-    else delete process.env[name];
-  }
-}
-
 test("resolveModel refuses a hosted catalog model without credentials, naming the provider", async () => {
-  await withOneEnv("OPENROUTER_API_KEY", undefined, async () => {
+  await withEnv({ OPENROUTER_API_KEY: undefined }, async () => {
     await assert.rejects(resolveModel("openrouter/deepseek/deepseek-v3.2"), (e: Error) => {
       assert.ok(e instanceof MissingCredentialsError, "typed error");
       assert.equal(e.name, "MissingCredentialsError");
@@ -183,7 +168,7 @@ test("resolveModel refuses a hosted catalog model without credentials, naming th
 });
 
 test("resolveModel resolves a hosted catalog model once its key is set", async () => {
-  await withOneEnv("OPENROUTER_API_KEY", "test-key", async () => {
+  await withEnv({ OPENROUTER_API_KEY: "test-key" }, async () => {
     const { model, provider } = await resolveModel("openrouter/deepseek/deepseek-v3.2");
     assert.equal(provider, "openrouter");
     assert.match(model.baseUrl, /^https:\/\//);
@@ -210,6 +195,33 @@ test("resolveModel keeps the dummy key for a local models.json endpoint without 
       const { model, modelRuntime } = await resolveModel("litellm/local-model");
       assert.equal(model.baseUrl, "http://localhost:4000/v1");
       assert.equal(modelRuntime.hasConfiguredAuth("litellm"), true);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveModel counts a models.json https provider whose apiKey is set in the file as configured", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "model-https-"));
+  const modelsPath = join(dir, "models.json");
+  writeFileSync(
+    modelsPath,
+    JSON.stringify({
+      providers: {
+        hosted: {
+          baseUrl: "https://llm.example.com/v1",
+          api: "openai-completions",
+          apiKey: "file-key",
+          models: [{ id: "big-model", name: "big-model", contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    }),
+  );
+  try {
+    await withEnv({ MODELS_JSON_PATH: modelsPath }, async () => {
+      const { model, modelRuntime } = await resolveModel("hosted/big-model");
+      assert.equal(model.baseUrl, "https://llm.example.com/v1");
+      assert.equal(modelRuntime.hasConfiguredAuth("hosted"), true);
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
