@@ -18,8 +18,7 @@ import {
   resetPlanLimits,
 } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
-import { ShutdownAbort } from "@roundtable/knight-core";
-import { formatRequestResponse } from "@roundtable/knight-core";
+import { ShutdownAbort, formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/session-source.js";
 // Shared with the core telemetry tests; tsx resolves the cross-package relative import.
@@ -112,7 +111,7 @@ test("the Claude Code child env carries no production-mode switches", () => {
   }
 });
 
-test("no OTLP endpoint: the child gets no Claude Code telemetry switches", () => {
+test("tracing not configured: the child gets no Claude Code telemetry switches", () => {
   assert.deepEqual(claudeCodeTelemetryEnv({ PATH: "/bin" }), {});
   assert.deepEqual(claudeCodeTelemetryEnv({ OTEL_TRACES_EXPORTER: "none", PATH: "/bin" }), {});
   assert.deepEqual(claudeCodeTelemetryEnv({ OTEL_TRACES_EXPORTER: " None " }), {});

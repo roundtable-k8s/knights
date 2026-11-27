@@ -5,22 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { setBrowserExec } from "@roundtable/knight-core";
-import { browserTools, BROWSER_TOOL_IDS } from "../src/browser.js";
+import { browserTools, BROWSER_TOOL_IDS, type BrowserArgs } from "../src/browser.js";
 import { roundtableToolIds } from "../src/tools.js";
 import { buildPreamble } from "../src/prompt.js";
 import { loadConfig } from "../src/config.js";
 
-// The argument shape of each browser tool, so a wrong shape or an unknown name fails typecheck.
-type BrowserArgs = {
-  browser_open: { url: string };
-  browser_snapshot: Record<string, never>;
-  browser_click: { ref: string };
-  browser_fill: { ref: string; text: string };
-  browser_get_text: { ref: string };
-  browser_screenshot: { path?: string; full?: boolean };
-  browser_eval: { js: string };
-  browser_close: Record<string, never>;
-};
 // Calls the named tool's handler with that tool's own arguments.
 function call<N extends keyof BrowserArgs>(name: N, args: BrowserArgs[N]): Promise<any> {
   const tool = browserTools.find((t) => t.name === name)!;

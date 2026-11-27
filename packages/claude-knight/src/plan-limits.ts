@@ -103,7 +103,8 @@ let blockSeen = false;
  * `probe` (a cheap Claude call whose rate_limit_event feeds recordRateLimit) at
  * most once per `intervalMs`, so a knight recovers after usage drops (owner reset
  * or bought more) instead of staying refused until the recorded reset time.
- * Concurrent tasks share one probe. If the probe throws, the old reading is kept.
+ * Concurrent tasks share one probe. Each window the probe does not re-report keeps
+ * its old reading, whether the probe succeeds or throws.
  */
 export async function checkReserveRefreshing(
   reserve: number,
