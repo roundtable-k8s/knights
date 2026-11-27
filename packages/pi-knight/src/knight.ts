@@ -12,7 +12,7 @@ import { dataPaths, type KnightConfig } from "./config.js";
 import { sessionMessages } from "./runtime-metrics.js";
 import { SessionSpans } from "./spans.js";
 import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
-import { natsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
+import { getNatsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
 import { toolHooksExtension } from "./hooks.js";
@@ -265,7 +265,7 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
     // Explicitly trust the project dir; see model.ts.
     settingsManager,
     customTools: [
-      ...natsTools,
+      ...getNatsTools(),
       ...subagentTools,
       ...(process.env.BROWSER_ENABLED === "true" ? browserTools : []),
     ],
