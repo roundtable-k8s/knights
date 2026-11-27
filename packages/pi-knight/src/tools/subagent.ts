@@ -57,6 +57,47 @@ export function setParentModel(model: string): void {
   parentModel = model;
 }
 
+type SubagentSession = { session: AgentSession; local: boolean };
+type SubagentSessionFactory = (modelStr: string, thinkingLevel: ThinkingLevel, systemPrompt: string) => Promise<SubagentSession>;
+
+/** Resolve the model and create a fresh, ephemeral sub-agent session. */
+const createSubagentSession: SubagentSessionFactory = async (modelStr, thinkingLevel, systemPrompt) => {
+  // Shared resolution — same model/auth handling as the parent knight.
+  const { model, modelRuntime } = await resolveModel(modelStr);
+
+  const { dataDir } = dataPaths();
+  const settingsManager = createTrustedSettingsManager(dataDir, dataDir);
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: dataDir,
+    agentDir: dataDir,
+    settingsManager,
+    noExtensions: true,
+    noThemes: true,
+    noPromptTemplates: true,
+    noSkills: true, // Sub-agents are focused — no skill discovery overhead
+    systemPrompt,
+  });
+  await resourceLoader.reload();
+
+  const { session } = await createAgentSession({
+    model,
+    thinkingLevel,
+    cwd: dataDir,
+    agentDir: dataDir,
+    modelRuntime,
+    settingsManager,
+    resourceLoader,
+  });
+  return { session, local: isLocalModel(model) };
+};
+
+let sessionFactory: SubagentSessionFactory = createSubagentSession;
+
+/** Test seam: replace session creation (null restores the real factory). */
+export function __setSubagentSessionFactoryForTests(f: SubagentSessionFactory | null): void {
+  sessionFactory = f ?? createSubagentSession;
+}
+
 export const spawnSubagentTool = defineTool({
   name: "spawn_subagent",
   label: "Spawn Sub-Agent",
@@ -83,41 +124,26 @@ export const spawnSubagentTool = defineTool({
 
     const startTime = Date.now();
     let session: AgentSession | undefined;
+    let local = false;
+    let usageRecorded = false;
+
+    // Abort before the session exists is handled by the checks below; this listener
+    // covers aborts during prompt(). Removed in finally so a long-lived signal doesn't
+    // accumulate one listener per spawn.
+    const onAbort = () => {
+      void session?.abort().catch((err: unknown) => log.warn("Sub-agent abort failed", { error: String(err) }));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     onUpdate?.(textResult(`Spawning sub-agent (${modelStr})…`));
 
     try {
-      // Shared resolution — same model/auth handling as the parent knight.
-      const { model, modelRuntime } = await resolveModel(modelStr);
+      if (signal?.aborted) return textResult("Sub-agent aborted");
 
-      const { dataDir } = dataPaths();
-      const settingsManager = createTrustedSettingsManager(dataDir, dataDir);
-      const resourceLoader = new DefaultResourceLoader({
-        cwd: dataDir,
-        agentDir: dataDir,
-        settingsManager,
-        noExtensions: true,
-        noThemes: true,
-        noPromptTemplates: true,
-        noSkills: true, // Sub-agents are focused — no skill discovery overhead
-        systemPrompt,
-      });
-      await resourceLoader.reload();
+      ({ session, local } = await sessionFactory(modelStr, thinkingLevel, systemPrompt));
 
-      ({ session } = await createAgentSession({
-        model,
-        thinkingLevel,
-        cwd: dataDir,
-        agentDir: dataDir,
-        modelRuntime,
-        settingsManager,
-        resourceLoader,
-      }));
-
-      // Wire abort signal
-      if (signal) {
-        signal.addEventListener("abort", () => session?.abort(), { once: true });
-      }
+      // An abort during model resolution or session creation never reaches onAbort.
+      if (signal?.aborted) return textResult("Sub-agent aborted");
 
       onUpdate?.(textResult(`Sub-agent running…`));
       await session.prompt(params.task);
@@ -126,7 +152,8 @@ export const spawnSubagentTool = defineTool({
       const stats = session.getSessionStats();
       const durationMs = Date.now() - startTime;
 
-      recordSubagentUsage(modelStr, stats, isLocalModel(model));
+      recordSubagentUsage(modelStr, stats, local);
+      usageRecorded = true;
 
       log.info("Sub-agent completed", {
         durationMs,
@@ -143,6 +170,15 @@ export const spawnSubagentTool = defineTool({
       log.error("Sub-agent failed", { error: msg });
       return textResult(`Sub-agent error: ${msg}`);
     } finally {
+      signal?.removeEventListener("abort", onAbort);
+      // Failed or aborted sub-agents still spent tokens: record what the session saw.
+      if (session && !usageRecorded) {
+        try {
+          recordSubagentUsage(modelStr, session.getSessionStats(), local);
+        } catch (err: unknown) {
+          log.warn("Failed to record sub-agent usage", { error: String(err) });
+        }
+      }
       // Dispose the ephemeral sub-session so it doesn't leak (each spawn creates a fresh
       // session). dispose() also aborts any in-flight work if we exit via error/abort.
       session?.dispose();
