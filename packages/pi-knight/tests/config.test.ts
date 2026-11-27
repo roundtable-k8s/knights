@@ -151,3 +151,24 @@ test("ACTIVITY_CONTENT: none and preview pass through; a typo warns and uses pre
   assert.equal(warnings.length, 1);
   assert.match(String(warnings[0]?.["msg"]), /ACTIVITY_CONTENT/);
 });
+
+test("pi-knight numeric env vars: garbage falls back to the default, never NaN", () => {
+  const cases: Array<[string, keyof ReturnType<typeof loadConfig>, number]> = [
+    ["MAX_CONCURRENT_TASKS", "maxConcurrentTasks", 1],
+    ["MAX_RETRY_DELAY_MS", "maxRetryDelayMs", 60000],
+    ["MODEL_REQUEST_TIMEOUT_MS", "modelRequestTimeoutMs", 600000],
+    ["THINKING_BUDGET_LOW", "thinkingBudgetLow", 1024],
+    ["THINKING_BUDGET_MEDIUM", "thinkingBudgetMedium", 4096],
+    ["THINKING_BUDGET_HIGH", "thinkingBudgetHigh", 8192],
+    ["SESSION_RETENTION_MAX_FILES", "sessionRetentionMaxFiles", 100],
+    ["SESSION_RETENTION_DAYS", "sessionRetentionDays", 30],
+    ["TASK_TIMEOUT_MS", "taskTimeoutMs", 1_800_000],
+  ];
+  for (const [name, field, def] of cases) {
+    for (const v of ["abc", "NaN", ""]) {
+      const got = loadConfig({ ...env, [name]: v })[field];
+      assert.equal(got, def, `${name}=${JSON.stringify(v)}`);
+      assert.ok(!Number.isNaN(got));
+    }
+  }
+});

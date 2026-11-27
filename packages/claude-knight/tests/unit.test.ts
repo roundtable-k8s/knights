@@ -531,3 +531,12 @@ test("classifyResult: shutdown abort reports an interruption, own timer still re
   const own = classifyResult({ result: undefined, lastAssistantText: "half", aborted: true, config: cfg, durationMs: 90_000, timeoutMs: 120_000 });
   assert.match(own.error!, /^Task timed out after 90s \(limit 120s\)\. Raise it with .*timeoutSeconds\. Partial output:\n\nhalf/);
 });
+
+test("claude-knight config: shared base defaults come from loadBaseConfig", () => {
+  const c = loadConfig(baseEnv);
+  assert.equal(c.natsUrl, "nats://nats.database.svc.cluster.local:4222");
+  assert.equal(c.natsResultsPrefix, "fleet-a.results");
+  assert.equal(c.metricsPort, 3000);
+  assert.equal(c.logLevel, "info");
+  assert.equal(c.taskTimeoutMs, 1_800_000);
+});
