@@ -59,6 +59,11 @@ roundtable_knight_task_duration_seconds_bucket{table="dev",knight="galahad",runt
 roundtable_knight_task_duration_seconds_sum{table="dev",knight="galahad",runtime="pi"} 4523.7
 roundtable_knight_task_duration_seconds_count{table="dev",knight="galahad",runtime="pi"} 42
 
+# Task queue wait: seconds from publish to start on this knight (histogram, buckets 0.1 .. 3600)
+roundtable_knight_task_queue_seconds_bucket{table="dev",knight="galahad",runtime="pi",le="60"} 40
+roundtable_knight_task_queue_seconds_sum{table="dev",knight="galahad",runtime="pi"} 310.2
+roundtable_knight_task_queue_seconds_count{table="dev",knight="galahad",runtime="pi"} 42
+
 # LLM cost (billing = auth mode; pi-knight is always "api")
 roundtable_knight_llm_cost_usd_total{table="dev",knight="galahad",runtime="pi",model="openrouter/deepseek/deepseek-v3.2",billing="api"} 23.47
 

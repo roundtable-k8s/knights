@@ -151,6 +151,9 @@ export async function main(): Promise<void> {
     // Trace headers of the task span, captured while it is active: the result is published after it ends.
     let taskTrace: Record<string, string> | undefined;
 
+    const queuedFor = parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined;
+    metrics.observeQueueWait(queuedFor);
+
     try {
       activity = new TaskActivity({
         knight: config.knightName,
@@ -166,7 +169,7 @@ export async function main(): Promise<void> {
         model: parsed.model ?? config.claudeModel,
         slot,
         concurrency: config.maxConcurrentTasks,
-        queuedFor: parsed.publishedAtMs ? Math.max(0, started - parsed.publishedAtMs) : undefined,
+        queuedFor,
         workDir: basename(config.workDir),
         content: config.activityContent,
       });

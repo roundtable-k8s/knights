@@ -98,6 +98,19 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     registers: [registry],
   });
 
+  const taskQueueSeconds = new client.Histogram({
+    name: `${prefix}_task_queue_seconds`,
+    help: "Seconds a task waited between being published and being started by this knight",
+    buckets: [0.1, 0.5, 1, 5, 15, 60, 300, 900, 3600],
+    registers: [registry],
+  });
+
+  /** Observe one task's queue wait in ms; undefined (no timestamp) and non-finite values record nothing, negatives count as 0. */
+  function observeQueueWait(ms: number | undefined): void {
+    if (ms === undefined || !Number.isFinite(ms)) return;
+    taskQueueSeconds.observe(Math.max(0, ms) / 1000);
+  }
+
   /** Pass to connectNats as onStatus: sets the connection gauge and counts a reconnect (back up after being down). */
   let natsWasDown = false;
   function setNatsConnected(up: boolean): void {
@@ -122,5 +135,5 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     for (const [type, n] of types) if (n !== undefined) tokensTotal.labels(model, type).inc(n);
   }
 
-  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, usageLimitHits, recordLostTask, recordTokens, setNatsConnected };
+  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, usageLimitHits, taskQueueSeconds, observeQueueWait, recordLostTask, recordTokens, setNatsConnected };
 }

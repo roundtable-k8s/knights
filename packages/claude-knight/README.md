@@ -125,6 +125,7 @@ else running Roundtable brings their own token. Check Anthropic's current terms 
 Set by the operator (same as pi-knight): `KNIGHT_NAME`, `KNIGHT_MODEL`, `SUBSCRIBE_TOPICS`, `NATS_URL`,
 `NATS_TASKS_STREAM`, `NATS_RESULTS_STREAM`, `NATS_RESULTS_PREFIX`, `MAX_CONCURRENT_TASKS`, `TASK_TIMEOUT_MS`,
 `METRICS_PORT`, `LOG_LEVEL`.
+Metrics are the shared `roundtable_knight_*` set described in pi-knight's `docs/OBSERVABILITY.md`, including `roundtable_knight_task_queue_seconds` (histogram: seconds from publish to start; nothing is recorded for a task without a timestamp).
 `MAX_CONCURRENT_TASKS` defaults to `1` when unset, the same default as pi-knight (shared in `@roundtable/knight-core`).
 The task prompt ends with a note giving the task time limit and its UTC stop time (from the task `timeoutMs` or `TASK_TIMEOUT_MS`); set `KNIGHT_TASK_LIMIT_NOTE=off` to leave prompts unchanged.
 
