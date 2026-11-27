@@ -111,3 +111,5 @@ what it has opened and exits 0 without subscribing, so it never takes a task it 
 of the grace period.
 
 A task can set its own `timeoutMs` (`timeout_ms` in the NATS metadata), which overrides `TASK_TIMEOUT_MS` for that task only. A task whose override is longer than `DRAIN_TIMEOUT_MS` can outlive the drain bound. At the deadline the knight aborts still-running tasks and gives them a short grace period to publish a failure result. The default `DRAIN_TIMEOUT_MS` is `TASK_TIMEOUT_MS` + 60s - 20s, so that grace period ends before the kubelet SIGKILL at the pod grace period.
+
+The task prompt ends with a note giving the task time limit and its UTC stop time (from the task `timeoutMs` or `TASK_TIMEOUT_MS`); set `KNIGHT_TASK_LIMIT_NOTE=off` to leave prompts unchanged.

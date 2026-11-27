@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { encodeResult, normalizeTimeoutMs, parseTask, type TaskResult } from "../src/contract/index.ts";
+import { encodeResult, normalizeTimeoutMs, parseTask, taskLimitNote, withTaskLimitNote, type TaskResult } from "../src/contract/index.ts";
 
 test("normalizeTimeoutMs keeps positive finite timeouts", () => {
   assert.equal(normalizeTimeoutMs(1800000), 1800000);
@@ -222,4 +222,26 @@ test("failure and lost results carry the task", () => {
   assert.equal(lost.lost, true);
   assert.equal(lost.task?.taskId, "t-4");
   assert.equal(failureResult({ taskId: "t-4", knight: "k", model: "m", error: "e" }).task, undefined);
+});
+
+const T0 = Date.UTC(2026, 0, 1, 14, 2, 0);
+
+test("taskLimitNote states the limit in minutes and the UTC stop time", () => {
+  const note = taskLimitNote(600000, T0);
+  assert.match(note, /Time limit for this task: 10 minutes, stopping at 14:12 UTC/);
+  assert.match(note, /full test suite at most once/);
+});
+
+test("taskLimitNote handles hours, one minute and sub-minute limits", () => {
+  assert.match(taskLimitNote(3600000, T0), /1 hour, stopping at 15:02 UTC/);
+  assert.match(taskLimitNote(5400000, T0), /1 hour 30 minutes, stopping at 15:32 UTC/);
+  assert.match(taskLimitNote(60000, T0), /1 minute, stopping at 14:03 UTC/);
+  assert.match(taskLimitNote(30000, T0), /30 seconds, stopping at 14:02 UTC/);
+});
+
+test("withTaskLimitNote appends after the task text and honours KNIGHT_TASK_LIMIT_NOTE=off", () => {
+  const out = withTaskLimitNote("do it", 600000, T0, {});
+  assert.ok(out.startsWith("do it\n\nTime limit for this task: 10 minutes"));
+  assert.equal(withTaskLimitNote("do it", 600000, T0, { KNIGHT_TASK_LIMIT_NOTE: "off" }), "do it");
+  assert.ok(withTaskLimitNote("do it", 600000, T0, { KNIGHT_TASK_LIMIT_NOTE: "on" }).length > 5);
 });

@@ -5,7 +5,7 @@ import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
 import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
-import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
+import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, HEARTBEAT_MS, natsPrefix, podIdentity, publishResult, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
@@ -189,7 +189,7 @@ export async function main(): Promise<void> {
             { taskId: parsed.taskId, runId: parsed.runId, attempt: parsed.attempt, knight: config.knightName, table: config.table, model: parsed.model ?? config.claudeModel, runtime: "claude", parent: delivery.traceContext, chain: parsed.chainName, step: parsed.stepName },
             () => {
               act.setTraceId(activeTraceId());
-              return executeTask(promptWithRetryContext(parsed), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
+              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, controller.signal, parsed.runId, { model: parsed.model });
             },
             (o) => ({ success: o.success, cost: o.cost, model: o.model, tokens: o.tokens, error: o.error }),
           );
