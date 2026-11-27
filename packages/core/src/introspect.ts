@@ -304,7 +304,8 @@ async function answer<E>(msg: Msg, opts: IntrospectOptions<E>, maxPayload: () =>
 function oversizedMessage(bytes: number, req: IntrospectRequest, max: number | undefined): string {
   const limit = max ? ` (server max_payload ${max} bytes)` : "";
   const head = `reply too large (${bytes} bytes)${limit}`;
-  const fit = max && req.limit !== undefined && req.limit >= 1 ? Math.floor((req.limit * max) / bytes) : NaN;
+  // The estimate is linear and ignores envelope overhead, so keep a 10 % margin below it.
+  const fit = max && req.limit !== undefined && req.limit >= 1 ? Math.floor((req.limit * max * 0.9) / bytes) : NaN;
   if (!(fit >= 1) || fit >= req.limit!) return `${head}: request fewer entries with a smaller limit`;
   return `${head}: request at most ${fit} entries (limit=${fit})`;
 }

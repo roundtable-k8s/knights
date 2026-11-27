@@ -243,7 +243,7 @@ export class Roster {
     this.stopWatch = null;
     // Log the first failure of each outage (including a watch that never loaded); retries stay quiet.
     if (wasWatching || !this.failureLogged) {
-      log.warn("Roster watch ended — reading cards directly", { error: err === undefined ? undefined : String(err) });
+      log.warn("Roster watch failed or ended — reading cards directly", { error: err === undefined ? undefined : String(err) });
     }
     this.failureLogged = true;
     if (this.retryTimer) return;
@@ -262,6 +262,7 @@ export class Roster {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.retryMs = ROSTER_RETRY_MIN_MS;
+    this.failureLogged = false; // a restarted roster logs its first failure again
     this.stopWatch?.();
     this.stopWatch = null;
     this.watching = false;

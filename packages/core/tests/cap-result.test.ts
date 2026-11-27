@@ -87,6 +87,7 @@ describe("publishResult cap", () => {
       await publishResult("t1", withText(unit.repeat(100_000)), { js: c.js, resultMaxBytes: 512 * 1024, maxPayload: 20_000 });
       const kept = Buffer.byteLength((JSON.parse(c.sent[0]!) as TaskResult).result);
       const ratio = Buffer.byteLength(JSON.stringify(unit).slice(1, -1)) / Buffer.byteLength(unit);
+      // Lower-bound estimate: the 1_000-byte allowance is a guess for the other fields, not an exact figure.
       const allowed = (20_000 - 1_000) / ratio;
       assert.ok(kept >= 0.7 * allowed, `${name}: kept ${kept}, allowed ${allowed.toFixed(0)}`);
     });
