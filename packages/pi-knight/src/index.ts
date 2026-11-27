@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, createActiveCounter, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -126,7 +126,11 @@ async function main(): Promise<void> {
 
   // Register as a NATS micro service ($SRV.PING/INFO/STATS) for liveness, skills and load.
   // Discovery only: tasks stay on JetStream.
-  let activeCount = 0;
+  // Reports to the gauges before the count changes, so a throwing setter cannot leave it high.
+  const activeTasks = createActiveCounter((n) => {
+    setActiveTaskCount(n);
+    metrics.activeTasks.labels().set(n);
+  });
   const openScopes = new Set<TaskScope>();
   let knightService: KnightService | null = null;
   const nc = getConnection();
@@ -142,7 +146,7 @@ async function main(): Promise<void> {
       pod: config.hostname,
       skillsDir: config.skillsDir,
       maxConcurrentTasks: config.maxConcurrentTasks,
-      getActive: () => activeCount,
+      getActive: () => activeTasks.get(),
       getCounts: () => countsFromMetrics(metrics.tasksTotal, config.knightName),
     }).catch((e) => {
       log.warn("NATS micro service registration failed", { error: String(e) });
@@ -175,16 +179,8 @@ async function main(): Promise<void> {
       delivery,
       timeoutMs,
       onHeartbeat: () => activity?.heartbeat(),
-      onOpen: () => {
-        activeCount++;
-        setActiveTaskCount(activeCount);
-        metrics.activeTasks.labels().set(activeCount);
-      },
-      onClose: () => {
-        activeCount--;
-        setActiveTaskCount(activeCount);
-        metrics.activeTasks.labels().set(activeCount);
-      },
+      onOpen: () => activeTasks.increment(),
+      onClose: () => activeTasks.decrement(),
     });
 
     // Trace headers of the task span, captured while it is active: the result is published after it ends.
@@ -272,7 +268,7 @@ async function main(): Promise<void> {
     },
     stopService: () => knightService?.stop(),
     stopPulling: async () => void (await puller?.stop()),
-    getActive: () => activeCount,
+    getActive: () => activeTasks.get(),
     maxWaitMs: config.drainTimeoutMs,
     // Dispose sessions to abort in-flight agent/compaction/retry/bash work.
     abortInflight: () => {
@@ -301,7 +297,7 @@ async function main(): Promise<void> {
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {
     // Guard: never fetch once a termination was requested, even one that came during start-up.
-    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeCount),
+    freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeTasks.get()),
     // Skip self-echo — ignore messages published by this knight back to its own topic
     accept: (parsed) => {
       const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
