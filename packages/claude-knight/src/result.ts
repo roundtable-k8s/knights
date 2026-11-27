@@ -200,6 +200,7 @@ export function reserveRefusedOutcome(reason: string | undefined, config: Knight
     billing: config.authMode,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     model: resultModel(config),
+    toolCalls: 0,
     turns: 0,
   };
 }
@@ -216,6 +217,7 @@ export function failedOutcome(errMsg: string, config: KnightConfig): TaskResult 
     billing: config.authMode,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     model: resultModel(config),
+    toolCalls: 0,
     turns: 0,
   };
 }
