@@ -17,7 +17,7 @@
     "dev:send": "tsx scripts/dev/send-task.ts"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.0",
+    "@eslint/js": "^10.0.1",
     "eslint": "^9.39.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.0"
