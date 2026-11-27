@@ -362,11 +362,12 @@ export async function executeTask(
   signal?: AbortSignal,
   runId?: string,
   taskId?: string,
-  opts: { model?: string; activity?: TaskActivity } = {},
+  opts: { model?: string; activity?: TaskActivity; timeoutMs?: number } = {},
 ): Promise<TaskResult> {
   // Same runId → same session, queued behind that run's earlier steps; anything else
   // runs on its own session, concurrently. Run-less tasks never share one (#31, #53).
   const id = taskId || randomUUID();
+  const startedAt = Date.now();
   const slot = getSlot(runId ? `run:${runId}` : `task:${id}`, runId || undefined, config);
   const prevLock = slot.lock;
   let releaseLock!: () => void;
@@ -552,11 +553,12 @@ export async function executeTask(
     // A silent LLM error or abort (the Pi loop records those on the final assistant
     // message and resolves prompt() normally) is surfaced as the failure reason rather
     // than being masked by the generic no-output message.
+    const abortContext = { reason: signal?.reason, elapsedMs: Date.now() - startedAt, timeoutMs: opts.timeoutMs ?? config.taskTimeoutMs };
     const messagesBefore = taskStartIndex(sess, lastMessageBefore);
     let deliverable = getBestAssistantResult(sess, messagesBefore);
     // Opt-in: an aborted or errored task is a failure even when it narrated before dying.
     const abortedReason = process.env.ABORTED_TASK_IS_FAILURE === "true" && deliverable != null
-      ? describeAbortedTask(sess, signal?.aborted ?? false, deliverable, messagesBefore)
+      ? describeAbortedTask(sess, signal?.aborted ?? false, deliverable, messagesBefore, abortContext)
       : undefined;
     if (abortedReason) deliverable = undefined;
     // Only tool-call-shaped text and no tool actually ran: the model "called" tools in prose
@@ -572,7 +574,7 @@ export async function executeTask(
     } else if (toolCallsAsText) {
       failureReason = TOOL_CALLS_AS_TEXT_REASON;
     } else if (deliverable == null) {
-      failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore) ??
+      failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore, abortContext) ??
         (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
     }
     const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);

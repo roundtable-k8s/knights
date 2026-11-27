@@ -499,5 +499,7 @@ test("classifyResult: shutdown abort reports an interruption, own timer still re
   const bare = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new ShutdownAbort(), config: cfg, durationMs: 1 });
   assert.match(bare.error!, /^Task interrupted/);
   const timer = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new Error("x"), config: cfg, durationMs: 1 });
-  assert.match(timer.error!, /task timeout/);
+  assert.equal(timer.error, "Task timed out after 0s (limit " + cfg.taskTimeoutMs / 1000 + "s). Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds.");
+  const own = classifyResult({ result: undefined, lastAssistantText: "half", aborted: true, config: cfg, durationMs: 90_000, timeoutMs: 120_000 });
+  assert.match(own.error!, /^Task timed out after 90s \(limit 120s\)\. Raise it with .*timeoutSeconds\. Partial output:\n\nhalf/);
 });

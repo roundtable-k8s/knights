@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ShutdownAbort } from "@roundtable/knight-core";
 import {
   describeAbortedTask,
   describeSessionFailure,
@@ -132,8 +133,12 @@ test("describeSessionFailure reports an abort as a timeout when the task signal 
     { role: "assistant", content: [], stopReason: "aborted" },
   ]) as any;
   assert.equal(
-    describeSessionFailure(aborted, true),
-    "Task aborted before producing output (task timeout)",
+    describeSessionFailure(aborted, true, 0, { elapsedMs: 61_400, timeoutMs: 60_000 }),
+    "Task timed out after 61s (limit 60s). Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds.",
+  );
+  assert.equal(
+    describeSessionFailure(aborted, true, 0, { reason: new ShutdownAbort(), elapsedMs: 5000, timeoutMs: 60_000 }),
+    "Task interrupted: the knight is shutting down (pod restart or rollout), not a task timeout. It can be retried.",
   );
   assert.equal(
     describeSessionFailure(aborted, false),
@@ -227,7 +232,7 @@ test("describeAbortedTask reports timeout/error with partial output, and nothing
     { role: "assistant", content: [{ type: "text", text: "narration" }] },
     { role: "assistant", content: [], stopReason: "aborted" },
   ]);
-  assert.equal(describeAbortedTask(aborted as any, true, "narration"), "Task timed out. Partial output: narration");
+  assert.equal(describeAbortedTask(aborted as any, true, "narration", 0, { elapsedMs: 3000, timeoutMs: 60_000 }), "Task timed out after 3s (limit 60s). Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds. Partial output: narration");
   const errored = session([{ role: "assistant", content: [], stopReason: "error", errorMessage: "429" }]);
   assert.equal(describeAbortedTask(errored as any, false, "narration"), "LLM call failed: 429. Partial output: narration");
   const ok = session([{ role: "assistant", content: [{ type: "text", text: "fine" }], stopReason: "stop" }]);
@@ -237,4 +242,16 @@ test("describeAbortedTask reports timeout/error with partial output, and nothing
 test("describeAbortedTask does not claim 'before producing output' next to partial output", () => {
   const s = session([{ role: "assistant", content: [], stopReason: "aborted" }]);
   assert.equal(describeAbortedTask(s as any, false, "narration"), "Task aborted. Partial output: narration");
+});
+
+test("describeAbortedTask: shutdown and timeout, with and without partial output", () => {
+  const aborted = session([{ role: "assistant", content: [], stopReason: "aborted" }]) as any;
+  const shut = { reason: new ShutdownAbort(), elapsedMs: 5000, timeoutMs: 60_000 };
+  const timeout = { elapsedMs: 61_000, timeoutMs: 60_000 };
+  const interrupted = "Task interrupted: the knight is shutting down (pod restart or rollout), not a task timeout. It can be retried.";
+  const timedOut = "Task timed out after 61s (limit 60s). Raise it with the knight's taskTimeoutSeconds or the chain step's timeoutSeconds.";
+  assert.equal(describeAbortedTask(aborted, true, undefined, 0, shut), interrupted);
+  assert.equal(describeAbortedTask(aborted, true, "half", 0, shut), `${interrupted} Partial output: half`);
+  assert.equal(describeAbortedTask(aborted, true, undefined, 0, timeout), timedOut);
+  assert.equal(describeAbortedTask(aborted, true, "half", 0, timeout), `${timedOut} Partial output: half`);
 });
