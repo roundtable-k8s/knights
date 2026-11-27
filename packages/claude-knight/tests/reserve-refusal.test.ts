@@ -32,17 +32,23 @@ test("a reserve refusal publishes one refused result, records the refusal and ac
   const published: Array<{ id: string; result: TaskResult }> = [];
   const refusedBefore = await count("refused");
 
-  await refuseForReserve({
-    parsed: parsed("t1"),
-    scope,
-    reason: "weekly quota 95%",
-    config,
-    started: Date.now(),
-    activity,
-    publish: async (id, result) => {
-      published.push({ id, result: result as unknown as TaskResult });
-    },
-  });
+  let acks: string[] = [];
+  try {
+    await refuseForReserve({
+      parsed: parsed("t1"),
+      scope,
+      reason: "weekly quota 95%",
+      config,
+      started: Date.now(),
+      activity,
+      publish: async (id, result) => {
+        published.push({ id, result: result as unknown as TaskResult });
+      },
+    });
+    acks = [...calls];
+  } finally {
+    scope.close(); // cleanup only: stops the timers if the refusal did not close the scope
+  }
 
   assert.equal(published.length, 1);
   assert.equal(published[0].id, "t1");
@@ -54,7 +60,7 @@ test("a reserve refusal publishes one refused result, records the refusal and ac
   assert.equal(payload.usage_limited, true);
   assert.equal(await count("refused"), refusedBefore + 1);
   assert.equal(finished.length, 1);
-  assert.deepEqual(calls, ["ack"]);
+  assert.deepEqual(acks, ["ack"]);
 });
 
 test("a refusal whose publish rejects counts publish_failed and still acks once", async () => {
@@ -63,18 +69,24 @@ test("a refusal whose publish rejects counts publish_failed and still acks once"
   const { activity } = fakeActivity();
   const failedBefore = await count("publish_failed");
 
-  await refuseForReserve({
-    parsed: parsed("t2"),
-    scope,
-    reason: "quota",
-    config,
-    started: Date.now(),
-    activity,
-    publish: async () => {
-      throw new Error("nats down");
-    },
-  });
+  let acks: string[] = [];
+  try {
+    await refuseForReserve({
+      parsed: parsed("t2"),
+      scope,
+      reason: "quota",
+      config,
+      started: Date.now(),
+      activity,
+      publish: async () => {
+        throw new Error("nats down");
+      },
+    });
+    acks = [...calls];
+  } finally {
+    scope.close(); // cleanup only
+  }
 
   assert.equal(await count("publish_failed"), failedBefore + 1);
-  assert.deepEqual(calls, ["ack"]);
+  assert.deepEqual(acks, ["ack"]);
 });
