@@ -168,8 +168,9 @@ export function parseStreamLine(line: string): SDKMessage | undefined {
 }
 
 /**
- * Signal the CLI's whole process group (it is spawned detached, so its pid is
- * the group id): Claude Code's shell commands and background jobs die with it.
+ * Signal the CLI's process group (it is spawned detached, so its pid is the
+ * group id): the CLI and its direct helpers die with it. Claude Code's shell
+ * commands run in their own sessions, so killByToken finds those.
  * Falls back to the single process when the group call fails.
  */
 export function killTree(child: Pick<ChildProcess, "pid" | "kill">, signal: NodeJS.Signals): void {
@@ -219,17 +220,50 @@ export function findByToken(token: string): number[] {
  * Signal every process of the run. Claude Code starts each shell command in
  * its own session, so the CLI's process group misses them, and orphans are
  * re-parented to pid 1; the env token finds them regardless.
+ * Returns how many processes were found (and signalled).
  */
-export function killByToken(token: string, signal: NodeJS.Signals): number {
-  const pids = findByToken(token);
+export function killByToken(
+  token: string,
+  signal: NodeJS.Signals,
+  scan: (token: string) => number[] = findByToken,
+  send: (pid: number, signal: NodeJS.Signals) => void = (pid, s) => process.kill(pid, s),
+): number {
+  const pids = scan(token);
   for (const pid of pids) {
     try {
-      process.kill(pid, signal);
+      send(pid, signal);
     } catch {
       // already gone
     }
   }
   return pids.length;
+}
+
+/** Scan-and-kill passes for the final SIGKILL, and the pause between passes. */
+export const SIGKILL_MAX_PASSES = 5;
+export const SIGKILL_PASS_PAUSE_MS = 50;
+
+/**
+ * Repeat killByToken(token, "SIGKILL") until a pass finds nothing. A process
+ * that forks between two scans leaves a child the next pass catches. Bounded
+ * by `maxPasses`, so it always returns; resolves with the number of processes
+ * signalled across all passes.
+ */
+export async function killByTokenUntilEmpty(
+  token: string,
+  scan: (token: string) => number[] = findByToken,
+  send?: (pid: number, signal: NodeJS.Signals) => void,
+  maxPasses = SIGKILL_MAX_PASSES,
+  pauseMs = SIGKILL_PASS_PAUSE_MS,
+): Promise<number> {
+  let total = 0;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    const n = killByToken(token, "SIGKILL", scan, send);
+    if (n === 0) break;
+    total += n;
+    if (pass < maxPasses - 1) await new Promise((r) => setTimeout(r, pauseMs));
+  }
+  return total;
 }
 
 /** Grace period between SIGTERM and SIGKILL when a task is aborted. */
@@ -247,7 +281,7 @@ const RESULT_EXIT_GRACE_MS = 10_000;
 export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: AbortSignal): AsyncGenerator<SDKMessage> {
   const token = randomUUID();
   const child = spawn(inv.bin, inv.args, { cwd: inv.cwd, env: { ...inv.env, [RUN_TOKEN_ENV]: token }, stdio: ["pipe", "pipe", "pipe"],
-    detached: true, // own process group, so killTree can stop everything the CLI started
+    detached: true, // own process group, so killTree can stop the CLI and its direct helpers (shell commands are found by the token)
   });
   let spawnError: Error | undefined;
   child.on("error", (e) => (spawnError = e));
@@ -269,7 +303,7 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
     killByToken(token, "SIGTERM");
     killTimer = setTimeout(() => {
       killTree(child, "SIGKILL");
-      killByToken(token, "SIGKILL");
+      void killByTokenUntilEmpty(token);
     }, KILL_GRACE_MS);
     killTimer.unref();
   };
@@ -309,7 +343,7 @@ export async function* runClaudeCli(prompt: string, inv: CliInvocation, signal: 
       const deadline = Date.now() + KILL_GRACE_MS;
       while (findByToken(token).length > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
       killTree(child, "SIGKILL");
-      killByToken(token, "SIGKILL");
+      await killByTokenUntilEmpty(token);
     }
     if (killTimer) clearTimeout(killTimer);
   }
