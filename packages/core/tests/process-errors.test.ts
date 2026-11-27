@@ -45,4 +45,5 @@ test("uncaught exception logs structured error and exits 1", () => {
   assert.deepEqual(codes, [1]);
   assert.equal(lines()[0]!["msg"], "Uncaught exception");
   assert.equal(lines()[0]!["error"], "not an error");
+  assert.deepEqual(lines()[0]!["inflight"], []);
 });

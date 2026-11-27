@@ -59,7 +59,7 @@ test("pre-aborted signal never creates or prompts a session", async () => {
   let created = 0;
   __setSubagentSessionFactoryForTests(async () => {
     created++;
-    return fakeSession().session as never;
+    return { session: fakeSession().session, local: true };
   });
   try {
     const ac = new AbortController();
