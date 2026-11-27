@@ -143,19 +143,22 @@ export async function main(): Promise<void> {
     const timeoutMs = parsed.timeoutMs ?? config.taskTimeoutMs;
     // Everything taken after the slot is released in the finally below, even when a step throws part-way.
     let activity: TaskActivity | undefined;
-    // Keep the message un-acked but alive while the task runs; the scope acks it on close.
-    const scope = startTaskScope({
-      delivery,
-      timeoutMs,
-      onHeartbeat: () => activity?.heartbeat(),
-      onOpen: () => activeTasks.increment(),
-      onClose: () => activeTasks.decrement(),
-    });
-    inflight.add(scope);
+    let scope: TaskScope | undefined;
     // Trace headers of the task span, captured while it is active: the result is published after it ends.
     let taskTrace: Record<string, string> | undefined;
 
     try {
+      // Keep the message un-acked but alive while the task runs; the scope acks it on close.
+      // Inside the try so the finally below always runs, even if opening the scope throws.
+      const taskScope = startTaskScope({
+        delivery,
+        timeoutMs,
+        onHeartbeat: () => activity?.heartbeat(),
+        onOpen: () => activeTasks.increment(),
+        onClose: () => activeTasks.decrement(),
+      });
+      scope = taskScope;
+      inflight.add(taskScope);
       const queuedFor = metrics.observeQueuedFor(parsed.publishedAtMs, started);
       activity = new TaskActivity({
         knight: config.knightName,
@@ -192,13 +195,13 @@ export async function main(): Promise<void> {
             () => {
               act.setTraceId(activeTraceId());
               taskTrace = traceHeaders();
-              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, scope.signal, parsed.runId, { model: parsed.model, timeoutMs });
+              return executeTask(withTaskLimitNote(promptWithRetryContext(parsed), timeoutMs, started), parsed.taskId, config, taskScope.signal, parsed.runId, { model: parsed.model, timeoutMs });
             },
             (o) => ({ success: o.success, cost: o.cost, model: o.model, tokens: o.tokens, error: o.error }),
           );
 
       if (!outcome) {
-        await refuseForReserve({ parsed, scope, reason: reserve.reason, config, started, activity });
+        await refuseForReserve({ parsed, scope: taskScope, reason: reserve.reason, config, started, activity });
         return;
       }
 
@@ -228,8 +231,8 @@ export async function main(): Promise<void> {
       metrics.tasksTotal.labels("error").inc();
       metrics.taskDuration.labels().observe(durationMs / 1000);
     } finally {
-      inflight.delete(scope);
-      scope.close(); // clears timers, drops the active count, then acks once
+      if (scope) inflight.delete(scope);
+      scope?.close(); // clears timers, drops the active count, then acks once
       activity?.close();
       knightService?.markTaskFinished();
       puller?.wake();
