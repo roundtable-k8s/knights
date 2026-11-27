@@ -340,3 +340,79 @@ test("a throwing SDK loader leaves telemetry disabled, logs a warning and does n
     resetOtelGlobals();
   }
 });
+
+// ---- OTel GenAI metrics (opt-in) ----
+import { MeterProvider, InMemoryMetricExporter, PeriodicExportingMetricReader, AggregationTemporality } from "@opentelemetry/sdk-metrics";
+import { recordChatTurn } from "../src/genai-metrics.js";
+
+async function collect(run: () => void) {
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 3_600_000 });
+  const provider = new MeterProvider({ readers: [reader] });
+  metrics.disable();
+  // An earlier SDK start can leave a global registered by another API copy; clear it so ours can register.
+  delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  assert.ok(metrics.setGlobalMeterProvider(provider));
+  try {
+    run();
+    await reader.forceFlush();
+    return exporter.getMetrics().flatMap((r) => r.scopeMetrics.flatMap((s) => s.metrics));
+  } finally {
+    await provider.shutdown();
+    delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  }
+}
+
+test("recordChatTurn records both GenAI histograms with unit and attributes", async () => {
+  const all = await collect(() =>
+    recordChatTurn({ model: "m", responseModel: "m-r", provider: "anthropic", durationSeconds: 1.5, inputTokens: 10, outputTokens: 5, knight: "k", table: "t" }),
+  );
+  const dur = all.find((m) => m.descriptor.name === "gen_ai.client.operation.duration")!;
+  assert.equal(dur.descriptor.unit, "s");
+  assert.equal(dur.dataPoints.length, 1);
+  assert.deepEqual(dur.dataPoints[0]!.attributes, {
+    "gen_ai.operation.name": "chat",
+    "gen_ai.request.model": "m",
+    "gen_ai.response.model": "m-r",
+    "gen_ai.provider.name": "anthropic",
+    "roundtable.table": "t",
+    "roundtable.knight": "k",
+  });
+  const tok = all.find((m) => m.descriptor.name === "gen_ai.client.token.usage")!;
+  assert.equal(tok.descriptor.unit, "{token}");
+  const byType = Object.fromEntries(tok.dataPoints.map((d) => [d.attributes["gen_ai.token.type"], (d.value as any).sum]));
+  assert.deepEqual(byType, { input: 10, output: 5 });
+});
+
+test("recordChatTurn adds error.type to the duration on failure", async () => {
+  const all = await collect(() => recordChatTurn({ model: "m", durationSeconds: 0.1, errorType: "error", knight: "k" }));
+  const dur = all.find((m) => m.descriptor.name === "gen_ai.client.operation.duration")!;
+  assert.equal(dur.dataPoints[0]!.attributes["error.type"], "error");
+  assert.equal(dur.dataPoints[0]!.attributes["roundtable.table"], "none");
+});
+
+test("recordChatTurn with no meter provider records nothing and does not throw", () => {
+  metrics.disable();
+  assert.doesNotThrow(() => recordChatTurn({ model: "m", durationSeconds: 1, inputTokens: 1, outputTokens: 1, knight: "k" }));
+});
+
+test("metricsEnabled follows OTEL_METRICS_EXPORTER; none keeps metricReaders empty", async () => {
+  for (const [val, want] of [[undefined, false], ["none", false], ["prometheus", false], ["otlp", true]] as const) {
+    let opts: any;
+    const loadSdk = async () => ({
+      NodeSDK: class {
+        constructor(o: unknown) {
+          opts = o;
+        }
+        start() {}
+        async shutdown() {}
+      },
+    }) as any;
+    const env: NodeJS.ProcessEnv = { OTEL_TRACES_EXPORTER: "otlp", ...(val ? { OTEL_METRICS_EXPORTER: val } : {}) };
+    const t = await startTelemetry({ service: "s", knight: "k", env, loadSdk });
+    assert.equal(t.metricsEnabled, want, String(val));
+    assert.equal("metricReaders" in opts, !want, String(val));
+    if (!want) assert.deepEqual(opts.metricReaders, []);
+  }
+  assert.equal((await startTelemetry({ service: "s", knight: "k", env: {} })).metricsEnabled, false);
+});
