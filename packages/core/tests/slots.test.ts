@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { SlotPool, withSlot, isSelfEcho, runInSlot } from "../src/slots.ts";
 import type { TaskDelivery } from "../src/nats/index.ts";
+import { setLogStream } from "../src/logger.ts";
 
 test("acquire returns the lowest free slot", () => {
   const p = new SlotPool();
@@ -57,11 +58,22 @@ test("runInSlot acks the delivery and frees the slot when the handler throws", a
   const slots = new SlotPool();
   let acked = 0;
   const delivery = { task: { taskId: "t" }, ack: () => { acked++; } } as unknown as TaskDelivery;
-  runInSlot(slots, delivery, async () => { throw new Error("boom"); });
-  assert.equal(slots.inUse(), 1);
-  await new Promise((r) => setImmediate(r));
+  const lines: string[] = [];
+  setLogStream({ write: (s: string) => { lines.push(s); return true; } } as unknown as NodeJS.WritableStream);
+  try {
+    runInSlot(slots, delivery, async () => { throw new Error("boom"); });
+    assert.equal(slots.inUse(), 1);
+    await new Promise((r) => setImmediate(r));
+  } finally {
+    setLogStream(process.stdout);
+  }
   assert.equal(acked, 1);
   assert.equal(slots.inUse(), 0);
+  const crash = lines.map((l) => JSON.parse(l) as Record<string, unknown>).find((e) => e["msg"] === "Task handler crashed");
+  assert.ok(crash, `crash line logged: ${lines.join("")}`);
+  assert.equal(crash["level"], "error");
+  assert.equal(crash["taskId"], "t");
+  assert.equal(crash["error"], "boom");
 });
 
 test("runInSlot does not ack when the handler succeeds", async () => {

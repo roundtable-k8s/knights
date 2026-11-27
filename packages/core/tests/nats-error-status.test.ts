@@ -47,34 +47,42 @@ describe("applyStatus (#247)", () => {
 });
 
 describe("watchLostTasks: the stream message is gone (#247)", () => {
-  /** A connection whose lost-task advisory subscription yields the given messages, then ends. */
+  /**
+   * A connection whose lost-task advisory subscription yields the given messages, then ends.
+   * The async iterator only asks for the next message once the watcher has finished with the
+   * previous one, so `drained` resolving means every advisory was fully handled.
+   */
   function advisoryConn(advisories: unknown[]) {
+    let markDrained!: () => void;
+    const drained = new Promise<void>((resolve) => { markDrained = resolve; });
     const sub = {
       async *[Symbol.asyncIterator]() {
         for (const m of advisories) yield m;
+        markDrained();
       },
       unsubscribe() {},
     };
-    return { subscribe: () => sub } as never;
+    return { conn: { subscribe: () => sub } as never, drained };
   }
   const advisory = { json: () => ({ stream_seq: 7 }) };
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  async function run(getMessage: () => Promise<unknown>) {
+  /** Runs the watcher over one advisory per entry of `getMessage`'s calls; returns what was reported lost. */
+  async function run(advisoryCount: number, getMessage: (call: number) => Promise<unknown>) {
     const getCalls: unknown[] = [];
     const lost: unknown[] = [];
     const jsm = {
       streams: {
         getMessage: async (...args: unknown[]) => {
           getCalls.push(args);
-          return getMessage();
+          return getMessage(getCalls.length - 1);
         },
         find: async () => {
           throw new Error("find must not run for a task that is not in the stream");
         },
       },
     } as never;
-    const stop = watchLostTasks(advisoryConn([advisory]), jsm, {
+    const { conn, drained } = advisoryConn(Array.from({ length: advisoryCount }, () => advisory));
+    const stop = watchLostTasks(conn, jsm, {
       stream: "TASKS",
       durable: "k-consumer",
       resultsPrefix: "res",
@@ -83,18 +91,22 @@ describe("watchLostTasks: the stream message is gone (#247)", () => {
         lost.push(task);
       },
     });
-    for (let i = 0; i < 100 && getCalls.length === 0; i++) await sleep(5);
-    await sleep(20); // let the handler finish after getMessage resolves
+    await drained;
     stop();
-    assert.deepEqual(getCalls, [["TASKS", { seq: 7 }]]);
+    assert.deepEqual(getCalls, Array.from({ length: advisoryCount }, () => ["TASKS", { seq: 7 }]));
     return lost;
   }
 
   it("a null getMessage result reports nothing lost", async () => {
-    assert.deepEqual(await run(async () => null), []);
+    assert.deepEqual(await run(1, async () => null), []);
   });
   it("a rejected getMessage reports nothing lost and does not stop the watcher", async () => {
-    assert.deepEqual(await run(async () => Promise.reject(new Error("stream unavailable"))), []);
+    // The first advisory's lookup fails; the second one must still be looked up and handled.
+    const lost = await run(2, async (call) => {
+      if (call === 0) throw new Error("stream unavailable");
+      return null;
+    });
+    assert.deepEqual(lost, []);
   });
 });
 

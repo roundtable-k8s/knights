@@ -279,6 +279,25 @@ describe("TaskTracker heartbeats (#147)", () => {
     assert.equal(t.state("a"), undefined);
   });
 
+  it("a heartbeat revives an expired entry that state() has not dropped yet", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 6000;
+    t.touch("a");
+    assert.equal(t.state("a"), "active");
+  });
+
+  it("a heartbeat after state() dropped the expired entry does not revive it", () => {
+    let now = 0;
+    const t = new TaskTracker(1000, 10, () => now, 5000);
+    t.started("a");
+    now = 6000;
+    assert.equal(t.state("a"), undefined);
+    t.touch("a");
+    assert.equal(t.state("a"), undefined);
+  });
+
   it("ignores touch for an unknown id", () => {
     const t = new TaskTracker(1000, 10, () => 0, 5000);
     t.touch("x");
@@ -480,6 +499,40 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     await waitFor(() => done.length === 1, 10_000);
     await sleep(500);
     assert.equal(acks.filter((a) => a === "+ACK").length, 1, `exactly one ack reached the server: ${JSON.stringify(acks)}`);
+    ackSub.unsubscribe();
+    await puller.stop();
+  });
+
+  it("a handler that acks and then throws leaves exactly one ack on the wire and no redelivery", async () => {
+    const cfg: NatsSubscribeConfig = { ...config, knightName: "Thrower", subscribeTopics: ["fleet-a.tasks.thrower.>"] };
+    await preCreate("Thrower", "fleet-a.tasks.thrower.>");
+    const acks: string[] = [];
+    const ackSub = admin.subscribe("$JS.ACK.TASKS.Thrower-consumer.>");
+    void (async () => { for await (const m of ackSub) acks.push(m.string()); })();
+    await admin.flush();
+
+    let active = 0;
+    const seen: string[] = [];
+    const puller = await subscribe(cfg, {
+      ackWaitMs: 1000,
+      freeSlots: () => 1 - active,
+      onLost: () => {},
+      onTask: (d) => {
+        active++;
+        seen.push(d.task.taskId);
+        d.ack(); // the success path acks first ...
+        active--;
+        throw new Error("forced throw after ack"); // ... then the handler fails; its error path must not ack again
+      },
+    });
+    await publishTask("th1", "thrower");
+    await waitFor(() => seen.length === 1, 10_000);
+    await sleep(1500); // past ack_wait: a second, redelivered copy would show up here
+    const info = await (await jetstreamManager(admin)).consumers.info("TASKS", "Thrower-consumer");
+    assert.equal(acks.filter((a) => a === "+ACK").length, 1, `exactly one ack reached the server: ${JSON.stringify(acks)}`);
+    assert.equal(info.num_redelivered, 0, "the task is not run again");
+    assert.equal(info.num_ack_pending, 0);
+    assert.deepEqual(seen, ["th1"]);
     ackSub.unsubscribe();
     await puller.stop();
   });

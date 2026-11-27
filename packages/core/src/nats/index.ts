@@ -463,7 +463,12 @@ export class TaskTracker {
     this.prune();
   }
 
-  /** A heartbeat for a running task: restarts its active bound. No-op for unknown ids. */
+  /**
+   * A heartbeat for a running task: restarts its active bound. No-op for unknown ids. An entry
+   * that is past activeTtlMs but not yet pruned is revived: a heartbeat proves the task is still
+   * running here, so state() reports it "active" again. Once state() has dropped such an entry,
+   * a later heartbeat finds nothing and does not bring it back.
+   */
   touch(taskId: string): void {
     const cur = this.active.get(taskId);
     if (cur) cur.at = this.now();
