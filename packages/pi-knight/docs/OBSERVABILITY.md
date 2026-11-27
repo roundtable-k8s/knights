@@ -45,6 +45,8 @@ Expose metrics on `/metrics` endpoint (HTTP, same port as health check).
 
 `roundtable_knight_tasks_total` is labelled by `status`. A task whose result cannot be published is counted twice: once as its outcome (`success` or `error`, recorded before the publish) and once as `publish_failed` (the result itself is lost and logged as such). Do not sum over `status` for a task total; use `status!="publish_failed"` or a single status.
 
+`roundtable_knight_task_queue_seconds` observes every start, so a task that is delivered again is counted again, and its wait includes the run time of the earlier attempt.
+
 Every series carries the constant labels `table` (`ROUNDTABLE_TABLE`, `none` when unset),
 `knight` and `runtime` (`pi`). The names are shared with claude-knight (`runtime="claude"`).
 
@@ -58,6 +60,11 @@ roundtable_knight_tasks_total{table="dev",knight="galahad",runtime="pi",status="
 roundtable_knight_task_duration_seconds_bucket{table="dev",knight="galahad",runtime="pi",le="60"} 30
 roundtable_knight_task_duration_seconds_sum{table="dev",knight="galahad",runtime="pi"} 4523.7
 roundtable_knight_task_duration_seconds_count{table="dev",knight="galahad",runtime="pi"} 42
+
+# Task queue wait: seconds from publish to start on this knight (histogram, buckets 0.1 .. 3600)
+roundtable_knight_task_queue_seconds_bucket{table="dev",knight="galahad",runtime="pi",le="60"} 40
+roundtable_knight_task_queue_seconds_sum{table="dev",knight="galahad",runtime="pi"} 310.2
+roundtable_knight_task_queue_seconds_count{table="dev",knight="galahad",runtime="pi"} 42
 
 # LLM cost (billing = auth mode; pi-knight is always "api")
 roundtable_knight_llm_cost_usd_total{table="dev",knight="galahad",runtime="pi",model="openrouter/deepseek/deepseek-v3.2",billing="api"} 23.47

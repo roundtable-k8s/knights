@@ -21,6 +21,7 @@ export const {
   toolCallsTotal,
   toolCallsBlocked,
   usageLimitHits,
+  observeQueueWait,
   recordLostTask,
   recordTokens,
 } = metrics;

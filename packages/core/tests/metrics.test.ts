@@ -39,6 +39,7 @@ test("metric names and labels are the shared roundtable_knight_* scheme", async 
   m.toolCallDuration.labels("t").observe(1);
   m.toolCallsBlocked.labels("t", "r").inc();
   m.usageLimitHits.labels().inc();
+  m.observeQueueWait(1000);
   const text = await m.registry.metrics();
   assert.deepEqual(metricNames(text), [
     "roundtable_knight_active_tasks",
@@ -47,6 +48,7 @@ test("metric names and labels are the shared roundtable_knight_* scheme", async 
     "roundtable_knight_nats_connected",
     "roundtable_knight_nats_reconnects_total",
     "roundtable_knight_task_duration_seconds",
+    "roundtable_knight_task_queue_seconds",
     "roundtable_knight_tasks_total",
     "roundtable_knight_tool_call_duration_seconds",
     "roundtable_knight_tool_calls_blocked_total",
@@ -82,4 +84,20 @@ test("setNatsConnected drives the gauge and counts a reconnect only after a disc
   const text = await m.registry.metrics();
   assert.match(text, /roundtable_knight_nats_connected\{[^}]*\} 1/);
   assert.match(text, /roundtable_knight_nats_reconnects_total\{[^}]*\} 1/);
+});
+
+test("observeQueueWait: 30 s lands in the 60 s bucket, negatives clamp to 0, bad or missing values record nothing", async () => {
+  const m = createKnightMetrics(opts);
+  m.observeQueueWait(undefined);
+  m.observeQueueWait(NaN);
+  m.observeQueueWait(Infinity);
+  let text = await m.registry.metrics();
+  assert.match(text, /roundtable_knight_task_queue_seconds_count\{table="none",knight="galahad",runtime="pi"\} 0/);
+  m.observeQueueWait(30_000);
+  m.observeQueueWait(-5_000);
+  text = await m.registry.metrics();
+  assert.match(text, /roundtable_knight_task_queue_seconds_bucket\{le="15",table="none",knight="galahad",runtime="pi"\} 1/);
+  assert.match(text, /roundtable_knight_task_queue_seconds_bucket\{le="60",table="none",knight="galahad",runtime="pi"\} 2/);
+  assert.match(text, /roundtable_knight_task_queue_seconds_bucket\{le="0.1",table="none",knight="galahad",runtime="pi"\} 1/);
+  assert.match(text, /roundtable_knight_task_queue_seconds_sum\{table="none",knight="galahad",runtime="pi"\} 30/);
 });
