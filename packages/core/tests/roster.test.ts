@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, describe, it, mock } from "node:test";
+import { Writable } from "node:stream";
 import { connect, type NatsConnection } from "@nats-io/transport-node";
 import { Kvm, type KV } from "@nats-io/kv";
 import {
@@ -23,6 +24,7 @@ import {
   type KnightCard,
 } from "../src/roster.ts";
 import { cardsBucketFromEnv } from "../src/config.ts";
+import { initLogger, setLogStream } from "../src/logger.ts";
 import { startKnightService } from "../src/service.ts";
 
 const card = (name: string, domain: string, extra: Partial<KnightCard> = {}, rt: NonNullable<KnightCard["roundtable"]> = {}): KnightCard => ({
@@ -196,6 +198,7 @@ describe("Roster when the watch ends", () => {
   afterEach(() => {
     resetRoster();
     mock.timers.reset();
+    setLogStream(process.stdout);
   });
 
   /** A source whose watch can be ended by the test; each start() sees the current bucket. */
@@ -265,6 +268,27 @@ describe("Roster when the watch ends", () => {
     mock.timers.tick(10 * 60_000);
     await new Promise((r) => setImmediate(r));
     assert.equal(st.watches, 3, "no retry after stop()");
+  });
+
+  it("logs the first failed watch at warn and keeps later retries quiet", async () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const chunks: string[] = [];
+    setLogStream(new Writable({ write(c, _e, cb) { chunks.push(String(c)); cb(); } }));
+    initLogger("lancelot", "info");
+    const { source, st } = endable([card("galahad", "security")]);
+    const roster = new Roster({ self: "lancelot", source });
+    st.failNext = true;
+    await roster.start();
+    const warns = () => chunks.join("").split("\n").filter((l) => l.includes('"level":"warn"'));
+    assert.equal(warns().length, 1, "the first failure is logged");
+    assert.match(warns()[0]!, /Roster watch ended/);
+    mock.timers.tick(ROSTER_RETRY_MIN_MS);
+    await new Promise((r) => setImmediate(r));
+    mock.timers.tick(ROSTER_RETRY_MIN_MS * 2);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(st.watches, 3, "retries continue");
+    assert.equal(warns().length, 1, "later retries are not logged");
+    roster.stop();
   });
 
   it("stop() while watching does not schedule a retry", async () => {

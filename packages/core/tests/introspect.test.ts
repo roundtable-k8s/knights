@@ -201,6 +201,7 @@ describe("startIntrospect", () => {
       failNextRespond: (err: Error) => void;
     }[] = [];
     const nc = {
+      info: { max_payload: 50 },
       subscribe(subject: string, o?: { queue?: string }) {
         const pending: { data: Uint8Array; respond: (d: string | Uint8Array) => boolean }[] = [];
         const failures: Error[] = [];
@@ -275,10 +276,20 @@ describe("startIntrospect", () => {
     assert.deepEqual(Object.keys(tooBig).sort(), ["error", "node", "pod"]);
     assert.equal(tooBig.pod, "kay.0");
     assert.equal(tooBig.node, "n1");
-    assert.match(tooBig.error, /^reply too large \(\d+ bytes\): request fewer entries/);
+    assert.match(tooBig.error, /^reply too large \(\d+ bytes\) \(server max_payload 50 bytes\): request at most \d+ entries \(limit=\d+\)$/);
+    const fit = Number(/limit=(\d+)\)$/.exec(tooBig.error)![1]);
+    assert.ok(fit >= 1 && fit < 500, "suggests fewer entries than the caller asked for");
     // The responder is still alive for the next request.
     const next = JSON.parse(await base!.push(JSON.stringify({ type: "history" })));
     assert.deepEqual(next, { pod: "kay.0", node: "n1", knight: "Kay", sessions: [{ id: "abc" }], total: 1 });
+  });
+
+  it("asks for a smaller limit when the caller gave none, and names the server limit", async () => {
+    const { nc, subs } = fakeNats();
+    startIntrospect({ ...options(fakeSource({ persisted: { abc: entries(2) } })), prefix: "rt-dev", nc });
+    subs[1]!.failNextRespond(new Error("max_payload size exceeded"));
+    const tooBig = JSON.parse(await subs[1]!.push(JSON.stringify({ type: "stats" })));
+    assert.match(tooBig.error, /^reply too large \(\d+ bytes\) \(server max_payload 50 bytes\): request fewer entries with a smaller limit$/);
   });
 
   it("reports a non-size send failure as a reply failure and keeps serving", async () => {
