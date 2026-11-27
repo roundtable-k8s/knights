@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Mise baseline tools (python, yq, ripgrep for skill scripts) ──
-# renovate: datasource=github-releases depName=jdx/mise
+# Bump by hand: check https://github.com/jdx/mise/releases (no Renovate or Dependabot bumps this ARG).
 ARG MISE_VERSION=v2026.11.6
 RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
 COPY packages/claude-knight/mise.toml /app/mise.toml
@@ -77,7 +77,7 @@ COPY packages/core/scripts/early-signals.mjs ./scripts/early-signals.mjs
 # the SDK's bundled CLI, `claude` links to that binary instead of shipping a
 # second ~360 MB copy; otherwise the pinned CLI is installed on its own. Either
 # way the build fails unless `claude --version` reports the pinned version.
-# renovate: datasource=npm depName=@anthropic-ai/claude-code
+# Bump by hand: check https://www.npmjs.com/package/@anthropic-ai/claude-code (no Renovate or Dependabot bumps this ARG).
 ARG CLAUDE_CODE_VERSION=2.1.329
 RUN set -eu; \
     sdk_cli="$(jq -r .claudeCodeVersion node_modules/@anthropic-ai/claude-agent-sdk/package.json)"; \

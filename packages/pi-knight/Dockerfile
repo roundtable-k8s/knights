@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Mise (baseline tools) ────────────────────────────────────────
-# renovate: datasource=github-releases depName=jdx/mise
+# Bump by hand: check https://github.com/jdx/mise/releases (no Renovate or Dependabot bumps this ARG).
 ARG MISE_VERSION=v2026.11.6
 RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
 COPY packages/pi-knight/mise.toml /app/mise.toml
