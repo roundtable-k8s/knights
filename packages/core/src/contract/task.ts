@@ -138,6 +138,40 @@ export function promptWithRetryContext(task: Pick<ParsedTask, "task" | "attempt"
   );
 }
 
+function formatLimit(timeoutMs: number): string {
+  if (timeoutMs < 60_000) {
+    const s = Math.max(1, Math.round(timeoutMs / 1000));
+    return `${s} second${s === 1 ? "" : "s"}`;
+  }
+  const total = Math.round(timeoutMs / 60_000);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+  if (h === 0) return plural(m, "minute");
+  return m === 0 ? plural(h, "hour") : `${plural(h, "hour")} ${plural(m, "minute")}`;
+}
+
+/** A note telling the model how long the task has and when it stops (UTC `HH:MM`). */
+export function taskLimitNote(timeoutMs: number, startedAtMs: number): string {
+  const stop = new Date(startedAtMs + timeoutMs).toISOString().slice(11, 16);
+  return (
+    `Time limit for this task: ${formatLimit(timeoutMs)}, stopping at ${stop} UTC (check with \`date -u\`). ` +
+    "Plan for it: run the full test suite at most once, near the end; while iterating run only the tests for the code you changed; " +
+    "commit and push a work-in-progress branch early so a timeout does not lose the work."
+  );
+}
+
+/** The prompt with the time-limit note appended, unless `KNIGHT_TASK_LIMIT_NOTE=off`. */
+export function withTaskLimitNote(
+  prompt: string,
+  timeoutMs: number,
+  startedAtMs: number,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if ((env.KNIGHT_TASK_LIMIT_NOTE ?? "").trim().toLowerCase() === "off") return prompt;
+  return `${prompt}\n\n${taskLimitNote(timeoutMs, startedAtMs)}`;
+}
+
 /**
  * Fields a result carries for a task: `attempt` and `retry_of` when set, and on a failure
  * the original task as `task` (the dead-letter capture reads it from there, because the
