@@ -91,6 +91,9 @@ Pi-Knight restricts what the agent's built-in tools can do:
 - Timeout enforcement via AbortController
 - A `tool_call` hook blocks a small set of destructive commands: `rm -rf /`, `mkfs`, `dd of=/dev/…`, `chmod 777`, and `git push` with a `-f`/`--force` flag token (`--force-with-lease` is allowed). Piping a download to a shell (`curl … | sh`) is deliberately not blocked: it only ever caught normal tool installs and text inside heredocs, fixtures and commit messages, and network egress is controlled by NetworkPolicy.
 
+### Write Guard
+- `write` and `edit` calls (including `edits[].newText` and the legacy `newText`) whose new text contains a token-shaped secret are blocked (`secret_in_content`); bash redirects are not inspected
+
 ### Vault Write Scoping
 ```typescript
 // Pseudo-code: vault write guard
@@ -125,7 +128,6 @@ With multi-provider support, each knight uses only the auth for its configured m
 - **All task executions logged** with full metadata (who, what, when, how long, what cost)
 - **NATS message bus is an audit trail** — every task dispatch and result is a durable message
 - **Cost tracking = anomaly detection** — a knight suddenly costing 10x normal is suspicious
-- **Write guard** — `write` and `edit` calls (including `edits[].newText` and the legacy `newText`) whose new text contains a token-shaped secret are blocked (`secret_in_content`); bash redirects are not inspected
 - **Tool call logging** — every bash command, file read/write logged at debug level
 - **Alert on high error rates** — could indicate prompt injection or degraded model behavior
 
