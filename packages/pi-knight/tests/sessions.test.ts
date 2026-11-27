@@ -166,7 +166,7 @@ test("pruneSessionFiles reports over-cap files it cannot delete instead of dropp
     const result = await pruneSessionFiles({ maxFiles: 1, maxAgeMs: 0 }, new Set(), root);
     assert.deepEqual(result.removed, []);
     assert.equal(result.failed.length, 2);
-    assert.deepEqual(result.failed.map((f) => f.path).sort(), [join(dir, names[0]), join(dir, names[1])].sort());
+    assert.deepEqual(result.failed.map((f) => f.path).sort(), names.slice(0, 2).map((n) => join(dir, n)).sort());
     assert.ok(result.failed.every((f) => f.error.length > 0));
     assert.equal(result.rootError, undefined);
   } finally {
