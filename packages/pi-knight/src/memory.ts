@@ -141,7 +141,7 @@ async function updateSessionNotesLocked(
   const previousErrors = extractSection(existing, "Errors & Corrections");
   // Worklog accumulates (bounded) so that every task's entry survives; lost updates would drop lines here.
   const previousWorklog = extractSection(existing, "Worklog").split("\n").filter((l) => l.startsWith("- "));
-  const worklog = [...previousWorklog, `- ${now}: ${taskPreview.split("\n")[0].slice(0, 80)} → result (${result.length} chars)`]
+  const worklog = [...previousWorklog, `- ${now}: ${(taskPreview.split("\n")[0] ?? "").slice(0, 80)} → result (${result.length} chars)`]
     .slice(-WORKLOG_MAX_ENTRIES)
     .join("\n");
 

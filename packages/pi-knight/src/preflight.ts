@@ -275,7 +275,7 @@ async function probeShow(nativeBase: string, modelId: string): Promise<OllamaSho
 /** Pull an explicit `num_ctx N` out of Ollama's Modelfile parameters string, if present. */
 function extractNumCtx(body: OllamaShow): number | null {
   const match = (body.parameters ?? "").match(/^\s*num_ctx\s+(\d+)/m);
-  return match ? parseInt(match[1], 10) : null;
+  return match?.[1] !== undefined ? parseInt(match[1], 10) : null;
 }
 
 /** Pull the model's trained max context ("<arch>.context_length") from model_info. */
