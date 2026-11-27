@@ -24,9 +24,13 @@ permissions:
   # write: only to add the protected-paths label.
   pull-requests: write
 
+# Do not cancel a run in progress: a cancelled required check run on the head
+# commit keeps the pull request BLOCKED even when a later run succeeds, so a
+# review arriving during the first run left PRs stuck (#327). The check takes
+# seconds, so a newer event queues behind the running one at no cost.
 concurrency:
   group: merge-guard-${{ github.event.pull_request.number || github.event.merge_group.head_ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   merge-guard:
