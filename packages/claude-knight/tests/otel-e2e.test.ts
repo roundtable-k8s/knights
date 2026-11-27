@@ -71,6 +71,14 @@ function setProcessEnv(extra: Record<string, string>) {
 
 before(async () => {
   if (skip) return;
+  // Ambient OTEL_* / CLAUDE_CODE_* (the runner's shell or pod) must not reach the child or change the
+  // export. They are restored in `after` like every other variable this file touches.
+  for (const k of Object.keys(process.env)) {
+    if (/^(OTEL_|CLAUDE_CODE_)/.test(k)) {
+      savedEnv[k] = process.env[k];
+      delete process.env[k];
+    }
+  }
   mock = await startMockAnthropic();
   receiver = await startOtlpReceiver();
   home = mkdtempSync(join(tmpdir(), "ck-otel-e2e-"));
@@ -147,11 +155,13 @@ async function runTraced(prompt: string) {
   const arrived = await receiver.waitFor(() => !!interaction(), 30_000);
   const seen = receiver.spans.map((s) => `${s.name}(trace ${s.traceId.slice(0, 8)}, parent ${s.parentSpanId.slice(0, 8)})`).join(", ");
   assert.ok(arrived, `claude_code.interaction exported on the task's trace; receiver got spans [${seen}], rejected ${JSON.stringify(receiver.rejected)}`);
-  // Give the log and tool exports a moment after the interaction span.
-  await new Promise((r) => setTimeout(r, 1500));
+  // The user_prompt log record is exported with the content or, with capture off, without it.
+  const promptRecorded = await receiver.waitFor(() => !!userPrompt(), 30_000);
+  assert.ok(promptRecorded, `user_prompt log record exported; receiver got ${receiver.logs.length} log records`);
   return { traceId, spanId, interaction: interaction()! };
 }
 
+const userPrompt = () => receiver.logs.find((l) => l.attributes["event.name"] === "user_prompt");
 const exportText = () => JSON.stringify({ spans: receiver.spans, logs: receiver.logs });
 
 test("Claude Code's interaction span is a child of knight.task and carries the prompt", { skip, timeout: 120_000 }, async () => {
