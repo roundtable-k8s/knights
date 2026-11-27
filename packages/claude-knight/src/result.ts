@@ -5,7 +5,7 @@
  */
 import { USAGE_LIMIT_ERROR_PREFIXES, type SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { KnightConfig } from "./config.js";
-import { SHUTDOWN_INTERRUPTED_MESSAGE, ShutdownAbort, taskTimeoutMessage, invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
+import { SHUTDOWN_INTERRUPTED_MESSAGE, ShutdownAbort, describeNoDeliverable, taskTimeoutMessage, invalidTaskResult, log, lostTaskResult, parseTaskFailure, parseVerdict, resolvePrs, taskResultFields, transientFailure, type TransientFailure, type ParsedTask, type PRRef, type TaskResult as ResultPayload, type Verdict } from "@roundtable/knight-core";
 
 export interface TaskResult {
   result: string;
@@ -138,7 +138,13 @@ export function classifyResult(input: ClassifyInput): TaskResult {
       }
       return { ...base, result: finalText, success: true, ...(prs.length ? { prs } : {}), ...(verdict ? { verdict } : {}) };
     }
-    return fail("Agent produced no deliverable output");
+    return fail(
+      describeNoDeliverable({
+        turns: result.num_turns,
+        toolCalls: input.toolCalls,
+        ended: assistantError ? `assistant error: ${assistantError}` : "the last message had no text",
+      }),
+    );
   }
 
   // Failure paths, most specific first.

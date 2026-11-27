@@ -9,6 +9,7 @@ import {
   isDeliverableAssistantText,
   refusalCode,
   resolveTaskOutcome,
+  describeSessionEnd,
   summarizeSessionTail,
 } from "../src/result-extraction.ts";
 
@@ -103,6 +104,23 @@ test("resolveTaskOutcome maps no deliverable to an explicit failure, not a senti
   assert.equal(outcome.success, false);
   assert.equal(outcome.error, "Agent produced no deliverable output");
   assert.equal(outcome.result, "Agent produced no deliverable output");
+});
+
+test("resolveTaskOutcome adds session facts to the generic message only", () => {
+  const facts = { turns: 3, toolCalls: 5, ended: "the last message had only tool calls" };
+  const outcome = resolveTaskOutcome(undefined, undefined, facts);
+  assert.equal(outcome.error, "Agent produced no deliverable output (3 turns, 5 tool calls; the last message had only tool calls). End the task with a written answer.");
+  assert.equal(outcome.result, outcome.error);
+  assert.equal(resolveTaskOutcome(undefined, "LLM call failed: x", facts).error, "LLM call failed: x");
+});
+
+test("describeSessionEnd uses part types and stop reason, not content", () => {
+  const sess = { messages: [
+    { role: "user", content: "secret" },
+    { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { cmd: "secret" } }], stopReason: "toolUse" },
+  ] } as never;
+  assert.equal(describeSessionEnd(sess), "the last message had only tool calls, stop reason toolUse");
+  assert.equal(describeSessionEnd(sess, 2), undefined);
 });
 
 test("resolveTaskOutcome prefers a specific failure reason over the generic message", () => {

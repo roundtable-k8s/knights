@@ -19,7 +19,7 @@ import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
 import { pruneSessionFiles } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
-import { describeAbortedTask, taskStartIndex, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
+import { describeAbortedTask, describeSessionEnd, taskStartIndex, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
 
 
 export interface TaskResult {
@@ -577,7 +577,11 @@ export async function executeTask(
       failureReason = describeSessionFailure(sess, signal?.aborted ?? false, messagesBefore, abortContext) ??
         (local && taskToolCalls === 0 ? LOCAL_NO_TOOL_CALLS_REASON : undefined);
     }
-    const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason);
+    const { result: resultText, success, error } = resolveTaskOutcome(deliverable, failureReason, {
+      turns: taskTurns,
+      toolCalls: taskToolCalls,
+      ended: describeSessionEnd(sess, messagesBefore),
+    });
     const refused = success ? undefined : refusalCode(error);
     // Only an LLM call failure is a provider error; never the agent's own output or a task timeout.
     const transient = !success && !refused && failureReason?.startsWith("LLM call failed") ? transientFailure(failureReason) : undefined;

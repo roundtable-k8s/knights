@@ -352,6 +352,14 @@ test("empty success falls back to last assistant text, else is an honest failure
   assert.match(none.error!, /no deliverable/);
 });
 
+test("no-deliverable failure reports turns, tool calls and how it ended, never content", () => {
+  const r = classifyResult({ result: resultMsg({ result: "" }), lastAssistantText: "", toolCalls: 5, aborted: false, config: cfg, durationMs: 1 });
+  assert.equal(r.error, "Agent produced no deliverable output (3 turns, 5 tool calls; the last message had no text). End the task with a written answer.");
+  assert.equal(r.result, r.error);
+  const e = classifyResult({ result: resultMsg({ result: "" }), lastAssistantText: "", assistantError: "max_output_tokens", aborted: false, config: cfg, durationMs: 1 });
+  assert.match(e.error!, /\(3 turns; assistant error: max_output_tokens\)/);
+});
+
 test("usage limits, auth failures, timeouts and turn caps are reported as such", () => {
   assert.ok(isUsageLimitMessage("You've hit your limit · resets 5pm"));
   const limited = classifyResult({
