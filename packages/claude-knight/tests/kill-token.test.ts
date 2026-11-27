@@ -12,7 +12,7 @@ function scripted(passes: number[][]) {
   const calls: string[] = [];
   const scan = (token: string) => {
     calls.push(token);
-    return passes[Math.min(i++, passes.length - 1)];
+    return passes[Math.min(i++, passes.length - 1)] ?? [];
   };
   return { scan, calls };
 }
