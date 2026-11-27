@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   decideRunSession,
   pruneSessionFiles,
+  pruneWarning,
   selectSessionsToPrune,
   sessionsRoot,
   type SessionFile,
@@ -191,6 +192,45 @@ test("pruneSessionFiles reports an unreadable sessions root as rootError", async
     await chmod(root, 0o700).catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
+});
+
+// --- pruneWarning (one warning per problem, not per run) ---
+
+test("pruneWarning is silent when the prune succeeds and clears a previous warning", () => {
+  assert.deepEqual(pruneWarning({ removed: ["/s/a.jsonl"], failed: [] }, undefined), { next: undefined });
+  assert.deepEqual(pruneWarning({ removed: [], failed: [] }, "failed:EACCES"), { next: undefined });
+});
+
+test("pruneWarning gives one warning for N undeletable files and none for the repeats", () => {
+  const result = {
+    removed: [],
+    failed: [
+      { path: "/s/a.jsonl", error: "EACCES: permission denied" },
+      { path: "/s/b.jsonl", error: "EACCES: permission denied" },
+      { path: "/s/c.jsonl", error: "EACCES: permission denied" },
+    ],
+  };
+  const first = pruneWarning(result, undefined);
+  assert.ok(first.warn);
+  assert.equal(first.warn.fields["count"], 3);
+  assert.equal(first.warn.fields["path"], "/s/a.jsonl");
+  const repeat = pruneWarning(result, first.next);
+  assert.equal(repeat.warn, undefined);
+  assert.equal(repeat.next, first.next);
+});
+
+test("pruneWarning warns again when the undeletable error changes", () => {
+  const next = pruneWarning({ removed: [], failed: [{ path: "/s/a.jsonl", error: "EBUSY" }] }, "failed:EACCES");
+  assert.ok(next.warn);
+  assert.equal(next.warn.fields["error"], "EBUSY");
+});
+
+test("pruneWarning warns once for an unreadable sessions root", () => {
+  const result = { removed: [], failed: [], rootError: "EACCES: permission denied" };
+  const first = pruneWarning(result, undefined);
+  assert.ok(first.warn);
+  assert.equal(first.warn.fields["error"], "EACCES: permission denied");
+  assert.equal(pruneWarning(result, first.next).warn, undefined);
 });
 
 test("sessionsRoot follows KNIGHT_DATA_DIR at call time, KNIGHT_SESSIONS_ROOT wins", () => {

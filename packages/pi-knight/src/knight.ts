@@ -16,7 +16,7 @@ import { subagentTools, setParentModel } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
 import { toolHooksExtension } from "./hooks.js";
 import { setupCompactionHook, updateSessionNotes } from "./memory.js";
-import { pruneSessionFiles } from "./sessions.js";
+import { pruneSessionFiles, pruneWarning } from "./sessions.js";
 import { transientFailure, type PRRef, type TransientFailure, type Verdict } from "@roundtable/knight-core";
 import { describeAbortedTask, describeSessionEnd, taskStartIndex, LOCAL_NO_TOOL_CALLS_REASON, TOOL_CALLS_AS_TEXT_REASON, isDeliverableAssistantText, describeSessionFailure, extractStructured, getBestAssistantResult, refusalCode, resolveTaskOutcome, summarizeSessionTail, type Structured } from "./result-extraction.js";
 
@@ -120,14 +120,14 @@ export function warmSession(config: KnightConfig): void {
     .finally(() => rm(cwd, { recursive: true, force: true }).catch(() => {}));
 }
 
+// Last retention warning logged, so a PVC that stays undeletable does not log on every run.
+let lastPruneWarning: string | undefined;
+
 /**
  * Enforce the on-disk session retention policy (fire-and-forget). Per-run sessions
  * each persist their own JSONL file, so without this the PVC grows with every chain
  * run. Live sessions' files are always kept.
  */
-// Last retention warning logged, so a PVC that stays undeletable does not log on every run.
-let lastPruneWarning: string | undefined;
-
 export function pruneOldSessions(config: KnightConfig): void {
   const keep = new Set<string>();
   for (const s of getActiveSessions()) {
@@ -141,27 +141,11 @@ export function pruneOldSessions(config: KnightConfig): void {
     },
     keep,
   )
-    .then(({ removed, failed, rootError }) => {
-      if (removed.length > 0) log.info("Pruned old session files", { count: removed.length });
-      if (rootError !== undefined) {
-        const message = `sessions root cannot be read: ${rootError}`;
-        if (message !== lastPruneWarning) log.warn("Session retention cannot read the sessions root", { error: rootError });
-        lastPruneWarning = message;
-      } else if (failed.length > 0) {
-        const first = failed[0];
-        if (first !== undefined) {
-          if (first.error !== lastPruneWarning) {
-            log.warn("Could not delete old session files; the sessions volume will keep growing", {
-              count: failed.length,
-              path: first.path,
-              error: first.error,
-            });
-          }
-          lastPruneWarning = first.error;
-        }
-      } else {
-        lastPruneWarning = undefined;
-      }
+    .then((result) => {
+      if (result.removed.length > 0) log.info("Pruned old session files", { count: result.removed.length });
+      const { next, warn } = pruneWarning(result, lastPruneWarning);
+      lastPruneWarning = next;
+      if (warn) log.warn(warn.message, warn.fields);
     })
     .catch((err) => log.warn("Session retention prune failed", { error: String(err) }));
 }

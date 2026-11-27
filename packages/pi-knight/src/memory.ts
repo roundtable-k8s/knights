@@ -21,6 +21,8 @@ import { log, redactSecrets, sweepStaleTempFiles, writeFileAtomic, type AtomicFs
 const DATA_DIR = () => dataPaths().dataDir;
 const SESSION_NOTES_DIR = () => `${DATA_DIR()}/session-notes`;
 const SESSION_NOTES_FILE = () => `${SESSION_NOTES_DIR()}/current.md`;
+// Notes dirs already swept for crash leftovers in this process; the sweep runs once, before the first write.
+const sweptNotesDirs = new Set<string>();
 const SCRATCH_DIR = () => `${DATA_DIR()}/scratch`;
 
 /**
@@ -133,7 +135,10 @@ async function updateSessionNotesLocked(
   // Ensure directories exist
   await ensureDir(SESSION_NOTES_DIR());
   await ensureDir(SCRATCH_DIR());
-  sweepStaleTempFiles(SESSION_NOTES_DIR());
+  if (!sweptNotesDirs.has(SESSION_NOTES_DIR())) {
+    sweptNotesDirs.add(SESSION_NOTES_DIR());
+    sweepStaleTempFiles(SESSION_NOTES_DIR());
+  }
 
   const now = new Date().toISOString();
   // Free text may contain lines that look like headings; escape them so they are never read back as sections.

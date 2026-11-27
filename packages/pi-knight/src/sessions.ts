@@ -61,16 +61,22 @@ export function sessionIdFromFilename(name: string): string {
   return us >= 0 ? stem.slice(us + 1) : stem;
 }
 
+export interface SessionScan {
+  files: SessionFile[];
+  /** Set when the sessions root exists but cannot be read (a missing root is not an error). */
+  rootError?: string;
+}
+
 /**
- * List every persisted session file under `root` (one subdir per cwd), newest
- * first by mtime. Returns [] if the dir doesn't exist yet.
+ * Scan every persisted session file under `root` (one subdir per cwd), newest first by
+ * mtime. The root is read once; a missing root yields no files and no error.
  */
-export async function listSessionFiles(root: string = sessionsRoot()): Promise<SessionFile[]> {
+export async function scanSessionFiles(root: string = sessionsRoot()): Promise<SessionScan> {
   let dirents;
   try {
     dirents = await readdir(root, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (err) {
+    return codeOf(err) === "ENOENT" ? { files: [] } : { files: [], rootError: errorMessage(err) };
   }
   const dirs = dirents.filter((d) => d.isDirectory()).map((d) => join(root, d.name));
   // Defensive: also consider .jsonl files sitting directly in the root.
@@ -96,7 +102,15 @@ export async function listSessionFiles(root: string = sessionsRoot()): Promise<S
     }
   }
   files.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return files;
+  return { files };
+}
+
+/**
+ * List every persisted session file under `root`, newest first by mtime.
+ * Returns [] if the dir doesn't exist yet or cannot be read.
+ */
+export async function listSessionFiles(root: string = sessionsRoot()): Promise<SessionFile[]> {
+  return (await scanSessionFiles(root)).files;
 }
 
 export interface RetentionPolicy {
@@ -151,14 +165,12 @@ export async function pruneSessionFiles(
 ): Promise<PruneResult> {
   const result: PruneResult = { removed: [], failed: [] };
   if (policy.maxFiles <= 0 && policy.maxAgeMs <= 0) return result;
-  try {
-    await readdir(root);
-  } catch (err) {
-    // A missing root just means no session has been persisted yet.
-    if (codeOf(err) !== "ENOENT") result.rootError = errorMessage(err);
+  const scan = await scanSessionFiles(root);
+  if (scan.rootError !== undefined) {
+    result.rootError = scan.rootError;
     return result;
   }
-  const victims = selectSessionsToPrune(await listSessionFiles(root), policy, keep, now);
+  const victims = selectSessionsToPrune(scan.files, policy, keep, now);
   for (const v of victims) {
     try {
       await unlink(v.path);
@@ -170,6 +182,36 @@ export async function pruneSessionFiles(
     }
   }
   return result;
+}
+
+/**
+ * Decide the retention warning for a prune result, given the key of the last warning
+ * logged. `next` is the key to remember; `warn` is set only when the problem is new, so
+ * an undeletable volume logs once instead of on every run. A clean prune clears the key.
+ */
+export function pruneWarning(
+  result: PruneResult,
+  last: string | undefined,
+): { next: string | undefined; warn?: { message: string; fields: Record<string, unknown> } } {
+  if (result.rootError !== undefined) {
+    const next = `root:${result.rootError}`;
+    if (next === last) return { next };
+    return {
+      next,
+      warn: { message: "Session retention cannot read the sessions root", fields: { error: result.rootError } },
+    };
+  }
+  const first = result.failed[0];
+  if (first === undefined) return { next: undefined };
+  const next = `failed:${first.error}`;
+  if (next === last) return { next };
+  return {
+    next,
+    warn: {
+      message: "Could not delete old session files; the sessions volume will keep growing",
+      fields: { count: result.failed.length, path: first.path, error: first.error },
+    },
+  };
 }
 
 function codeOf(err: unknown): string | undefined {

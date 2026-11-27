@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { updateSessionNotes } from "../src/memory.ts";
@@ -156,4 +156,21 @@ test("stale .tmp files in the notes dir are swept, fresh ones are left", async (
   utimesSync(old, past, past);
   await updateSessionNotes("k", "t", "r");
   assert.deepEqual(readdirSync(notesDir).sort(), ["current.md", "current.md.3.4.def.tmp"]);
+});
+
+test("stale .tmp files are swept once per process, not on every notes update", async () => {
+  const notesDir = setup();
+  mkdirSync(notesDir, { recursive: true });
+  const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const first = join(notesDir, "current.md.1.1.aaa.tmp");
+  writeFileSync(first, "x");
+  utimesSync(first, past, past);
+  await updateSessionNotes("k", "t1", "r1");
+  assert.ok(!existsSync(first), "first update sweeps the stale leftover");
+
+  const second = join(notesDir, "current.md.2.2.bbb.tmp");
+  writeFileSync(second, "x");
+  utimesSync(second, past, past);
+  await updateSessionNotes("k", "t2", "r2");
+  assert.ok(existsSync(second), "a later update in the same process does not sweep again");
 });
