@@ -124,7 +124,7 @@ test("boundText never leaves half a surrogate pair at the cut", () => {
   }
   // The pre-cut at max * 8 lands inside a pair as well.
   const pre = boundText("a".repeat(79) + "😀" + "b".repeat(50), 10);
-  assert.equal(pre.text, "a".repeat(10)); // the lone high half at 80 is dropped, not kept
+  assert.equal(pre.text, "a".repeat(10)); // the lone high half at index 79 (the pre-cut at 80 ends just after it) is dropped, not kept
 });
 
 test("a secret straddling the preview limit is not half-leaked", () => {
