@@ -114,6 +114,19 @@ test("boundText truncates to the limit and flags it", () => {
   assert.deepEqual(boundText("short", MAX_PREVIEW_CHARS), { text: "short", truncated: false });
 });
 
+test("boundText never leaves half a surrogate pair at the cut", () => {
+  for (const text of ["a".repeat(9) + "😀" + "b".repeat(20), "😀".repeat(50)]) {
+    const p = boundText(text, 10);
+    assert.equal(p.truncated, true);
+    assert.ok(!p.text.includes("\ufffd"));
+    assert.ok(!/[\ud800-\udbff]$/.test(p.text));
+    assert.ok(p.text.length <= 10);
+  }
+  // The pre-cut at max * 8 lands inside a pair as well.
+  const pre = boundText("a".repeat(79) + "😀" + "b".repeat(50), 10);
+  assert.ok(!/[\ud800-\udfff]/.test(pre.text.replace(/[\ud800-\udbff][\udc00-\udfff]/g, "")));
+});
+
 test("a secret straddling the preview limit is not half-leaked", () => {
   const text = "a".repeat(MAX_PREVIEW_CHARS - 10) + ` api_key=${"Z".repeat(40)}`;
   assert.ok(!boundText(text, MAX_PREVIEW_CHARS).text.includes("ZZZZ"));

@@ -1,5 +1,5 @@
 import { trace } from "@opentelemetry/api";
-import { activeTraceContext, boundText, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
+import { activeTraceContext, boundText, sliceWhole, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
 
 /**
  * Turns pi session events into `chat <model>` (one per LLM turn) and `execute_tool <tool>`
@@ -140,18 +140,33 @@ export class SessionSpans {
     this.tools.clear();
   }
 
-  /** Append to the history, dropping the oldest messages once it exceeds the content cap. */
+  /**
+   * Append to the history, dropping the oldest messages until the serialized list
+   * (`gen_ai.input.messages`) fits the content cap, so it always parses as JSON.
+   */
   private remember(role: string, content: string): void {
     if (!captureContent()) return;
     const max = contentMaxBytes();
-    if (content.length > max) {
-      content = content.slice(0, max);
+    const size = (c: string) => Buffer.byteLength(JSON.stringify({ role, content: c }));
+    // Room for the entry plus the surrounding brackets.
+    const budget = max - 2;
+    if (size(content) > budget) {
+      // Trim the single message before storing it: largest prefix whose serialized entry fits.
+      let lo = 0;
+      let hi = content.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (size(sliceWhole(content, mid)) <= budget) lo = mid;
+        else hi = mid - 1;
+      }
+      content = sliceWhole(content, lo);
       this.historyDropped = true;
     }
     this.history.push({ role, content });
-    this.historyBytes += Buffer.byteLength(content);
-    while (this.historyBytes > max && this.history.length > 1) {
-      this.historyBytes -= Buffer.byteLength(this.history.shift()!.content);
+    this.historyBytes += size(content) + (this.history.length > 1 ? 1 : 0); // +1 for the comma
+    while (this.historyBytes > budget && this.history.length > 1) {
+      const old = this.history.shift()!;
+      this.historyBytes -= Buffer.byteLength(JSON.stringify(old)) + 1;
       this.historyDropped = true;
     }
   }

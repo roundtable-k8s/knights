@@ -123,14 +123,23 @@ export function containsSecret(text: string, scope: RedactScope = "all"): boolea
 
 // ─── Bounding helpers ───────────────────────────────────────────────
 
+/** Cut to at most `max` UTF-16 units without leaving half of a surrogate pair at the end. */
+export function sliceWhole(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let end = max;
+  const last = end > 0 ? text.charCodeAt(end - 1) : 0;
+  if (last >= 0xd800 && last <= 0xdbff) end--; // dangling high surrogate
+  return text.slice(0, end);
+}
+
 /** Redact secrets, then cut to `max` chars. Returns the text and whether it was cut. */
 export function boundText(text: string, max: number): { text: string; truncated: boolean } {
   // Pre-cut so redaction never scans megabytes of tool output. Redact BEFORE the final
   // cut so a secret straddling the limit is replaced whole instead of half-leaked.
-  const pre = text.length > max * 8 ? text.slice(0, max * 8) : text;
+  const pre = text.length > max * 8 ? sliceWhole(text, max * 8) : text;
   const clean = redactSecrets(pre);
   if (clean.length <= max && pre.length === text.length) return { text: clean, truncated: false };
-  return { text: clean.slice(0, max), truncated: true };
+  return { text: sliceWhole(clean, max), truncated: true };
 }
 
 /** Argument keys whose values are file contents or credentials: never summarised. */

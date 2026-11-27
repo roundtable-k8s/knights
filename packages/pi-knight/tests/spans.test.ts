@@ -185,6 +185,25 @@ test("input history keeps the newest messages when over the cap", async () => {
   assert.equal(chat!.attributes["roundtable.content.truncated"], true);
 });
 
+test("input history stays valid JSON within the cap for escaping-heavy content", async () => {
+  const cap = 400;
+  const nasty = ['"q"'.repeat(60), "line\n".repeat(60), "😀\\".repeat(60), "x".repeat(5000)];
+  const events: any[] = [];
+  for (const c of nasty) {
+    events.push({ type: "turn_start" }, { type: "message_end", message: { role: "user", content: c } }, msg());
+  }
+  const spans = await run({ ROUNDTABLE_TELEMETRY_CONTENT_MAX_BYTES: String(cap) }, events);
+  const chats = spans.filter((s) => s.name === "chat p/m");
+  assert.equal(chats.length, nasty.length);
+  for (const chat of chats) {
+    const input = String(chat.attributes["gen_ai.input.messages"]);
+    assert.ok(Buffer.byteLength(input) <= cap, `size ${Buffer.byteLength(input)}`);
+    const parsed = JSON.parse(input);
+    assert.ok(parsed.length >= 1);
+    assert.ok(!input.includes("\ufffd"));
+  }
+});
+
 test("compaction and retry events land on the task span with redacted, bounded error text", async () => {
   const { exporter, t, processor } = await setup();
   await withTaskSpan({ taskId: "t1", knight: "k", table: "tbl" }, async () => {
