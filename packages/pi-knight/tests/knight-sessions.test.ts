@@ -466,8 +466,6 @@ test("executeTask: a rejecting session.abort() on the abort signal is not an unh
 
 test("executeTask: per-task effort sets the thinking level for that task, then restores it", async () => {
   const { created } = setup();
-  const orig = created.length;
-  void orig;
   __setSessionFactoryForTests(async () => {
     const s = fakeSession(created.length + 1, []) as any;
     s.thinkingLevel = "off";

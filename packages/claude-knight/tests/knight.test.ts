@@ -230,7 +230,7 @@ test("per-task model that is not a Claude model is a task error, not a silent fa
 });
 
 test("effort: KNIGHT_EFFORT is the default, CLAUDE_EFFORT wins, and a task effort overrides for that task only", async () => {
-  const env = { KNIGHT_NAME: "g", SUBSCRIBE_TOPICS: "rt.tasks.x.>" };
+  const env = { CLAUDE_AUTH_MODE: "api", KNIGHT_NAME: "g", SUBSCRIBE_TOPICS: "rt.tasks.x.>", KNIGHT_WORKDIR: work, KNIGHT_SKILLS_DIR: join(work, "skills"), KNIGHT_CONFIG_DIR: join(work, "config") };
   assert.equal(loadConfig(env).effort, undefined);
   assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high" }).effort, "high");
   assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high", CLAUDE_EFFORT: "low" }).effort, "low");

@@ -62,7 +62,7 @@ test("task.minimal parses to just the id and prompt", () => {
     task: "Say hello.",
     taskId: "t-minimal",
     domain: undefined, from: undefined, dispatchedBy: undefined, timestamp: undefined, timeoutMs: undefined,
-    runId: undefined, chainName: undefined, stepName: undefined, model: undefined, publishedAtMs: undefined,
+    runId: undefined, chainName: undefined, stepName: undefined, model: undefined, effort: undefined, publishedAtMs: undefined,
     attempt: undefined, retryOf: undefined, previousFailure: undefined,
   });
 });
@@ -71,7 +71,7 @@ test("task.full sets every ParsedTask field", () => {
   const p = parseTask(readFixtureText("task.full"), "subj");
   assert.equal(p.invalid, undefined);
   for (const k of ["task", "taskId", "domain", "from", "dispatchedBy", "timestamp", "timeoutMs", "runId", "chainName",
-    "stepName", "model", "publishedAtMs", "attempt", "retryOf", "previousFailure"] as const) {
+    "stepName", "model", "effort", "publishedAtMs", "attempt", "retryOf", "previousFailure"] as const) {
     assert.notEqual(p[k], undefined, k);
   }
   assert.equal(p.attempt, 2);
