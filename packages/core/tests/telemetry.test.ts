@@ -56,6 +56,12 @@ test("telemetry stays off without OTEL_* env, with OTEL_SDK_DISABLED, and regist
   assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "otlp" }), true);
   assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }), true);
   assert.equal(telemetryEnabled({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces", OTEL_SDK_DISABLED: "true" }), false);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "none" }), false);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: " NONE " }), false);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "  " }), false);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "none", OTEL_EXPORTER_OTLP_ENDPOINT: "http://c:4318" }), true);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "none", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://c/v1/traces" }), true);
+  assert.equal(telemetryEnabled({ OTEL_TRACES_EXPORTER: "otlp", OTEL_SDK_DISABLED: "true" }), false);
   await withTelemetry({ service: "pi-knight", knight: "k", env: {} }, async (t) => {
     assert.equal(t.enabled, false);
     // Nothing is registered: spans are not recording and metrics calls are harmless no-ops.

@@ -114,6 +114,11 @@ test("the Claude Code child env carries no production-mode switches", () => {
 
 test("no OTLP endpoint: the child gets no Claude Code telemetry switches", () => {
   assert.deepEqual(claudeCodeTelemetryEnv({ PATH: "/bin" }), {});
+  assert.deepEqual(claudeCodeTelemetryEnv({ OTEL_TRACES_EXPORTER: "none", PATH: "/bin" }), {});
+  assert.deepEqual(claudeCodeTelemetryEnv({ OTEL_TRACES_EXPORTER: " None " }), {});
+  const noneChild = buildChildEnv("api", {}, { ANTHROPIC_API_KEY: "k", OTEL_TRACES_EXPORTER: "none", PATH: "/bin" });
+  assert.equal(noneChild["CLAUDE_CODE_ENABLE_TELEMETRY"], undefined);
+  assert.notEqual(noneChild["OTEL_TRACES_EXPORTER"], "otlp");
   const child = buildChildEnv("api", {}, { ANTHROPIC_API_KEY: "k", PATH: "/bin" });
   assert.equal(child["CLAUDE_CODE_ENABLE_TELEMETRY"], undefined);
   assert.equal(child["OTEL_LOG_USER_PROMPTS"], undefined);

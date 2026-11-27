@@ -30,10 +30,10 @@ export function traceHeaders(): Record<string, string> {
   return out;
 }
 
-// W3C traceparent, parsed like the OpenTelemetry propagator: lowercase hex only, no surrounding
-// whitespace, version ff invalid, and version 00 must have exactly four fields. Other versions may
-// carry extra fields after a '-'.
-const TRACEPARENT_RE = /^([0-9a-f]{2})-((?!0{32})[0-9a-f]{32})-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}(-.+)?$/;
+// W3C traceparent, parsed like the OpenTelemetry propagator (@opentelemetry/core): lowercase hex only,
+// one optional whitespace character allowed at each end, version ff invalid, and version 00 must have
+// exactly four fields. Other versions may carry extra fields after a '-' (a bare trailing '-' included).
+const TRACEPARENT_RE = /^\s?([0-9a-f]{2})-((?!0{32})[0-9a-f]{32})-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}(-.*)?\s?$/;
 
 /** Trace id of a W3C `traceparent` header; undefined when it is missing, malformed or all zeros. */
 export function traceIdFromTraceparent(traceparent: string | undefined): string | undefined {

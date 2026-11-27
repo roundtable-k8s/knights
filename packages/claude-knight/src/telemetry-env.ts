@@ -1,7 +1,7 @@
 /**
  * Claude Code's built-in OpenTelemetry export, switched on for the child.
  *
- * When the pod has an OTLP endpoint, the Claude Code CLI exports its own spans
+ * When tracing is configured (see `telemetryEnabled` in knight-core), the Claude Code CLI exports its own spans
  * (claude_code.interaction, llm_request, tool) and metrics and log events. The
  * child inherits TRACEPARENT from the knight.task span (see buildChildEnv), so
  * its interaction span becomes a child of the task. Content (prompts, responses,
@@ -9,7 +9,7 @@
  * is the redaction step for these spans, since the export runs inside the CLI.
  *
  * Every switch is added only when the pod env does not already set that key,
- * so an explicit pod value always wins. With no OTLP endpoint, nothing is added.
+ * so an explicit pod value always wins. With tracing not configured, nothing is added.
  */
 
 import { telemetryEnabled } from "@roundtable/knight-core";
@@ -22,7 +22,7 @@ function present(env: Env, name: string): boolean {
 
 /**
  * Environment for the Claude Code child that turns on its built-in OTel export.
- * Returns {} when no OTLP endpoint is configured.
+ * Returns {} when tracing is not configured (see `telemetryEnabled`).
  */
 export function claudeCodeTelemetryEnv(env: Env = process.env): Record<string, string> {
   if (!telemetryEnabled(env)) return {};
