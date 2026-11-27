@@ -95,7 +95,7 @@ export const RECHECK_INTERVAL_MS = 5 * 60_000;
 
 let lastProbeAtMs = 0;
 let probing: Promise<void> | null = null;
-/** True from the first refused check until the reserve clears; `onCleared` fires once for that span. */
+/** True from the first refused check until a later check finds the reserve clear (a window passing its reset time counts); `onCleared` fires once for that span. */
 let blockSeen = false;
 
 /**
@@ -120,11 +120,12 @@ export async function checkReserveRefreshing(
     lastProbeAtMs = now();
     const previous = new Map(windows);
     windows.clear();
+    // Keep the old reading for each window the probe did not re-report, whether or not it succeeded.
+    const restore = () => {
+      for (const [k, v] of previous) if (!windows.has(k)) windows.set(k, v);
+    };
     probing = probe()
-      .catch(() => {
-        // Keep the old reading for windows the probe did not re-report.
-        for (const [k, v] of previous) if (!windows.has(k)) windows.set(k, v);
-      })
+      .then(restore, restore)
       .finally(() => {
         probing = null;
       });

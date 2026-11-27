@@ -76,6 +76,7 @@ const natsRequest = tool(
       domain,
       task,
       timeoutMs: timeout_ms,
+      // The SDK types the handler's extra argument as unknown; it carries the call's AbortSignal.
       signal: (extra as { signal?: AbortSignal } | undefined)?.signal,
     });
     return text(r.text, !r.ok);
