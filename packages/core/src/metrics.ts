@@ -111,6 +111,18 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     taskQueueSeconds.observe(Math.max(0, ms) / 1000);
   }
 
+  const knightInfo = new client.Gauge({
+    name: `${prefix}_info`,
+    help: "Knight runtime version and configured default model (always 1)",
+    labelNames: ["version", "model"] as const,
+    registers: [registry],
+  });
+  /** Set the single info series (1); clears the previous one. Empty values are reported as "unknown". */
+  function setInfo(version: string, model: string): void {
+    knightInfo.reset();
+    knightInfo.labels(version || "unknown", model || "unknown").set(1);
+  }
+
   /** Pass to connectNats as onStatus: sets the connection gauge and counts a reconnect (back up after being down). */
   let natsWasDown = false;
   function setNatsConnected(up: boolean): void {
@@ -135,5 +147,5 @@ export function createKnightMetrics(opts: KnightMetricsOptions) {
     for (const [type, n] of types) if (n !== undefined) tokensTotal.labels(model, type).inc(n);
   }
 
-  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, usageLimitHits, taskQueueSeconds, observeQueueWait, recordLostTask, recordTokens, setNatsConnected };
+  return { registry, tasksTotal, taskDuration, llmCost, tokensTotal, natsConnected, natsReconnects, activeTasks, toolCallDuration, toolCallsTotal, toolCallsBlocked, usageLimitHits, knightInfo, setInfo, taskQueueSeconds, observeQueueWait, recordLostTask, recordTokens, setNatsConnected };
 }

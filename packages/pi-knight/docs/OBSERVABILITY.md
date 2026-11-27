@@ -84,6 +84,10 @@ roundtable_knight_llm_retries_total{table="dev",knight="galahad",runtime="pi",ou
 roundtable_knight_skill_activations_total{table="dev",knight="galahad",runtime="pi",skill="review"} 7
 roundtable_knight_session_messages{table="dev",knight="galahad",runtime="pi"} 87
 
+# Runtime version and the configured default model (one series, value 1; "unknown" when empty).
+# A per-task model switch does not add series; the model label is the configured default.
+roundtable_knight_info{version="1.2.3",model="openrouter/deepseek/deepseek-v3.2",table="dev",knight="galahad",runtime="pi"} 1
+
 # NATS health and concurrency
 roundtable_knight_nats_connected{table="dev",knight="galahad",runtime="pi"} 1
 roundtable_knight_nats_reconnects_total{table="dev",knight="galahad",runtime="pi"} 0

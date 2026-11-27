@@ -135,6 +135,7 @@ async function main(): Promise<void> {
   });
   const openScopes = new Set<TaskScope>();
   let knightService: KnightService | null = null;
+  metrics.setInfo(readPackageVersion(import.meta.url), config.knightModel);
   const nc = getConnection();
   if (nc) {
     knightService = await startKnightService({

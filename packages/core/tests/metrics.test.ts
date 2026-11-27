@@ -40,9 +40,11 @@ test("metric names and labels are the shared roundtable_knight_* scheme", async 
   m.toolCallsBlocked.labels("t", "r").inc();
   m.usageLimitHits.labels().inc();
   m.observeQueueWait(1000);
+  m.setInfo("1.0.0", "m");
   const text = await m.registry.metrics();
   assert.deepEqual(metricNames(text), [
     "roundtable_knight_active_tasks",
+    "roundtable_knight_info",
     "roundtable_knight_llm_cost_usd_total",
     "roundtable_knight_llm_tokens_total",
     "roundtable_knight_nats_connected",
@@ -100,4 +102,19 @@ test("observeQueueWait: 30 s lands in the 60 s bucket, negatives clamp to 0, bad
   assert.match(text, /roundtable_knight_task_queue_seconds_bucket\{le="60",table="none",knight="galahad",runtime="pi"\} 2/);
   assert.match(text, /roundtable_knight_task_queue_seconds_bucket\{le="0.1",table="none",knight="galahad",runtime="pi"\} 1/);
   assert.match(text, /roundtable_knight_task_queue_seconds_sum\{table="none",knight="galahad",runtime="pi"\} 30/);
+});
+
+test("setInfo renders one roundtable_knight_info series, replaced on a second call", async () => {
+  const m = createKnightMetrics(opts);
+  m.setInfo("1.2.3", "m1");
+  m.setInfo("1.2.3", "");
+  const lines = (await m.registry.metrics()).split("\n").filter((l) => l.startsWith("roundtable_knight_info{"));
+  assert.deepEqual(lines, ['roundtable_knight_info{version="1.2.3",model="unknown",table="none",knight="galahad",runtime="pi"} 1']);
+});
+
+test("the info gauge is not shared between knight registries", async () => {
+  const a = createKnightMetrics(opts);
+  const b = createKnightMetrics({ ...opts, knight: "other" });
+  a.setInfo("1.0.0", "m");
+  assert.doesNotMatch(await b.registry.metrics(), /^roundtable_knight_info\{/m);
 });
