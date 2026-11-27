@@ -1,6 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { Writable } from "node:stream";
+import { setLogStream } from "@roundtable/knight-core";
 import { dataPaths, loadConfig } from "../src/config.js";
+
+/** Run fn with log output captured; returns the parsed warn entries. */
+function captureWarnings(fn: () => void): Array<Record<string, unknown>> {
+  const lines: string[] = [];
+  setLogStream(new Writable({ write(chunk, _enc, cb) { lines.push(String(chunk)); cb(); } }));
+  try {
+    fn();
+  } finally {
+    setLogStream(process.stdout);
+  }
+  return lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((e) => e["level"] === "warn");
+}
 
 const env = { KNIGHT_NAME: "k", SUBSCRIBE_TOPICS: "a.>, b.>" };
 
@@ -80,4 +94,60 @@ test("data paths: specific overrides take precedence over KNIGHT_DATA_DIR", () =
   );
   // Empty MODELS_JSON_PATH falls back to the default, as before.
   assert.equal(dataPaths({ KNIGHT_DATA_DIR: "/tmp/k", MODELS_JSON_PATH: "" }).modelsJson, "/tmp/k/models.json");
+});
+
+test("data paths: empty KNIGHT_WORK_ROOT and KNIGHT_SESSIONS_ROOT fall back to the data root", () => {
+  assert.deepEqual(dataPaths({ KNIGHT_DATA_DIR: "/d", KNIGHT_WORK_ROOT: "", KNIGHT_SESSIONS_ROOT: "" }), {
+    dataDir: "/d",
+    workRoot: "/d/work",
+    sessionsRoot: "/d/sessions",
+    modelsJson: "/d/models.json",
+  });
+  assert.equal(dataPaths({ KNIGHT_WORK_ROOT: "", KNIGHT_SESSIONS_ROOT: "" }).workRoot, "/data/work");
+});
+
+test("KNIGHT_THINKING: valid levels pass through without a warning", () => {
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    let cfg: ReturnType<typeof loadConfig> | undefined;
+    const warnings = captureWarnings(() => {
+      cfg = loadConfig({ ...env, KNIGHT_THINKING: level });
+    });
+    assert.equal(cfg?.thinkingLevel, level);
+    assert.equal(warnings.length, 0);
+  }
+});
+
+test("KNIGHT_THINKING: unset or empty is off without a warning", () => {
+  for (const v of [undefined, ""]) {
+    let cfg: ReturnType<typeof loadConfig> | undefined;
+    const warnings = captureWarnings(() => {
+      cfg = loadConfig({ ...env, KNIGHT_THINKING: v });
+    });
+    assert.equal(cfg?.thinkingLevel, "off");
+    assert.equal(warnings.length, 0);
+  }
+});
+
+test("KNIGHT_THINKING: a typo warns once, naming the variable and accepted values, and uses off", () => {
+  let cfg: ReturnType<typeof loadConfig> | undefined;
+  const warnings = captureWarnings(() => {
+    cfg = loadConfig({ ...env, KNIGHT_THINKING: "hgih" });
+  });
+  assert.equal(cfg?.thinkingLevel, "off");
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0]?.["msg"]), /KNIGHT_THINKING/);
+  assert.match(String(warnings[0]?.["msg"]), /off, minimal, low, medium, high, xhigh, max/);
+  assert.equal(warnings[0]?.["value"], "hgih");
+});
+
+test("ACTIVITY_CONTENT: none and preview pass through; a typo warns and uses preview", () => {
+  assert.equal(captureWarnings(() => loadConfig({ ...env, ACTIVITY_CONTENT: "none" })).length, 0);
+  assert.equal(captureWarnings(() => loadConfig({ ...env, ACTIVITY_CONTENT: "preview" })).length, 0);
+  let cfg: ReturnType<typeof loadConfig> | undefined;
+  const warnings = captureWarnings(() => {
+    cfg = loadConfig({ ...env, ACTIVITY_CONTENT: "nonne" });
+  });
+  assert.equal(cfg?.activityContent, "preview");
+  assert.equal(warnings.length, 1);
+  assert.match(String(warnings[0]?.["msg"]), /ACTIVITY_CONTENT/);
 });

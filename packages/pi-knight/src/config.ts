@@ -1,6 +1,27 @@
 import os from "node:os";
 import { join } from "node:path";
-import { loadBaseConfig, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
+import { loadBaseConfig, log, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
+
+/** Thinking levels the SDK accepts (ThinkingLevel in pi-agent-core). */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** KNIGHT_THINKING: an unset or empty value is "off"; an unknown value warns and is "off". */
+function thinkingLevelEnv(env: Env): string {
+  const raw = env["KNIGHT_THINKING"];
+  if (!raw) return "off";
+  if ((THINKING_LEVELS as readonly string[]).includes(raw)) return raw;
+  log.warn(`Invalid KNIGHT_THINKING, using off. Accepted: ${THINKING_LEVELS.join(", ")}`, { name: "KNIGHT_THINKING", value: raw, accepted: THINKING_LEVELS, fallback: "off" });
+  return "off";
+}
+
+/** ACTIVITY_CONTENT: `none` or `preview` (default); any other non-empty value warns and is `preview`. */
+function activityContentEnv(env: Env): "none" | "preview" {
+  const raw = env["ACTIVITY_CONTENT"];
+  if (!raw || raw === "preview") return "preview";
+  if (raw === "none") return "none";
+  log.warn("Invalid ACTIVITY_CONTENT, using preview. Accepted: none, preview", { name: "ACTIVITY_CONTENT", value: raw, accepted: ["none", "preview"], fallback: "preview" });
+  return "preview";
+}
 
 export interface KnightConfig extends BaseKnightConfig {
   knightModel: string;
@@ -47,8 +68,8 @@ export function dataPaths(env: Env = process.env): DataPaths {
   const dataDir = env["KNIGHT_DATA_DIR"] || "/data";
   return {
     dataDir,
-    workRoot: env["KNIGHT_WORK_ROOT"] ?? join(dataDir, "work"),
-    sessionsRoot: env["KNIGHT_SESSIONS_ROOT"] ?? join(dataDir, "sessions"),
+    workRoot: env["KNIGHT_WORK_ROOT"] || join(dataDir, "work"),
+    sessionsRoot: env["KNIGHT_SESSIONS_ROOT"] || join(dataDir, "sessions"),
     modelsJson: env["MODELS_JSON_PATH"] || join(dataDir, "models.json"),
   };
 }
@@ -64,7 +85,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     natsResultsStream: env["NATS_RESULTS_STREAM"] ?? "fleet_a_results",
     maxConcurrentTasks: maxConcurrentTasks(env),
     hostname: os.hostname(),
-    thinkingLevel: env["KNIGHT_THINKING"] ?? "off",
+    thinkingLevel: thinkingLevelEnv(env),
     // 0 is valid: pi-ai treats it as "no cap" on provider-requested retry delays.
     maxRetryDelayMs: positiveIntEnv(env, "MAX_RETRY_DELAY_MS", 60000, { min: 0 }),
     modelRequestTimeoutMs: positiveIntEnv(env, "MODEL_REQUEST_TIMEOUT_MS", 600000),
@@ -74,7 +95,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     // Each chain run gets its own persisted session (#31); cap how many stay on disk.
     sessionRetentionMaxFiles: positiveIntEnv(env, "SESSION_RETENTION_MAX_FILES", 100, { min: 0 }),
     sessionRetentionDays: nonNegativeFloatEnv(env, "SESSION_RETENTION_DAYS", 30),
-    activityContent: env["ACTIVITY_CONTENT"] === "none" ? "none" : "preview",
+    activityContent: activityContentEnv(env),
     skillsDir: env["KNIGHT_SKILLS_DIR"] || "/skills",
   };
 }
