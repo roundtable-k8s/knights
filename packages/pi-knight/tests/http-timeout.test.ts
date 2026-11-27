@@ -11,7 +11,7 @@ async function slowServer(delayMs: number): Promise<{ url: string; close: () => 
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const { port } = server.address() as AddressInfo;
-  return { url: `http://127.0.0.1:${port}/`, close: () => server.closeAllConnections() || server.close() };
+  return { url: `http://127.0.0.1:${port}/`, close: () => { server.closeAllConnections(); server.close(); } };
 }
 
 describe("configureHttpTimeouts", () => {

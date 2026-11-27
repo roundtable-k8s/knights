@@ -16,7 +16,6 @@ test("a claude-knight task flows from the core pull loop into the handler, un-ac
     ack: () => calls.push(`ack:${id}`),
     working: () => calls.push(`working:${id}`),
     term: () => calls.push(`term:${id}`),
-    nak: () => calls.push(`nak:${id}`),
   });
   const knightName = "Tester";
   let served = false;
