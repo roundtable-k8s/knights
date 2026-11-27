@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { updateSessionNotes } from "../src/memory.ts";
@@ -118,4 +118,40 @@ test("setupCompactionHook counts compactions and retry sequences", async () => {
   assert.equal(await value("roundtable_knight_compactions_total", { reason: "overflow", outcome: "aborted" }), 1);
   assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "succeeded" }), 1);
   assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "exhausted" }), 1);
+});
+
+test("a legacy file with an unescaped # Worklog inside Key Results keeps its real Worklog", async () => {
+  const notesDir = setup();
+  mkdirSync(notesDir, { recursive: true });
+  writeFileSync(
+    join(notesDir, "current.md"),
+    "# Current State\nx\n\n# Key Results\nold\n# Worklog\nfake\n\n# Worklog\n- 2026-01-01T00:00:00.000Z: first → result (1 chars)\n",
+  );
+  await updateSessionNotes("k", "second", "r");
+  const text = readFileSync(join(notesDir, "current.md"), "utf8");
+  assert.match(text, /- 2026-01-01T00:00:00.000Z: first →/);
+  assert.match(text, /- \S+: second →/);
+});
+
+test("a task starting with # reads unescaped in the Worklog entry and the real Worklog survives", async () => {
+  const notesDir = setup();
+  await updateSessionNotes("k", "# Fix\nmore", "r");
+  await updateSessionNotes("k", "next", "r");
+  const text = readFileSync(join(notesDir, "current.md"), "utf8");
+  assert.match(text, /^- \S+: # Fix → result/m);
+  assert.doesNotMatch(text, /^- .*\\#/m);
+  assert.match(text, /- \S+: next →/);
+});
+
+test("stale .tmp files in the notes dir are swept, fresh ones are left", async () => {
+  const notesDir = setup();
+  mkdirSync(notesDir, { recursive: true });
+  const old = join(notesDir, "current.md.1.2.abc.tmp");
+  const fresh = join(notesDir, "current.md.3.4.def.tmp");
+  writeFileSync(old, "x");
+  writeFileSync(fresh, "x");
+  const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  utimesSync(old, past, past);
+  await updateSessionNotes("k", "t", "r");
+  assert.deepEqual(readdirSync(notesDir).sort(), ["current.md", "current.md.3.4.def.tmp"]);
 });
