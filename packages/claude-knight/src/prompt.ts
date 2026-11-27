@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { memoryPromptSection, resolveMemoryPaths } from "@roundtable/knight-core";
+import { browserEnabled, memoryPromptSection, resolveMemoryPaths } from "@roundtable/knight-core";
 import type { KnightConfig } from "./config.js";
-import { browserEnabled } from "./browser.js";
 
 /**
  * Text appended to Claude Code's own system prompt.

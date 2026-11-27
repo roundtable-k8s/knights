@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { browserTools, setBrowserExec, BROWSER_TOOL_IDS } from "../src/browser.js";
+import { setBrowserExec } from "@roundtable/knight-core";
+import { browserTools, BROWSER_TOOL_IDS } from "../src/browser.js";
 import { roundtableToolIds } from "../src/tools.js";
 import { buildPreamble } from "../src/prompt.js";
 import { loadConfig } from "../src/config.js";

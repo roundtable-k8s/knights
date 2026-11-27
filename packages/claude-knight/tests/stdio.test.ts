@@ -18,7 +18,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { handlePreToolUseHook, HookInputError } from "../src/hook-cli.js";
 import { createMcpServer, type ToolDef } from "../src/mcp-stdio.js";
 import { roundtableTools } from "../src/tools.js";
-import { setBrowserExec } from "../src/browser.js";
+import { setBrowserExec } from "@roundtable/knight-core";
 import { listTranscripts, projectDirName, readTranscript } from "../src/sessions.js";
 import { checkAuth, egressInjection } from "../src/auth.js";
 

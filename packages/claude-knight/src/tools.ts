@@ -8,13 +8,14 @@
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import {
+  browserEnabled,
   FIND_KNIGHTS_DESCRIPTION,
   FIND_KNIGHTS_PARAMS,
   findKnightsText,
   publishOutOfBand,
   requestKnight,
 } from "@roundtable/knight-core";
-import { browserEnabled, browserTools, BROWSER_TOOL_IDS } from "./browser.js";
+import { browserTools, BROWSER_TOOL_IDS } from "./browser.js";
 
 let knightName = "unknown";
 let natsPrefix = "fleet-a";
