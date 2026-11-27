@@ -63,6 +63,10 @@
       "type": "string",
       "description": "Per-task model override, already resolved from RoundTable aliases and checked against the knight's runtime. Applies to this task only; empty means the knight's configured model."
     },
+    "effort": {
+      "type": "string",
+      "description": "Per-task reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. Overrides the knight's `KNIGHT_EFFORT` default for this task only; empty or an unrecognised value means the knight default."
+    },
     "attempt": {
       "type": "integer",
       "minimum": 1,

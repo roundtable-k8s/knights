@@ -38,6 +38,9 @@ export const TaskPayload = Type.Object(
     model: str(
       "Per-task model override, already resolved from RoundTable aliases and checked against the knight's runtime. Applies to this task only; empty means the knight's configured model.",
     ),
+    effort: str(
+      "Per-task reasoning effort: `low`, `medium`, `high`, `xhigh` or `max`. Overrides the knight's `KNIGHT_EFFORT` default for this task only; empty or an unrecognised value means the knight default.",
+    ),
     attempt: Type.Optional(
       Type.Integer({ minimum: 1, description: "1-based attempt number, set by a manual retry. Absent means attempt 1." }),
     ),

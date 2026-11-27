@@ -140,7 +140,7 @@ Set through the Knight's `spec.env` / `spec.envFrom`:
 | `CLAUDE_MODEL` | from `spec.model` | `sonnet`, `opus`, `haiku`, or a `claude-*` id. Non-Claude `spec.model` → plan default |
 
 A task payload may carry an optional `model` (a Claude alias or `claude-*` id); it replaces `CLAUDE_MODEL` for that task only. Non-Claude ids fail the task with an error. Chain-run session resume continues across steps that use different models.
-| `CLAUDE_EFFORT` | Claude Code default | `low` `medium` `high` `xhigh` `max` |
+| `CLAUDE_EFFORT` | `KNIGHT_EFFORT`, else Claude Code default | `low` `medium` `high` `xhigh` `max`. `KNIGHT_EFFORT` (from `Knight.spec.effort`) is the fallback; a task payload `effort` overrides either for that task only |
 | `CLAUDE_PLAN_RESERVE` | `0.8` | 0–1; `1` disables; re-read on every check |
 | `CLAUDE_MAX_TURNS` | `0` (none) | turn cap per task |
 | `CLAUDE_MAX_BUDGET_USD` | `0` (none) | per-task cap at API-equivalent prices |

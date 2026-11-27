@@ -228,3 +228,19 @@ test("per-task model that is not a Claude model is a task error, not a silent fa
   assert.match(r.error!, /Unsupported model "openrouter\/deepseek\/deepseek-v3.2"/);
   assert.equal(calls.length, 0, "no Claude Code process is started");
 });
+
+test("effort: KNIGHT_EFFORT is the default, CLAUDE_EFFORT wins, and a task effort overrides for that task only", async () => {
+  const env = { CLAUDE_AUTH_MODE: "api", KNIGHT_NAME: "g", SUBSCRIBE_TOPICS: "rt.tasks.x.>", KNIGHT_WORKDIR: work, KNIGHT_SKILLS_DIR: join(work, "skills"), KNIGHT_CONFIG_DIR: join(work, "config") };
+  assert.equal(loadConfig(env).effort, undefined);
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high" }).effort, "high");
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high", CLAUDE_EFFORT: "low" }).effort, "low");
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "bogus" }).effort, undefined);
+
+  const cfg = loadConfig({ ...env, KNIGHT_EFFORT: "medium" });
+  const { fn, calls } = fakeQuery(() => [init("s1"), done("s1", "ok")]);
+  const sig = new AbortController().signal;
+  await executeTask("a", "e1", cfg, sig, undefined, { queryFn: fn, effort: "max" });
+  await executeTask("b", "e2", cfg, sig, undefined, { queryFn: fn });
+  assert.equal(calls[0]!.options.effort, "max");
+  assert.equal(calls[1]!.options.effort, "medium");
+});

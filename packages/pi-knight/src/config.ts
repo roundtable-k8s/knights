@@ -1,15 +1,19 @@
 import os from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { loadBaseConfig, log, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
+import { normalizeEffort, loadBaseConfig, log, maxConcurrentTasks, parseTopics, nonNegativeFloatEnv, positiveIntEnv, requireEnv, type BaseKnightConfig, type Env } from "@roundtable/knight-core";
 
 /** Thinking levels the SDK accepts (ThinkingLevel in pi-agent-core). */
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ThinkingLevel[];
 
-/** KNIGHT_THINKING: an unset or empty value is "off"; an unknown value warns and is "off". */
+/**
+ * KNIGHT_THINKING: an unknown value warns and is "off". When it is unset or empty, KNIGHT_EFFORT
+ * (from Knight.spec.effort; low..max map one to one onto the thinking levels) is the default,
+ * else "off".
+ */
 function thinkingLevelEnv(env: Env): ThinkingLevel {
   const raw = env["KNIGHT_THINKING"];
-  if (!raw) return "off";
+  if (!raw) return normalizeEffort(env["KNIGHT_EFFORT"]) ?? "off";
   if ((THINKING_LEVELS as readonly string[]).includes(raw)) return raw as ThinkingLevel;
   log.warn(`Invalid KNIGHT_THINKING, using off. Accepted: ${THINKING_LEVELS.join(", ")}`, { name: "KNIGHT_THINKING", value: raw, accepted: THINKING_LEVELS, fallback: "off" });
   return "off";

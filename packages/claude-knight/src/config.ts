@@ -1,5 +1,5 @@
 import os from "node:os";
-import { floatEnv, intEnv, loadBaseConfig, maxConcurrentTasks, parseTopics, requireEnv, type BaseKnightConfig } from "@roundtable/knight-core";
+import { normalizeEffort, floatEnv, intEnv, loadBaseConfig, maxConcurrentTasks, parseTopics, requireEnv, type BaseKnightConfig, type Effort } from "@roundtable/knight-core";
 
 /**
  * Runtime configuration. The first block is the env contract the Roundtable
@@ -37,7 +37,7 @@ export interface KnightConfig extends BaseKnightConfig {
   /** Model passed to Claude Code; undefined lets Claude Code pick its default. */
   claudeModel: string | undefined;
   /** "low" | "medium" | "high" | "xhigh" | "max" — passed as SDK effort when set. */
-  effort: string | undefined;
+  effort: Effort | undefined;
   /** Cap on agent turns per task (0 = no cap). */
   maxTurns: number;
   /** Per-task budget in USD at API-equivalent prices (0 = no cap). */
@@ -68,6 +68,11 @@ type Env = NodeJS.ProcessEnv;
 /** CLAUDE_PLAN_RESERVE clamped to 0-1; re-read on every reserve check so changes apply without a restart. */
 export function planReserveFromEnv(env: Env = process.env): number {
   return Math.min(1, Math.max(0, floatEnv(env, "CLAUDE_PLAN_RESERVE", 0.8)));
+}
+
+/** CLAUDE_EFFORT, else KNIGHT_EFFORT (from Knight.spec.effort); an unrecognised value is ignored. */
+export function effortEnv(env: Env): Effort | undefined {
+  return normalizeEffort(env["CLAUDE_EFFORT"]) ?? normalizeEffort(env["KNIGHT_EFFORT"]);
 }
 
 /**
@@ -123,7 +128,7 @@ export function loadConfig(env: Env = process.env): KnightConfig {
     runtime,
     claudeBin: env["CLAUDE_BIN"] || "claude",
     claudeModel: resolveClaudeModel(knightModel, env["CLAUDE_MODEL"]),
-    effort: env["CLAUDE_EFFORT"] || undefined,
+    effort: effortEnv(env),
     maxTurns: intEnv(env, "CLAUDE_MAX_TURNS", 0),
     maxBudgetUsd: floatEnv(env, "CLAUDE_MAX_BUDGET_USD", 0),
     workDir,

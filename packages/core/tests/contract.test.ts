@@ -251,3 +251,11 @@ test("withTaskLimitNote appends after the task text and honours KNIGHT_TASK_LIMI
   assert.equal(withTaskLimitNote("do it", 600000, T0, { KNIGHT_TASK_LIMIT_NOTE: "off" }), "do it");
   assert.ok(withTaskLimitNote("do it", 600000, T0, { KNIGHT_TASK_LIMIT_NOTE: "on" }).length > 5);
 });
+
+test("parseTask reads an optional per-task effort and ignores unknown values", () => {
+  assert.equal(parseTask(JSON.stringify({ task: "x", effort: "xhigh" }), "s").effort, "xhigh");
+  assert.equal(parseTask(JSON.stringify({ task: "x", effort: " High " }), "s").effort, "high");
+  assert.equal(parseTask(JSON.stringify({ task: "x", effort: "turbo" }), "s").effort, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x", effort: "" }), "s").effort, undefined);
+  assert.equal(parseTask(JSON.stringify({ task: "x" }), "s").effort, undefined);
+});
