@@ -41,6 +41,13 @@ export const llmRetriesTotal = new client.Counter({
   registers: [registry],
 });
 
+export const skillActivationsTotal = new client.Counter({
+  name: "roundtable_knight_skill_activations_total",
+  help: "Skill activations (the agent read a skill's SKILL.md), by skill name",
+  labelNames: ["skill"] as const,
+  registers: [registry],
+});
+
 export const sessionMessages = new client.Gauge({
   name: "roundtable_knight_session_messages",
   help: "Message count of the session the last task ran in",

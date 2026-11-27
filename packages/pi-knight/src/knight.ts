@@ -468,7 +468,7 @@ export async function executeTask(
     opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
     ranModel = resolvedModelName(override?.model ?? sess.model, modelUsed);
     // chat / execute_tool spans under the task's invoke_agent span (no-ops without an SDK).
-    spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table }, undefined, () => (sess as any).systemPrompt);
+    spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table }, undefined, () => (sess as any).systemPrompt, config.skillsDir);
     const sp = spans;
     try {
       // Typed view of the SDK session's event subscription (same shape TaskActivity.attach takes).
