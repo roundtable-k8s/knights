@@ -17,6 +17,7 @@ test("nats_publish prompt embeds the table prefix set at startup", () => {
   assert.doesNotMatch(snippet, /startup logs/);
   assert.doesNotMatch(snippet, /SUBSCRIBE_TOPICS/);
   assert.doesNotMatch(snippet, /fleet-a/, "the legacy default prefix must not leak into the prompt");
+  assert.match(snippet, /Use your table's prefix \(rt-dev\) in subjects/, "guideline embeds the prefix itself");
 });
 
 test("a later prefix change is reflected when the tools are rebuilt", () => {

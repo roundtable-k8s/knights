@@ -72,7 +72,7 @@ export function natsPublishTool(prefix: string) {
     promptSnippet: natsPublishPrompt(prefix),
     promptGuidelines: [
       "Only use for out-of-band messaging — your task result is auto-published by the runtime",
-      "Use your table's prefix in subjects (see the table prefix above)",
+      `Use your table's prefix (${prefix}) in subjects`,
       "Never publish empty messages",
     ],
     parameters: PublishParams,
