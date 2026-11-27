@@ -122,7 +122,7 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
       log.info("outside");
       await processor.forceFlush();
       const finished = exporter.getFinishedSpans(); // shutdown() resets the exporter
-      const lines = logs.text().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const lines = logs.lines();
       return { finished, lines, tp };
     },
   );
@@ -147,8 +147,8 @@ test("one task yields one invoke_agent root span with attributes; logs inside ca
   assert.equal(s.resource.attributes["roundtable.knight"], "galahad");
   assert.equal(s.resource.attributes["roundtable.table"], "dev");
 
-  const inside = lines.find((l) => l.msg === "inside");
-  const outside = lines.find((l) => l.msg === "outside");
+  const inside = lines.find((l) => l.msg === "inside")!;
+  const outside = lines.find((l) => l.msg === "outside")!;
   assert.equal(inside.trace_id, s.spanContext().traceId);
   assert.equal(inside.span_id, s.spanContext().spanId);
   assert.equal(outside.trace_id, undefined);
