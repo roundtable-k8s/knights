@@ -636,7 +636,8 @@ export interface PublishResultOptions {
   isConnected?: () => boolean;
   /**
    * W3C trace headers to send with the result, captured while the task span was active. Default:
-   * the headers of the active span now (none outside a trace). Callers that publish after their
+   * the headers of the active span now (none outside a trace). Unset means "use the active span";
+   * an empty `{}` means "send no headers". Callers that publish after their
    * span has ended must pass them in.
    */
   traceHeaders?: Record<string, string>;
