@@ -265,3 +265,29 @@ test("reading a SKILL.md marks the tool span, adds a task event and counts the s
   assert.equal(await count("review"), before + 1);
   await t.shutdown();
 });
+
+test("a chat turn records one point in each GenAI histogram", async () => {
+  const { MeterProvider, InMemoryMetricExporter, PeriodicExportingMetricReader, AggregationTemporality } = await import("@opentelemetry/sdk-metrics");
+  const { metrics } = await import("@opentelemetry/api");
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 3_600_000 });
+  const provider = new MeterProvider({ readers: [reader] });
+  // An earlier SDK start can leave a global registered by another API copy; clear it so ours can register.
+  delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  assert.ok(metrics.setGlobalMeterProvider(provider));
+  try {
+    const s = new SessionSpans("p/m", { knight: "k", table: "tbl" });
+    s.handle({ type: "turn_start" });
+    s.handle(msg({ provider: "anthropic" }));
+    await reader.forceFlush();
+    const all = exporter.getMetrics().flatMap((r) => r.scopeMetrics.flatMap((x) => x.metrics));
+    const dur = all.find((m) => m.descriptor.name === "gen_ai.client.operation.duration")!;
+    assert.equal(dur.dataPoints.length, 1);
+    assert.equal(dur.dataPoints[0]!.attributes["gen_ai.provider.name"], "anthropic");
+    const tok = all.find((m) => m.descriptor.name === "gen_ai.client.token.usage")!;
+    assert.equal(tok.dataPoints.length, 2);
+  } finally {
+    await provider.shutdown();
+    delete (globalThis as any)[Symbol.for("opentelemetry.js.api.1")];
+  }
+});

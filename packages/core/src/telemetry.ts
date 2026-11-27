@@ -21,6 +21,8 @@ export interface TelemetryOptions {
 
 export interface Telemetry {
   enabled: boolean;
+  /** True when an OTLP metrics exporter is configured (`OTEL_METRICS_EXPORTER=otlp`) and the SDK started. */
+  metricsEnabled: boolean;
   /** Flush pending spans and stop the SDK. A no-op when disabled. */
   shutdown(): Promise<void>;
 }
@@ -72,7 +74,13 @@ export function resourceDefaults(opts: TelemetryOptions): Record<string, string>
   return defaults;
 }
 
-const DISABLED: Telemetry = { enabled: false, shutdown: async () => {} };
+/** OTel metrics are opt-in: only `OTEL_METRICS_EXPORTER=otlp` (or a list containing it) turns them on; Prometheus stays the default. */
+export function otelMetricsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env["OTEL_METRICS_EXPORTER"]?.trim().toLowerCase();
+  return !!v && v.split(",").some((x) => x.trim() === "otlp");
+}
+
+const DISABLED: Telemetry = { enabled: false, metricsEnabled: false, shutdown: async () => {} };
 
 /**
  * Start the OpenTelemetry Node SDK when OTEL_* env asks for it. Otherwise nothing is
@@ -81,13 +89,15 @@ const DISABLED: Telemetry = { enabled: false, shutdown: async () => {} };
 export async function startTelemetry(opts: TelemetryOptions): Promise<Telemetry> {
   const env = opts.env ?? process.env;
   if (!telemetryEnabled(env)) return DISABLED;
+  const metricsEnabled = otelMetricsEnabled(env);
   let sdk: { start(): void; shutdown(): Promise<void> };
   try {
     // Loaded on demand so a knight with telemetry off never pays for the SDK.
     const { NodeSDK } = await (opts.loadSdk ?? (() => import("@opentelemetry/sdk-node")))();
     sdk = new NodeSDK({
-      // Traces only: no OTLP metrics (prom-client stays) or logs exporters.
-      metricReaders: [],
+      // Traces only unless OTEL_METRICS_EXPORTER=otlp (the SDK then builds the reader from env);
+      // prom-client stays the metrics source. No logs exporter.
+      ...(metricsEnabled ? {} : { metricReaders: [] }),
       logRecordProcessors: [],
       resource: resourceFromAttributes(resourceDefaults(opts)),
       ...(opts.spanProcessors ? { spanProcessors: opts.spanProcessors } : {}),
@@ -101,6 +111,7 @@ export async function startTelemetry(opts: TelemetryOptions): Promise<Telemetry>
   log.info("OpenTelemetry tracing started", { service: env["OTEL_SERVICE_NAME"] || opts.service });
   return {
     enabled: true,
+    metricsEnabled,
     shutdown: () => sdk.shutdown().catch((e) => log.warn("OpenTelemetry shutdown failed", { error: String(e) })),
   };
 }

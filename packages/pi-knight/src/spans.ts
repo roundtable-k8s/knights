@@ -1,7 +1,7 @@
 import { trace } from "@opentelemetry/api";
 import { skillFromToolCall } from "./skill-activation.js";
 import { skillActivationsTotal } from "./runtime-metrics.js";
-import { activeTraceContext, boundText, sliceWhole, captureContent, contentMaxBytes, endSpan, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
+import { activeTraceContext, boundText, sliceWhole, captureContent, contentMaxBytes, endSpan, recordChatTurn, setContentAttribute, startChildSpan } from "@roundtable/knight-core";
 
 /**
  * Turns pi session events into `chat <model>` (one per LLM turn) and `execute_tool <tool>`
@@ -29,6 +29,8 @@ function asText(v: unknown): string {
 
 export class SessionSpans {
   private chat?: ReturnType<typeof startChildSpan>;
+  private chatStart = 0;
+  private readonly ids: { knight: string; table?: string };
   private tools = new Map<string, ReturnType<typeof startChildSpan>>();
   private readonly attrs: Record<string, string>;
   /** Newest messages as `{role, content}`, bounded to the content cap: the input of the next chat turn. */
@@ -45,6 +47,7 @@ export class SessionSpans {
     /** Skills directory; skill activations are only marked when set. */
     private readonly skillsDir?: string,
   ) {
+    this.ids = ids;
     this.attrs = { "roundtable.knight": ids.knight, "roundtable.table": ids.table || "none" };
   }
 
@@ -52,6 +55,7 @@ export class SessionSpans {
     switch (e?.type) {
       case "turn_start":
         this.endChat();
+        this.chatStart = Date.now();
         this.chat = startChildSpan(
           `chat ${this.model}`,
           { ...this.attrs, "gen_ai.operation.name": "chat", "gen_ai.request.model": this.model },
@@ -66,6 +70,8 @@ export class SessionSpans {
           break;
         }
         // The prompt's message_end arrives after turn_start, so the input is only complete here.
+        const start = this.chatStart;
+        const hadChat = !!this.chat;
         if (this.chat) {
           const chat = this.chat;
           this.setContent(chat, "gen_ai.input.messages", () => JSON.stringify(this.history));
@@ -79,6 +85,17 @@ export class SessionSpans {
         if (Number.isFinite(m.usage?.output)) a["gen_ai.usage.output_tokens"] = m.usage.output;
         const failed = m.stopReason === "error" || m.stopReason === "aborted";
         this.endChat(a, failed ? String(m.errorMessage ?? m.stopReason) : undefined);
+        if (hadChat) recordChatTurn({
+          model: this.model,
+          ...(typeof m.model === "string" && m.model ? { responseModel: m.model } : {}),
+          ...(typeof m.provider === "string" && m.provider ? { provider: m.provider } : {}),
+          durationSeconds: (Date.now() - start) / 1000,
+          ...(Number.isFinite(m.usage?.input) ? { inputTokens: m.usage.input } : {}),
+          ...(Number.isFinite(m.usage?.output) ? { outputTokens: m.usage.output } : {}),
+          ...(failed ? { errorType: String(m.stopReason) } : {}),
+          knight: this.ids.knight,
+          ...(this.ids.table ? { table: this.ids.table } : {}),
+        });
         break;
       }
       case "compaction_end":

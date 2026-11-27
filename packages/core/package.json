@@ -28,6 +28,7 @@
   "devDependencies": {
     "@opentelemetry/context-async-hooks": "^3.1.1",
     "@opentelemetry/core": "^2.12.1",
+    "@opentelemetry/sdk-metrics": "^3.1.1",
     "@types/node": "^22.19.19",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
