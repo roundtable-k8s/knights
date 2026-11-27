@@ -26,7 +26,7 @@ and commit the result. `npm test` fails when the committed files are stale.
 - Every fixture validates against its schema.
 - Each runtime's result builder produces the result fixtures for the same inputs
   (`resultFixtureDiff` in `@roundtable/knight-core/contract/fixtures`). Result fixtures hold the shared
-  fields only; runtime-specific fields (`tool_calls` — sent by pi-knight and claude-knight — `turns`, `runtime`, `billing`) and extra token counters are
+  fields only; runtime-specific fields (`tool_calls` (both runtimes), `turns`, `runtime`, `billing`) and extra token counters are
   left out of the comparison.
 - Both runtimes' activity events validate against the activity schema.
 - `taskConsumerConfig` deep-equals `fixtures/consumer.knight-tasks.json` (`tests/consumer-config.test.ts`), so a

@@ -1,8 +1,5 @@
 import { readFileSync } from "node:fs";
 
-/** Where the operator's config ConfigMap (including the KNIGHT_SKILLS key) is mounted. */
-export const SKILLS_CONFIG_FILE = "/config/KNIGHT_SKILLS";
-
 /**
  * Whether the operator expects any skills on this knight.
  *
@@ -58,7 +55,7 @@ export async function waitForSkills(opts: WaitForSkillsOptions): Promise<number>
     count = opts.load();
     if (count > 0) break;
     if (attempt < opts.maxAttempts - 1) {
-      info("No skills found, waiting for git-sync...", { attempt: attempt + 1 });
+      if (attempt === 0) info("No skills found, waiting for git-sync...", { attempt: 1 });
       await sleep(opts.intervalMs);
     }
   }

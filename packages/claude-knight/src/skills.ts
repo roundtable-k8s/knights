@@ -111,10 +111,11 @@ export async function waitForSkills(
   config: { skillsDir: string; claudeConfigDir: string; configDir: string },
   deps: SkillWaitDeps = {},
 ): Promise<number> {
+  const expected = deps.expected ?? skillsExpected(process.env, undefined, config.configDir);
   const count = await waitForSkillsCore({
     maxAttempts: 20,
     intervalMs: 3000,
-    expected: deps.expected ?? skillsExpected(process.env, undefined, config.configDir),
+    expected,
     sleep: deps.sleep,
     info: (msg, data) => log.info(msg, { skillsDir: config.skillsDir, ...data }),
     load: () => {
@@ -123,7 +124,7 @@ export async function waitForSkills(
       return names.length;
     },
   });
-  if (count === 0 && (deps.expected ?? skillsExpected(process.env, undefined, config.configDir))) {
+  if (count === 0 && expected) {
     log.warn("No skills found after waiting for git-sync — continuing without", { skillsDir: config.skillsDir });
   }
   return count;
