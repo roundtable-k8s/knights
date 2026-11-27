@@ -2,10 +2,10 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { initRoster, resetRoster, type KnightCard } from "@roundtable/knight-core";
-import { natsTools } from "../src/tools/nats.js";
+import { getNatsTools } from "../src/tools/nats.js";
 
 type Exec = (id: string, params: Record<string, unknown>, signal?: AbortSignal, onUpdate?: unknown, ctx?: unknown) => Promise<{ content: Array<{ text: string }> }>;
-const tool = (n: string) => natsTools.find((t) => t.name === n) as unknown as { execute: Exec; parameters: { required?: string[] }; promptSnippet?: string };
+const tool = (n: string) => getNatsTools().find((t) => t.name === n) as unknown as { execute: Exec; parameters: { required?: string[] }; promptSnippet?: string };
 const run = async (n: string, params: Record<string, unknown>) => (await tool(n).execute("call-1", params)).content[0]!.text;
 
 const card = (name: string, domain: string, suspended = false): KnightCard => ({
@@ -20,7 +20,7 @@ const useFixture = () => initRoster({}, "pi-self", () => null, { readAll: async 
 afterEach(() => resetRoster());
 
 test("find_knights is registered next to nats_request, with a prompt line", () => {
-  assert.deepEqual(natsTools.map((t) => t.name), ["nats_publish", "nats_request", "find_knights"]);
+  assert.deepEqual(getNatsTools().map((t) => t.name), ["nats_publish", "nats_request", "find_knights"]);
   assert.match(tool("find_knights").promptSnippet ?? "", /call find_knights/);
   assert.deepEqual([...(tool("nats_request").parameters.required ?? [])].sort(), ["knight", "task"], "domain is optional");
 });

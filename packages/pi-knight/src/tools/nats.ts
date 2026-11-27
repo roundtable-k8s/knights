@@ -44,36 +44,45 @@ function textResult(text: string): AgentToolResult<void> {
 }
 
 /**
+ * Prompt snippet for nats_publish, with the knight's real table prefix written in,
+ * so the model never has to guess it (it cannot read the startup logs).
+ */
+export function natsPublishPrompt(prefix: string): string {
+  return [
+    `Your table prefix is \`${prefix}\`. Subjects: \`${prefix}.alerts.<type>\`, \`${prefix}.reports.<type>\`, etc.`,
+    `NEVER publish empty messages. NEVER use this for task results (the runtime handles that).`,
+  ].join("\n");
+}
+
+/**
  * nats_publish — Fire-and-forget message to any NATS subject.
  *
  * Your normal task results are published automatically by the runtime.
  * Only use this for OUT-OF-BAND messaging: alerts, reports, broadcasts.
  */
-export const natsPublishTool = defineTool({
-  name: "nats_publish",
-  label: "NATS Publish",
-  description: [
-    "Publish a fire-and-forget message to a NATS subject.",
-    "Your task results are published AUTOMATICALLY — do NOT use this for normal task responses.",
-    "Use for: alerts, reports, broadcasts, or out-of-band messages.",
-  ].join(" "),
-  promptSnippet: [
-    `Your NATS table prefix is dynamically set at startup (current: check your SUBSCRIBE_TOPICS).`,
-    `Subject format: <your-prefix>.alerts.<type>, <your-prefix>.reports.<type>, etc.`,
-    `NEVER publish empty messages. NEVER use this for task results (the runtime handles that).`,
-  ].join("\n"),
-  promptGuidelines: [
-    "Only use for out-of-band messaging — your task result is auto-published by the runtime",
-    "Use your table's prefix in subjects (visible in your startup logs)",
-    "Never publish empty messages",
-  ],
-  parameters: PublishParams,
-  async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-    const r = await publishOutOfBand(params.subject, params.message);
-    // terminate: the message is delivered, so no follow-up LLM turn is needed.
-    return r.ok ? { ...textResult(r.text), terminate: true } : textResult(r.text);
-  },
-});
+export function natsPublishTool(prefix: string) {
+  return defineTool({
+    name: "nats_publish",
+    label: "NATS Publish",
+    description: [
+      "Publish a fire-and-forget message to a NATS subject.",
+      "Your task results are published AUTOMATICALLY — do NOT use this for normal task responses.",
+      "Use for: alerts, reports, broadcasts, or out-of-band messages.",
+    ].join(" "),
+    promptSnippet: natsPublishPrompt(prefix),
+    promptGuidelines: [
+      "Only use for out-of-band messaging — your task result is auto-published by the runtime",
+      "Use your table's prefix in subjects (see the table prefix above)",
+      "Never publish empty messages",
+    ],
+    parameters: PublishParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const r = await publishOutOfBand(params.subject, params.message);
+      // terminate: the message is delivered, so no follow-up LLM turn is needed.
+      return r.ok ? { ...textResult(r.text), terminate: true } : textResult(r.text);
+    },
+  });
+}
 
 /**
  * nats_request — Send a task to another knight and wait for their response.
@@ -148,5 +157,8 @@ const natsRequestTool = defineTool({
 
 /**
  * All NATS tools (and find_knights, registered next to nats_request) for registration with Pi SDK.
+ * Built on demand: the publish prompt embeds the table prefix, so call this after setNatsPrefix().
  */
-export const natsTools = [natsPublishTool, natsRequestTool, findKnightsTool];
+export function getNatsTools() {
+  return [natsPublishTool(_natsPrefix), natsRequestTool, findKnightsTool];
+}
