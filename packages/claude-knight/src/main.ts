@@ -43,7 +43,9 @@ export async function main(): Promise<void> {
   // Introspect in this process reads the same config dir the Claude Code child
   // processes write to.
   process.env["CLAUDE_CONFIG_DIR"] = config.claudeConfigDir;
-  await sweepStaleWorkDirs(config);
+  // Not awaited here: it overlaps the skills wait, and is awaited before the pull loop starts.
+  const sweep = sweepStaleWorkDirs(config);
+  sweep.catch(() => {}); // a failure surfaces at the await below; this only avoids an unhandled rejection meanwhile
 
   log.info("Claude-Knight starting", {
     model: config.claudeModel ?? "claude-code-default",
@@ -269,6 +271,9 @@ export async function main(): Promise<void> {
   // Ready: later signals run the full shutdown above. If one came during start-up the
   // start-up exit is already running: do not start the pull loop.
   if (!signals.ready(shutdown)) return;
+
+  // No task may start while the stale-workspace sweep is still running.
+  await sweep;
 
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {

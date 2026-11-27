@@ -55,7 +55,8 @@ export async function waitForSkills(opts: WaitForSkillsOptions): Promise<number>
     count = opts.load();
     if (count > 0) break;
     if (attempt < opts.maxAttempts - 1) {
-      if (attempt === 0) info("No skills found, waiting for git-sync...", { attempt: 1 });
+      // Log the first attempt and then every 10th so a 500 ms poll does not spam.
+      if (attempt % 10 === 0) info("No skills found, waiting for git-sync...", { attempt: attempt + 1 });
       await sleep(opts.intervalMs);
     }
   }

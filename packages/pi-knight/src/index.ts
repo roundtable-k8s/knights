@@ -51,7 +51,9 @@ async function main(): Promise<void> {
   log.info("Health server started", { port: config.metricsPort });
 
   // Workspaces left by a pod killed mid-task would otherwise fill the PVC; no task runs yet, so none is active.
-  await sweepStaleDirs(dataPaths().workRoot, { skip: [".warm"] });
+  // Not awaited here: it overlaps the model preflight and skills wait, and is awaited before the pull loop starts.
+  const sweep = sweepStaleDirs(dataPaths().workRoot, { skip: [".warm"] });
+  sweep.catch(() => {}); // a failure surfaces at the await below; this only avoids an unhandled rejection meanwhile
 
   // Preflight the model endpoint before doing anything else. For local endpoints
   // (Ollama/LM Studio/LiteLLM) this catches an unreachable endpoint or missing
@@ -83,8 +85,8 @@ async function main(): Promise<void> {
   // Discover skills using Pi SDK's built-in agentskills.io loader
   // Retry for git-sync race at startup
   const skillCount = await waitForSkills({
-    maxAttempts: 20, // ~60s total — allows git-sync + skill-filter to complete
-    intervalMs: 3000,
+    maxAttempts: 120, // ~60s total — allows git-sync + skill-filter to complete
+    intervalMs: 500,
     expected: skillsExpected(),
     info: (msg, data) => log.info(msg, data),
     load: () => {
@@ -293,6 +295,9 @@ async function main(): Promise<void> {
   // Ready: later signals run the full shutdown above. If one came during start-up the
   // start-up exit is already running: do not start the pull loop.
   if (!signals.ready(shutdown)) return;
+
+  // No task may start while the stale-workspace sweep is still running.
+  await sweep;
 
   // Pull only when a slot is free; backlog stays in the stream (consumer lag), not in memory.
   puller = await subscribe(config, {
