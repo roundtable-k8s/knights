@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseModelStr, splitRoutingSuffix, resolveModel, createTrustedSettingsManager, isClaudeAlias } from "../src/model.ts";
+import { parseModelStr, splitRoutingSuffix, resolveModel, createTrustedSettingsManager, isClaudeAlias, MissingCredentialsError } from "../src/model.ts";
 
 test("parseModelStr splits provider from model, defaulting to anthropic", () => {
   assert.deepEqual(parseModelStr("openrouter/deepseek/deepseek-v3.2"), {
@@ -148,12 +148,72 @@ test("resolveModel still resolves a Claude alias when a local base URL is config
 });
 
 test("resolveModel leaves catalog provider/model ids unaffected", async () => {
-  await withEnv({}, async () => {
-    const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
-    assert.equal(provider, "anthropic");
-    assert.equal(modelName, "claude-sonnet-4-5");
-    assert.equal(model.id, "claude-sonnet-4-5");
+  await withEnv({}, () =>
+    withOneEnv("ANTHROPIC_API_KEY", "test-key", async () => {
+      const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
+      assert.equal(provider, "anthropic");
+      assert.equal(modelName, "claude-sonnet-4-5");
+      assert.equal(model.id, "claude-sonnet-4-5");
+    }),
+  );
+});
+
+/** Run fn with one env var set (undefined = unset), restoring the original afterwards. */
+async function withOneEnv(name: string, value: string | undefined, fn: () => Promise<void>) {
+  const prev = process.env[name];
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+  try {
+    await fn();
+  } finally {
+    if (prev !== undefined) process.env[name] = prev;
+    else delete process.env[name];
+  }
+}
+
+test("resolveModel refuses a hosted catalog model without credentials, naming the provider", async () => {
+  await withOneEnv("OPENROUTER_API_KEY", undefined, async () => {
+    await assert.rejects(resolveModel("openrouter/deepseek/deepseek-v3.2"), (e: Error) => {
+      assert.ok(e instanceof MissingCredentialsError, "typed error");
+      assert.equal(e.name, "MissingCredentialsError");
+      assert.match(e.message, /No credentials for provider "openrouter" \(model deepseek\/deepseek-v3\.2\)/);
+      return true;
+    });
   });
+});
+
+test("resolveModel resolves a hosted catalog model once its key is set", async () => {
+  await withOneEnv("OPENROUTER_API_KEY", "test-key", async () => {
+    const { model, provider } = await resolveModel("openrouter/deepseek/deepseek-v3.2");
+    assert.equal(provider, "openrouter");
+    assert.match(model.baseUrl, /^https:\/\//);
+  });
+});
+
+test("resolveModel keeps the dummy key for a local models.json endpoint without credentials", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "model-local-"));
+  const modelsPath = join(dir, "models.json");
+  writeFileSync(
+    modelsPath,
+    JSON.stringify({
+      providers: {
+        litellm: {
+          baseUrl: "http://localhost:4000/v1",
+          api: "openai-completions",
+          models: [{ id: "local-model", name: "local-model", contextWindow: 8192, maxTokens: 1024 }],
+        },
+      },
+    }),
+  );
+  try {
+    await withEnv({ MODELS_JSON_PATH: modelsPath }, async () => {
+      const { model, modelRuntime } = await resolveModel("litellm/local-model");
+      assert.equal(model.baseUrl, "http://localhost:4000/v1");
+      assert.equal(modelRuntime.hasConfiguredAuth("litellm"), true);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("resolveModel accepts a models.json entry named like an alias", async () => {
