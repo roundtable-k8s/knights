@@ -40,11 +40,10 @@ export function readFixture<T = Record<string, unknown>>(name: FixtureName): T {
 }
 
 /**
- * Result fields that are runtime-specific (`tool_calls` is sent by both pi-knight and
- * claude-knight, but the fixtures omit it; `turns`, `runtime`, `billing` are claude-knight only).
+ * Result fields that are runtime-specific (`turns`, `runtime`, `billing`; claude-knight only).
  * The result fixtures hold the shared contract fields only.
  */
-export const RUNTIME_RESULT_FIELDS = ["tool_calls", "turns", "runtime", "billing"] as const;
+export const RUNTIME_RESULT_FIELDS = ["turns", "runtime", "billing"] as const;
 
 /**
  * How a runtime's result payload differs from a result fixture; empty when it matches.

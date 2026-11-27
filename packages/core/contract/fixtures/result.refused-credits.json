@@ -11,6 +11,7 @@
     "output": 0
   },
   "model": "openrouter/anthropic/claude-sonnet-4.5",
+  "tool_calls": 0,
   "refused": "credits",
   "timestamp": "2026-11-24T10:00:05.000Z"
 }

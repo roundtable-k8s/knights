@@ -124,6 +124,13 @@ test("describeSessionEnd uses part types and stop reason, not content", () => {
   assert.equal(describeSessionEnd(sess, 2), undefined);
 });
 
+test("describeSessionEnd reports an empty array and a string-content assistant message", () => {
+  const empty = { messages: [{ role: "assistant", content: [], stopReason: "stop" }] } as never;
+  assert.equal(describeSessionEnd(empty), "the last message was empty, stop reason stop");
+  const str = { messages: [{ role: "assistant", content: "secret", stopReason: "stop" }] } as never;
+  assert.equal(describeSessionEnd(str), "the last message had string parts, stop reason stop");
+});
+
 test("resolveTaskOutcome prefers a specific failure reason over the generic message", () => {
   const outcome = resolveTaskOutcome(undefined, "LLM call failed: 429 rate limited");
   assert.equal(outcome.success, false);

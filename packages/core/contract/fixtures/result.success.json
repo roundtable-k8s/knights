@@ -10,5 +10,6 @@
     "output": 340
   },
   "model": "claude-opus-5-5",
+  "tool_calls": 4,
   "timestamp": "2026-11-24T10:00:05.000Z"
 }

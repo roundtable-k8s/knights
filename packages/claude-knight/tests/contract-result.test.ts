@@ -15,6 +15,7 @@ const run: TaskResult = {
   billing: "subscription",
   tokens: { input: 1200, output: 340, cacheRead: 0, cacheWrite: 0 },
   model: "claude-opus-5-5",
+  toolCalls: 4,
   turns: 3,
 };
 
@@ -126,6 +127,7 @@ test("fixture result.transient: an overloaded API error publishes transient over
     aborted: false,
     config,
     durationMs: 5000,
+    toolCalls: 0,
   });
   assert.equal(out.success, false);
   const p = buildResultPayload({ ...out, cost: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: "claude-opus-5-5" }, { ...meta, durationMs: 5000 });
@@ -171,9 +173,8 @@ test("cache usage: tokens.cacheRead and cacheWrite are published, input stays un
 test("tool_calls is published (0 included) and the payload still validates", () => {
   const p = buildResultPayload({ ...run, toolCalls: 2 }, meta);
   assert.equal(p.tool_calls, 2);
-  assert.deepEqual(resultFixtureDiff(p, "result.success"), []);
   assert.equal(buildResultPayload({ ...run, toolCalls: 0 }, meta).tool_calls, 0);
-  assert.equal("tool_calls" in buildResultPayload(run, meta), false);
+  assert.equal("tool_calls" in buildResultPayload({ ...run, toolCalls: undefined }, meta), false);
   const failed = classifyResult({ result: undefined, lastAssistantText: "", thrown: "boom", aborted: false, config, durationMs: 1, toolCalls: 3 });
   assert.equal(buildResultPayload(failed, meta).tool_calls, 3);
 });

@@ -34,6 +34,7 @@ export function failureResult(meta: {
     cost: 0,
     tokens: { input: 0, output: 0 },
     model: meta.model,
+    tool_calls: 0,
     timestamp: meta.timestamp ?? new Date().toISOString(),
   };
 }

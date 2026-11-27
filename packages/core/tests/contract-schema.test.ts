@@ -99,7 +99,7 @@ test("invalidTaskResult for an empty task is a valid failure result (#139)", () 
 
 test("resultFixtureDiff reports schema errors, missing, extra and changed fields", () => {
   const ok = readFixture("result.success");
-  assert.deepEqual(resultFixtureDiff({ ...ok, tool_calls: 3, tokens: { ...(ok.tokens as object), cacheRead: 9 } }, "result.success"), []);
+  assert.deepEqual(resultFixtureDiff({ ...ok, tokens: { ...(ok.tokens as object), cacheRead: 9 } }, "result.success"), []);
   const { model: _m, ...noModel } = ok;
   assert.deepEqual(resultFixtureDiff({ ...noModel, refused: "quota", result: "x" }, "result.success"), [
     "schema: model: required",
