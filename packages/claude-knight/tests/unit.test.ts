@@ -363,7 +363,7 @@ test("usage limits, auth failures, timeouts and turn caps are reported as such",
   assert.match(auth.error!, /CLAUDE_CODE_OAUTH_TOKEN/);
 
   const timeout = classifyResult({ result: undefined, lastAssistantText: "half a report", thrown: "aborted", aborted: true, config: cfg, durationMs: 90_000 });
-  assert.match(timeout.error!, /timed out after 90s\. Partial output:\n\nhalf a report/);
+  assert.match(timeout.error!, /timed out after 90s \(limit \d+s\)\. .*Partial output:\n\nhalf a report/);
 
   const turns = classifyResult({ result: resultMsg({ subtype: "error_max_turns", is_error: true, errors: [] }), lastAssistantText: "", aborted: false, config: cfg, durationMs: 1 });
   assert.match(turns.error!, /turn limit \(3 turns\)/);
