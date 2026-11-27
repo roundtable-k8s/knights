@@ -4,11 +4,12 @@ import { checkAuth, checkRuntime } from "./auth.js";
 import { loadConfig, planReserveFromEnv, type KnightConfig } from "./config.js";
 import { introspectOptions } from "./session-source.js";
 import { executeTask, sweepStaleWorkDirs } from "./knight.js";
-import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload, reserveRefusedOutcome } from "./result.js";
+import { buildResultPayload, failedOutcome, invalidResultPayload, lostResultPayload } from "./result.js";
+import { refuseForReserve } from "./reserve-refusal.js";
 import { ShutdownAbort, setupMemory, initLogger, log, connectNats, startIntrospect, drain, natsPrefix, podIdentity, publishResult, publishTaskOutcome, startTaskScope, createActiveCounter, type TaskScope, subscribe, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, setActiveTaskCount, setDegradedReason, setDraining, setSkillCount, startHealthServer, stopHealthServer, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, type KnightService } from "@roundtable/knight-core";
 import { startParentRoster } from "./parent-roster.js";
 import * as metrics from "./runtime-metrics.js";
-import { recordPublishFailed, recordReserveRefusal, recordTaskOutcome } from "./task-metrics.js";
+import { recordPublishFailed, recordTaskOutcome } from "./task-metrics.js";
 import { checkReserveRefreshing } from "./plan-limits.js";
 import { waitForSkills } from "./skills.js";
 import { configureTools } from "./tools.js";
@@ -195,20 +196,7 @@ export async function main(): Promise<void> {
           );
 
       if (!outcome) {
-        log.warn("Task refused: plan reserve", { taskId: parsed.taskId, reason: reserve.reason });
-        activity?.finished({ success: false, error: `Task refused: ${reserve.reason}`, errorClass: "model_error", cost: 0 });
-        await publishTaskOutcome({
-          taskId: parsed.taskId,
-          record: recordReserveRefusal,
-          payload: () =>
-            buildResultPayload(reserveRefusedOutcome(reserve.reason, config), {
-              taskId: parsed.taskId,
-              knight: config.knightName,
-              durationMs: Date.now() - started,
-              parsed,
-            }),
-          onPublishFailed: recordPublishFailed,
-        });
+        await refuseForReserve({ parsed, scope, reason: reserve.reason, config, started, activity });
         return;
       }
 
