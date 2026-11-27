@@ -119,6 +119,13 @@ test("transient reasons: 503 is provider_5xx, ECONNRESET is network", () => {
   assert.equal(buildResultPayload(failedTaskResult("read ECONNRESET", "m"), meta).transientReason, "network");
 });
 
+test("a NATS connection error or a stray 529 is not transient", () => {
+  for (const msg of ["connection error", "NatsError: CONNECTION_CLOSED", "processed 529 records"]) {
+    const p = buildResultPayload(failedTaskResult(msg, "m"), meta);
+    assert.ok(!("transient" in p) && !("transientReason" in p), msg);
+  }
+});
+
 test("ordinary failures and refusals are not transient", () => {
   for (const msg of ["boom", "Task aborted before producing output (task timeout)", "tests failed: 3 of 500 passed", "402 This request requires more credits, or fewer max_tokens"]) {
     const p = buildResultPayload(failedTaskResult(msg, "m"), meta);

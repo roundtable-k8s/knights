@@ -159,8 +159,8 @@ test("transient fields validate and classify provider errors only", async () => 
 test("transient pairing is documented in the schema descriptions", async () => {
   const { TaskResult } = await import("../src/contract/schema.ts");
   const props = (TaskResult as unknown as { properties: Record<string, { description?: string }> }).properties;
-  assert.match(props.transient.description ?? "", /success.*false|failed/i);
-  assert.match(props.transientReason.description ?? "", /transient: true/);
+  assert.match(props.transient?.description ?? "", /success.*false|failed/i);
+  assert.match(props.transientReason?.description ?? "", /transient: true/);
 });
 
 // result.truncated is produced by publishResult (capResultText), not by a runtime's result builder,
