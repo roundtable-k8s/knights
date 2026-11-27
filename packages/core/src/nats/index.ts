@@ -76,7 +76,7 @@ export async function connectNats(
   onStatus?.(true);
 
   // Monitor connection status
-  (async () => {
+  void (async () => {
     if (!nc) return;
     for await (const status of nc.status()) {
       if (status.type === "error") {
@@ -91,7 +91,7 @@ export async function connectNats(
       else log.warn("NATS disconnected", { type: status.type });
       onStatus?.(next);
     }
-  })();
+  })().catch((e) => log.error("NATS status monitor loop failed", { error: String(e) }));
 
   js = jetstream(nc);
 }
@@ -564,7 +564,7 @@ interface WatchLostOptions {
  */
 function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLostOptions): () => void {
   const sub = conn.subscribe(`$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.${o.stream}.${o.durable}`, { queue: o.durable });
-  (async () => {
+  void (async () => {
     for await (const m of sub) {
       try {
         const adv = m.json<{ stream_seq?: number }>();
@@ -594,7 +594,7 @@ function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLos
         log.error("Failed to handle lost-task advisory", { error: err instanceof Error ? err.message : String(err) });
       }
     }
-  })();
+  })().catch((e) => log.error("Lost-task advisory loop failed", { error: String(e) }));
   return () => sub.unsubscribe();
 }
 
