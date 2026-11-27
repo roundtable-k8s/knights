@@ -14,12 +14,16 @@
 # trapped signal arrives. The handler stops that job and
 # exits 0 before the runtime is ever started.
 
+# Keep the container's stdout on fd 3: a phase may redirect stdout into a file
+# (rt_run cmd >out), and the handler's log line must still reach the pod log.
+exec 3>&1
+
 RT_PHASE_PID=""
 
 rt_startup_term() {
   # A second signal while stopping changes nothing.
   trap '' TERM INT
-  echo "[entrypoint] $(date '+%H:%M:%S') $1 received during start-up — exiting before the knight starts (no tasks taken)"
+  echo "[entrypoint] $(date '+%H:%M:%S') $1 received during start-up — exiting before the knight starts (no tasks taken)" >&3
   if [ -n "$RT_PHASE_PID" ]; then
     kill -TERM "$RT_PHASE_PID" 2>/dev/null || true
   fi
