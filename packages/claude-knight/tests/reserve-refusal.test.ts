@@ -51,8 +51,10 @@ test("a reserve refusal publishes one refused result, records the refusal and ac
   }
 
   assert.equal(published.length, 1);
-  assert.equal(published[0].id, "t1");
-  const payload = published[0].result as unknown as Record<string, unknown>;
+  const first = published[0];
+  assert.ok(first);
+  assert.equal(first.id, "t1");
+  const payload = first.result as unknown as Record<string, unknown>;
   assert.equal(payload.task_id, "t1");
   assert.equal(payload.knight, "k1");
   assert.equal(payload.success, false);
