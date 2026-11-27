@@ -13,7 +13,7 @@ pi-knight uses the SDK's own mechanisms; there is no second one.
 | Model | `spec.model` / `KNIGHT_MODEL` = `ollama/<tag>` (for example `ollama/qwen3:14b`). Any provider name that is not in the SDK catalogue or `models.json` is treated as an OpenAI-compatible endpoint. |
 | Base URL | `KNIGHT_MODEL_BASE_URL`, else `OPENAI_BASE_URL`, else `OPENAI_API_BASE`. The `ollama` provider defaults to `http://localhost:11434/v1`. The URL must end in `/v1`. |
 | Several models or exact limits | A `models.json` catalogue (the models path: `MODELS_JSON_PATH`, default `$KNIGHT_DATA_DIR/models.json`) instead of env. |
-| API key | None needed. A placeholder is set when no auth exists for the provider. |
+| API key | None needed for `http://` endpoints; a placeholder is set when no auth exists for the provider. A keyless `models.json` provider on an `https://` URL is refused (see below). |
 
 Optional tuning (all per knight, from env):
 
@@ -27,6 +27,13 @@ Optional tuning (all per knight, from env):
 
 At start-up the knight probes `<base URL>/models` and fails fast, retrying with back-off, if
 the endpoint is unreachable or the model is not pulled.
+
+**Keyless `models.json` providers on `https://` URLs are refused.** A hosted-looking model
+(a `models.json` entry whose base URL starts with `https://`) with no credentials fails at
+start-up with `MissingCredentialsError`, because the dummy key is only set for local endpoints.
+For an internal endpoint that is served over `https://` and needs no key, give the provider a
+placeholder `apiKey` in `models.json` (for example `"apiKey": "none"`). Auth then counts as
+configured and the request goes out unchanged. Plain `http://` endpoints need no placeholder.
 
 ## Example Knight
 
