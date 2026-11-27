@@ -1,3 +1,7 @@
+import { log } from "./logger.js";
+import type { ParsedTask } from "./contract/index.js";
+import type { TaskDelivery } from "./nats/index.js";
+
 /** Concurrency slots (0-based) handed out to running tasks and reported on `task.started`. */
 export class SlotPool {
   private readonly used = new Set<number>();
@@ -32,4 +36,22 @@ export async function withSlot<T>(slots: SlotPool, fn: (slot: number) => Promise
   } finally {
     slots.release(slot);
   }
+}
+
+/** True when the task was published by this knight itself (case-insensitive `from` match; empty `from` never matches). */
+export function isSelfEcho(task: Pick<ParsedTask, "taskId" | "from">, knightName: string): boolean {
+  const self = !!task.from && task.from.toLowerCase() === knightName.toLowerCase();
+  if (self) log.debug("Skipping self-echo", { taskId: task.taskId, from: task.from });
+  return self;
+}
+
+/**
+ * Fire-and-forget: runs `processTask` holding a slot (taken synchronously, so the next fetch sees it).
+ * If the handler throws, the error is logged and the delivery acked; the slot is always freed.
+ */
+export function runInSlot(slots: SlotPool, delivery: TaskDelivery, processTask: (delivery: TaskDelivery, slot: number) => Promise<unknown>): void {
+  void withSlot(slots, (slot) => processTask(delivery, slot)).catch((e) => {
+    log.error("Task handler crashed", { taskId: delivery.task.taskId, error: e instanceof Error ? e.message : String(e) });
+    delivery.ack();
+  });
 }

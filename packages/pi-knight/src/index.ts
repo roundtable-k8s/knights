@@ -1,5 +1,5 @@
 import { dataPaths, loadConfig } from "./config.js";
-import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, createActiveCounter, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, withSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
+import { setupMemory, initLogger, log, connectNats, startIntrospect, subscribe, publishResult, publishTaskOutcome, drain, startTaskScope, createActiveCounter, ShutdownAbort, type TaskScope, natsPrefix, podIdentity, scrubAgentEnv, TaskActivity, SlotPool, isSelfEcho, runInSlot, promptWithRetryContext, withTaskLimitNote, invalidTaskResult, lostTaskResult, type TaskDelivery, handleIntrospect, introspectRequestFromQuery, createShutdown, installStartupSignalHandlers, installProcessErrorHandlers, startHealthServer, stopHealthServer, setSkillCount, setActiveTaskCount, setDegradedReason, setDraining, getConnection, startKnightService, tableName, domainFromTopics, countsFromMetrics, readPackageVersion, initRoster, startTelemetry, withTaskSpan, traceIdFromTraceparent, traceHeaders, activeTraceId, sweepStaleDirs, skillsExpected, waitForSkills, type KnightService } from "@roundtable/knight-core";
 import { hostname } from "node:os";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { executeTask, getActiveSessions, pruneOldSessions, warmSession } from "./knight.js";
@@ -305,19 +305,8 @@ async function main(): Promise<void> {
   puller = await subscribe(config, {
     // Guard: never fetch once a termination was requested, even one that came during start-up.
     freeSlots: () => (shuttingDown || signals.requested() !== null ? 0 : config.maxConcurrentTasks - activeTasks.get()),
-    // Skip self-echo — ignore messages published by this knight back to its own topic
-    accept: (parsed) => {
-      const self = !!parsed.from && parsed.from.toLowerCase() === config.knightName.toLowerCase();
-      if (self) log.debug("Skipping self-echo", { taskId: parsed.taskId, from: parsed.from });
-      return !self;
-    },
-    onTask: (delivery) => {
-      // withSlot frees the slot on any throw; the catch makes sure the delivery is acked and the error logged.
-      void withSlot(slots, (slot) => processTask(delivery, slot)).catch((e) => {
-        log.error("Task handler crashed", { taskId: delivery.task.taskId, error: e instanceof Error ? e.message : String(e) });
-        delivery.ack();
-      });
-    },
+    accept: (parsed) => !isSelfEcho(parsed, config.knightName),
+    onTask: (delivery) => runInSlot(slots, delivery, processTask),
     onLost: async (parsed) => {
       metrics.recordLostTask();
       await publishResult(parsed.taskId, lostTaskResult({ taskId: parsed.taskId, knight: config.knightName, model: config.knightModel, parsed }));
