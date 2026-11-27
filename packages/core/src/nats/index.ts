@@ -393,25 +393,7 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
   const puller = startPullLoop({
     fetch: (max, expires) => pullConsumer.fetch({ max_messages: max, expires }),
     freeSlots: opts.freeSlots,
-    onTask: (d) => {
-      const id = d.task.taskId;
-      tracker.started(id);
-      let acked = false;
-      opts.onTask({
-        ...d,
-        // A heartbeat proves the task is alive: the tracker's active bound runs from the last one.
-        working: () => {
-          tracker.touch(id);
-          d.working();
-        },
-        ack: () => {
-          if (acked) return; // a handler that failed early may ack on its error path too
-          acked = true;
-          tracker.finished(id);
-          d.ack();
-        },
-      });
-    },
+    onTask: (d) => opts.onTask(trackDelivery(tracker, d)),
     accept: opts.accept,
     onInvalid: opts.onInvalid,
   });
@@ -420,6 +402,30 @@ export async function subscribe(config: NatsSubscribeConfig, opts: SubscribeOpti
     async stop() {
       await puller.stop();
       stopWatch();
+    },
+  };
+}
+
+/**
+ * Wrap a delivery so the tracker sees its lifecycle: started now, touched on each heartbeat, and finished
+ * on the first ack. A repeated ack() is a no-op, so the tracker and the wire see exactly one final ack.
+ */
+export function trackDelivery(tracker: Pick<TaskTracker, "started" | "touch" | "finished">, d: TaskDelivery): TaskDelivery {
+  const id = d.task.taskId;
+  tracker.started(id);
+  let acked = false;
+  return {
+    ...d,
+    // A heartbeat proves the task is alive: the tracker's active bound runs from the last one.
+    working: () => {
+      tracker.touch(id);
+      d.working();
+    },
+    ack: () => {
+      if (acked) return; // a handler that failed early may ack on its error path too
+      acked = true;
+      tracker.finished(id);
+      d.ack();
     },
   };
 }

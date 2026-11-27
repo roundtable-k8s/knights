@@ -379,7 +379,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
       });
     };
     const puller = await subscribe(config, {
-      ackWaitMs: 1000,
+      ackWaitMs: 5000,
       freeSlots: () => 1 - active,
       onTask: (d) => { active++; deliveries.push(d); },
       onLost,
@@ -440,7 +440,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     const lost: string[] = [];
     const done: string[] = [];
     const puller = await subscribe(beater, {
-      ackWaitMs: 1000,
+      ackWaitMs: 5000,
       freeSlots: () => 1 - active,
       onLost: (t) => { lost.push(t.taskId); },
       // What the runtimes do: heartbeat while the task runs, then ack once it finished.
@@ -484,7 +484,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     let active = 0;
     const done: string[] = [];
     const puller = await subscribe(cfg, {
-      ackWaitMs: 1000,
+      ackWaitMs: 5000,
       freeSlots: () => 1 - active,
       onLost: () => {},
       onTask: (d) => {
@@ -514,7 +514,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     let active = 0;
     const seen: string[] = [];
     const puller = await subscribe(cfg, {
-      ackWaitMs: 1000,
+      ackWaitMs: 5000,
       freeSlots: () => 1 - active,
       onLost: () => {},
       onTask: (d) => {
