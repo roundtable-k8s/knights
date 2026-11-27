@@ -79,17 +79,7 @@ export async function connectNats(
   void (async () => {
     if (!nc) return;
     for await (const status of nc.status()) {
-      if (status.type === "error") {
-        // e.g. a permission violation on one subject: the connection is still up.
-        log.warn("NATS error status", { error: String((status as { error?: unknown }).error ?? "") });
-        continue;
-      }
-      const next = connectionStateFor(status.type, connected);
-      if (next === connected) continue;
-      connected = next;
-      if (next) log.info("NATS reconnected");
-      else log.warn("NATS disconnected", { type: status.type });
-      onStatus?.(next);
+      connected = applyStatus(connected, status, onStatus);
     }
   })().catch((e) => log.error("NATS status monitor loop failed", { error: String(e) }));
 
@@ -121,14 +111,9 @@ export interface TraceContext {
 }
 
 function traceContextOf(msg: PulledMsg): TraceContext | undefined {
-  let traceparent: string | undefined;
-  let tracestate: string | undefined;
-  try {
-    traceparent = msg.headers?.get("traceparent") || undefined;
-    tracestate = msg.headers?.get("tracestate") || undefined;
-  } catch {
-    return undefined;
-  }
+  // MsgHdrs.get returns "" for a missing key and does not throw, so no guard is needed.
+  const traceparent = msg.headers?.get("traceparent") || undefined;
+  const tracestate = msg.headers?.get("tracestate") || undefined;
   if (!traceparent && !tracestate) return undefined;
   return { ...(traceparent ? { traceparent } : {}), ...(tracestate ? { tracestate } : {}) };
 }
@@ -512,6 +497,30 @@ export function connectionStateFor(statusType: string, current: boolean): boolea
   return current;
 }
 
+/** One NATS status event as the connection monitor sees it (a subset of nats.js Status). */
+export interface NatsStatusEvent {
+  type: string;
+  error?: unknown;
+}
+
+/**
+ * Applies one status event to the connection state and returns the new state. `onStatus` runs only
+ * when the state changes; an `error` status is logged and leaves the state and the callback alone.
+ */
+export function applyStatus(connected: boolean, status: NatsStatusEvent, onStatus?: (connected: boolean) => void): boolean {
+  if (status.type === "error") {
+    // e.g. a permission violation on one subject: the connection is still up.
+    log.warn("NATS error status", { error: String(status.error ?? "") });
+    return connected;
+  }
+  const next = connectionStateFor(status.type, connected);
+  if (next === connected) return connected;
+  if (next) log.info("NATS reconnected");
+  else log.warn("NATS disconnected", { type: status.type });
+  onStatus?.(next);
+  return next;
+}
+
 /**
  * The last result published for a task on `<resultsPrefix>.<taskId>`, if a stream stores it.
  * Undefined when there is none or it cannot be looked up (no results stream, no permission).
@@ -544,7 +553,7 @@ export async function findResult(
   }
 }
 
-interface WatchLostOptions {
+export interface WatchLostOptions {
   stream: string;
   durable: string;
   resultsPrefix: string;
@@ -562,7 +571,7 @@ interface WatchLostOptions {
  * no lost result for a task this process is running or recently finished, nor for one that
  * already has a successful result.
  */
-function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLostOptions): () => void {
+export function watchLostTasks(conn: NatsConnection, jsm: JetStreamManager, o: WatchLostOptions): () => void {
   const sub = conn.subscribe(`$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.${o.stream}.${o.durable}`, { queue: o.durable });
   void (async () => {
     for await (const m of sub) {
