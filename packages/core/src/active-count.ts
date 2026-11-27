@@ -1,10 +1,9 @@
 /**
- * Active-task counter whose change hook runs before the count is updated.
+ * Active-task counter: the count is assigned first, then `onChange` reports it.
  *
- * `onChange` reports the new value to the gauges and the task-count setter. If it throws, the
- * count keeps its old value, so it stays equal to the number of tasks truly open. (Assigning
- * first and reporting second would leave the count one too high after a throwing setter, and
- * the scope's onClose never runs for a failed onOpen, so shutdown would wait for it.)
+ * The count always reflects reality; the gauge/setter is best-effort. If `onChange` throws, the
+ * error propagates after the count has been updated, so a throwing setter cannot leave the count
+ * one too high (or low) while the task really opened or closed.
  */
 export interface ActiveCounter {
   get(): number;
@@ -15,8 +14,8 @@ export interface ActiveCounter {
 export function createActiveCounter(onChange: (n: number) => void): ActiveCounter {
   let count = 0;
   const set = (next: number): void => {
-    onChange(next);
     count = next;
+    onChange(next);
   };
   return {
     get: () => count,

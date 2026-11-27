@@ -13,7 +13,7 @@ test("increment and decrement report the new count and update get()", () => {
   assert.deepEqual(seen, [1, 2, 1]);
 });
 
-test("a throwing change hook leaves the count unchanged", () => {
+test("a throwing change hook still leaves get() equal to the real count", () => {
   let fail = false;
   const counter = createActiveCounter(() => {
     if (fail) throw new Error("setter down");
@@ -23,10 +23,10 @@ test("a throwing change hook leaves the count unchanged", () => {
 
   fail = true;
   assert.throws(() => counter.increment(), /setter down/);
-  assert.equal(counter.get(), 1, "count must not go one too high after a throwing setter");
+  assert.equal(counter.get(), 2, "the task opened, so it is counted");
 
   assert.throws(() => counter.decrement(), /setter down/);
-  assert.equal(counter.get(), 1, "count must not drop after a throwing setter");
+  assert.equal(counter.get(), 1, "the task closed, so it is no longer counted");
 
   fail = false;
   counter.decrement();
