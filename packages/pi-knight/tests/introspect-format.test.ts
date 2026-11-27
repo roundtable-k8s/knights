@@ -39,11 +39,11 @@ test("assistant tool-call message expands into tool_use entries with args", () =
     }),
   );
   assert.equal(items.length, 2, "assistant shell + one tool_use");
-  const tool = items[1];
-  assert.equal(tool!.type, "tool_use");
-  assert.equal(tool!.toolName, "write_file");
-  assert.equal(tool!.input, JSON.stringify({ path: "/vault/x.json", bytes: 1654 }));
-  assert.equal(tool!.id, "a2-tc-tc_1");
+  const tool = items[1]!;
+  assert.equal(tool.type, "tool_use");
+  assert.equal(tool.toolName, "write_file");
+  assert.equal(tool.input, JSON.stringify({ path: "/vault/x.json", bytes: 1654 }));
+  assert.equal(tool.id, "a2-tc-tc_1");
 });
 
 test("toolResult message becomes a tool_result entry with the returned content", () => {

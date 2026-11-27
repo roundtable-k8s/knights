@@ -96,7 +96,7 @@ jobs:
           (cd /tmp/nats-dl && sha256sum -c --ignore-missing SHA256SUMS | grep -F "${tarball}: OK")
           tar -xzf "/tmp/nats-dl/${tarball}" -C /tmp
           echo "NATS_SERVER_BIN=/tmp/nats-server-${NATS_VERSION}-linux-amd64/nats-server" >> "$GITHUB_ENV"
-      - name: Typecheck (root: all packages, scripts/dev, tests under strict flags)
+      - name: "Typecheck (root: all packages, scripts/dev, tests under strict flags)"
         run: npm run typecheck
       - run: npm test --workspace packages/core
       - name: Hermetic check (ambient ROUNDTABLE_TABLE/KNIGHT_NAME must not matter)
