@@ -68,7 +68,7 @@ describe("installStartupSignalHandlers", () => {
 
   it("early-signals.mjs records SIGTERM that arrives while the app has no handler", async () => {
     const preload = resolve(import.meta.dirname, "..", "scripts", "early-signals.mjs");
-    const child = spawn(process.execPath, ["--import", preload, "-e", 'console.log("up");setTimeout(()=>console.log("early="+globalThis.__rtEarlySignal),300)'], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, ["--import", preload, "-e", 'console.log("up");const t0=Date.now();const iv=setInterval(()=>{if(globalThis.__rtEarlySignal||Date.now()-t0>10000){clearInterval(iv);console.log("early="+globalThis.__rtEarlySignal)}},10)'], { stdio: ["ignore", "pipe", "pipe"] });
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     const exited = new Promise<number | null>((r) => child.on("exit", (code) => r(code)));
@@ -190,7 +190,7 @@ describe("mayPullAfterSweep", () => {
     let settled = false;
     const may = mayPullAfterSweep(sweep, fakeSignals(() => requested)).then((v) => ((settled = true), v));
     requested = "SIGTERM"; // arrives while the sweep is still pending
-    await sleep(5);
+    await new Promise((r) => setImmediate(r)); // flush microtasks
     assert.equal(settled, false, "must wait for the sweep");
     finishSweep();
     assert.equal(await may, false);

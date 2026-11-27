@@ -522,7 +522,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
         seen.push(d.task.taskId);
         d.ack(); // the success path acks first ...
         active--;
-        throw new Error("forced throw after ack"); // ... then the handler fails; its error path must not ack again
+        throw new Error("forced throw after ack"); // ... then the handler fails; the error path ends in a term() that the client drops after the ack
       },
     });
     await publishTask("th1", "thrower");
@@ -533,6 +533,7 @@ describe("pull consumer against a real nats-server", { skip: !hasBin(NATS_BIN) &
     assert.equal(info.num_redelivered, 0, "the task is not run again");
     assert.equal(info.num_ack_pending, 0);
     assert.deepEqual(seen, ["th1"]);
+    assert.deepEqual(acks.filter((a) => a.startsWith("+TERM")), [], `no +TERM reached the server: ${JSON.stringify(acks)}`);
     ackSub.unsubscribe();
     await puller.stop();
   });

@@ -305,10 +305,10 @@ export function getActivity(taskId: string): TaskActivity | undefined {
 
 const num = (n: unknown): number => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : 0);
 
-/** Activity stream for one task. All methods are safe to call at any time and never throw. */
 /** A session-like object whose event stream can optionally be followed; `subscribe` returns the unsubscribe function. */
 export type Subscribable<E> = { subscribe?: (listener: (e: E) => void) => () => void };
 
+/** Activity stream for one task. All methods are safe to call at any time and never throw. */
 export class TaskActivity {
   readonly taskId: string;
   readonly subject: string;
