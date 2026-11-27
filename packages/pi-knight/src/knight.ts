@@ -246,7 +246,7 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
     cwd: dataDir,
     agentDir: dataDir,
     settingsManager,
-    additionalSkillPaths: ["/skills"],
+    additionalSkillPaths: [config.skillsDir],
     noExtensions: true,
     noThemes: true,
     noPromptTemplates: true,

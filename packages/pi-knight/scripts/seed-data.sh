@@ -56,9 +56,20 @@ rt_write_models_json() {
     return 0
   fi
   if [ -n "${PI_MODELS_JSON_B64:-}" ]; then
-    if printf '%s' "$PI_MODELS_JSON_B64" | base64 -d > "$target" 2>/dev/null; then
+    # Decode to a temp file next to the target and move it into place only on success,
+    # so a bad payload never leaves a truncated models.json.
+    local tmp
+    tmp="$(mktemp "$target.XXXXXX" 2>/dev/null)" || {
+      log "  WARNING: cannot write $target — skipping PI_MODELS_JSON_B64 (non-fatal)"
+      return 0
+    }
+    if ! printf '%s' "$PI_MODELS_JSON_B64" | base64 -d > "$tmp" 2>/dev/null; then
+      rm -f "$tmp"
+      log "  WARNING: base64 decode failed — skipping PI_MODELS_JSON_B64, $target not written (non-fatal)"
+    elif chmod 644 "$tmp" 2>/dev/null && mv -f "$tmp" "$target" 2>/dev/null; then
       log "Phase 1.5: Wrote $target from PI_MODELS_JSON_B64"
     else
+      rm -f "$tmp"
       log "  WARNING: cannot write $target — skipping PI_MODELS_JSON_B64 (non-fatal)"
     fi
   elif printf '%s\n' "$PI_MODELS_JSON" > "$target" 2>/dev/null; then

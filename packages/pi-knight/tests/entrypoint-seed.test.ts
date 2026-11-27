@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -36,6 +36,7 @@ describe("entrypoint seeding (seed-data.sh)", () => {
       assert.ok(existsSync(join(data, ".config-hashes", "SOUL.md")));
       for (const d of ["memory", "session-notes", "scratch"]) assert.ok(existsSync(join(data, d)), d);
       assert.equal(readFileSync(join(data, "models.json"), "utf8"), '{"providers":{}}');
+      assert.equal(statSync(join(data, "models.json")).mode & 0o777, 0o644); // not mktemp's 0600
       assert.deepEqual(readdirSync(root).sort(), ["config", "data", "defaults"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -57,6 +58,24 @@ describe("entrypoint seeding (seed-data.sh)", () => {
   it("warns and continues when the models path is not writable", () => {
     const out = run({ PI_MODELS_JSON: "{}" }, `rt_write_models_json /proc/nope/models.json`);
     assert.match(out, /WARNING/);
+  });
+
+  it("invalid base64 keeps an existing models.json, writes none otherwise, leaves no temp file and says the decode failed", () => {
+    const root = mkdtempSync(join(tmpdir(), "seed-"));
+    try {
+      const target = join(root, "models.json");
+      writeFileSync(target, '{"keep":true}');
+      const out = run({ PI_MODELS_JSON_B64: "!!!not base64!!!" }, `rt_write_models_json "${target}"`);
+      assert.match(out, /base64 decode failed/);
+      assert.doesNotMatch(out, /cannot write/);
+      assert.equal(readFileSync(target, "utf8"), '{"keep":true}'); // existing file untouched
+      assert.deepEqual(readdirSync(root), ["models.json"]);
+      rmSync(target);
+      run({ PI_MODELS_JSON_B64: "!!!not base64!!!" }, `rt_write_models_json "${target}"`);
+      assert.deepEqual(readdirSync(root), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("entrypoint derives paths from KNIGHT_DATA_DIR and MODELS_JSON_PATH", () => {
