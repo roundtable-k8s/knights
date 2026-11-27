@@ -172,3 +172,9 @@ test("pi-knight numeric env vars: garbage falls back to the default, never NaN",
     }
   }
 });
+
+test("KNIGHT_EFFORT is the thinking default only when KNIGHT_THINKING is unset", () => {
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high" }).thinkingLevel, "high");
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "high", KNIGHT_THINKING: "low" }).thinkingLevel, "low");
+  assert.equal(loadConfig({ ...env, KNIGHT_EFFORT: "bogus" }).thinkingLevel, "off");
+});

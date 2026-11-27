@@ -21,7 +21,7 @@ import { buildChildEnv, checkRuntime } from "./auth.js";
 import { buildCliInvocation, makeTaskDir, runClaudeCli, writeInvocationFiles, type CliInvocation } from "./cli-runner.js";
 import { buildHooks } from "./hooks.js";
 import { DISALLOWED_TOOLS, EXTRA_BUILTINS, loadMcpServers } from "./mcp-config.js";
-import { forceRemoveTree, log, sweepStaleDirs } from "@roundtable/knight-core";
+import { type Effort, forceRemoveTree, log, sweepStaleDirs } from "@roundtable/knight-core";
 import { buildAppendPrompt } from "./prompt.js";
 import { linkSkills } from "./skills.js";
 import { applyMessage, newStreamState } from "./stream.js";
@@ -180,6 +180,8 @@ export interface ExecuteOverrides {
   cliInvocation?: (inv: CliInvocation) => CliInvocation;
   /** Per-task model (TaskPayload.model); replaces the knight's CLAUDE_MODEL for this task. Must be a Claude model. */
   model?: string;
+  /** Per-task reasoning effort (TaskPayload.effort); replaces the knight's effort default for this task only. */
+  effort?: Effort;
   /** The task's effective time limit, named in a timeout failure. Defaults to the knight's TASK_TIMEOUT_MS. */
   timeoutMs?: number;
 }
@@ -239,6 +241,7 @@ export async function executeTask(
     }
     config = { ...baseConfig, claudeModel: model };
   }
+  if (over.effort) config = { ...config, effort: over.effort };
   // main.ts refuses this at startup; never run a plan token through the SDK regardless.
   const runtimeProblem = checkRuntime(config.authMode, config.runtime);
   if (runtimeProblem) throw new Error(runtimeProblem);

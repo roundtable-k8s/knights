@@ -10,7 +10,7 @@ import { isLocalModel, resolveModel, createTrustedSettingsManager, type Resolved
 import { dataPaths, type KnightConfig } from "./config.js";
 import { sessionMessages } from "./runtime-metrics.js";
 import { SessionSpans } from "./spans.js";
-import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type Subscribable, type TaskActivity } from "@roundtable/knight-core";
+import { forceRemoveTree, type Effort, log, memoryPromptSection, resolveMemoryPaths, type Subscribable, type TaskActivity } from "@roundtable/knight-core";
 import { getNatsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
@@ -367,7 +367,7 @@ export async function executeTask(
   signal?: AbortSignal,
   runId?: string,
   taskId?: string,
-  opts: { model?: string; activity?: TaskActivity; timeoutMs?: number; startedAt?: number } = {},
+  opts: { model?: string; effort?: Effort; activity?: TaskActivity; timeoutMs?: number; startedAt?: number } = {},
 ): Promise<TaskResult> {
   // Same runId → same session, queued behind that run's earlier steps; anything else
   // runs on its own session, concurrently. Run-less tasks never share one (#31, #53).
@@ -446,6 +446,8 @@ export async function executeTask(
   // Switch this run's own session to the per-task model (we hold the slot lock), then
   // restore the knight default afterwards so later steps of the run get it back.
   const defaultModel = override ? sess.model : undefined;
+  // A per-task effort sets the session's thinking level for this task only; restored below.
+  const defaultThinking = opts.effort ? sess.thinkingLevel : undefined;
   let promptFailed = true;
   // Set when restoring the knight default failed: the session is stuck on the override.
   let staleSession = false;
@@ -470,6 +472,7 @@ export async function executeTask(
         throw new Error(`Cannot use model "${taskModel}": ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    if (opts.effort) sess.setThinkingLevel(opts.effort);
     opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
     ranModel = resolvedModelName(override?.model ?? sess.model, modelUsed);
     // chat / execute_tool spans under the task's invoke_agent span (no-ops without an SDK).
@@ -497,6 +500,13 @@ export async function executeTask(
       // ignore
     }
     spans?.endAll();
+    if (defaultThinking !== undefined) {
+      try {
+        sess.setThinkingLevel(defaultThinking);
+      } catch (err) {
+        log.warn("Failed to restore thinking level after task", { key: slot.key, error: String(err) });
+      }
+    }
     if (defaultModel) {
       try {
         await sess.setModel(defaultModel);

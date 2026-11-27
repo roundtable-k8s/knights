@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     // Skills may have changed (git-sync): re-read and re-register the service if so.
     // Not awaited: the slot must be counted synchronously so the next fetch sees it.
     void knightService?.refreshSkills();
-    const { taskId, runId, model, chainName, stepName, timestamp, attempt } = delivery.task;
+    const { taskId, runId, model, effort, chainName, stepName, timestamp, attempt } = delivery.task;
     const taskText = promptWithRetryContext(delivery.task);
     const timeoutMs = delivery.task.timeoutMs ?? config.taskTimeoutMs;
     const sentAt = timestamp ? Date.parse(timestamp) : NaN;
@@ -217,7 +217,7 @@ async function main(): Promise<void> {
           act.setTraceId(activeTraceId());
           taskTrace = traceHeaders();
           act.started(); // after the trace id is known, so task.started carries it
-          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, activity, timeoutMs, startedAt: startTime });
+          return executeTask(withTaskLimitNote(taskText, timeoutMs, startTime), config, scope.signal, runId, taskId, { model, effort, activity, timeoutMs, startedAt: startTime });
         },
         (r) => ({ success: r.success, cost: r.cost, model: r.model, tokens: r.tokens, error: r.error }),
       );

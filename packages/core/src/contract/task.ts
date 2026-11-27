@@ -24,6 +24,8 @@ export interface ParsedTask {
   stepName?: string;
   /** Optional per-task model override; applies to this task only. */
   model?: string;
+  /** Optional per-task reasoning effort (`low|medium|high|xhigh|max`); applies to this task only. */
+  effort?: Effort;
   /** Epoch ms the task was published, from `timestamp` when it parses (queuedFor in task.started). */
   publishedAtMs?: number;
   /** 1-based attempt number from a manual retry (absent means 1). */
@@ -49,6 +51,16 @@ export interface ParsedTask {
  */
 export function normalizeTimeoutMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type Effort = (typeof EFFORT_LEVELS)[number];
+
+/** Normalize an effort value (case-insensitive); anything unrecognised is undefined (knight default). */
+export function normalizeEffort(value: unknown): Effort | undefined {
+  if (typeof value !== "string") return undefined;
+  const v = value.trim().toLowerCase();
+  return (EFFORT_LEVELS as readonly string[]).includes(v) ? (v as Effort) : undefined;
 }
 
 /** Accept only a non-empty string run id; anything else means "no run identity". */
@@ -99,6 +111,7 @@ export function parseTask(raw: string, subjectTaskId: string): ParsedTask {
     chainName: str(json.chainName, json.chain_name, json.chain),
     stepName: str(json.stepName, json.step_name, json.step),
     model: typeof json.model === "string" && json.model.trim() ? json.model.trim() : undefined,
+    effort: normalizeEffort(json.effort),
     publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : undefined,
     attempt: json.attempt,
     retryOf: json.retryOf || undefined,

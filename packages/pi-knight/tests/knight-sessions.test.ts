@@ -463,3 +463,27 @@ test("executeTask: a rejecting session.abort() on the abort signal is not an unh
   assert.equal(abortCalls, 1);
   assert.deepEqual(unhandled, []);
 });
+
+test("executeTask: per-task effort sets the thinking level for that task, then restores it", async () => {
+  const { created } = setup();
+  const orig = created.length;
+  void orig;
+  __setSessionFactoryForTests(async () => {
+    const s = fakeSession(created.length + 1, []) as any;
+    s.thinkingLevel = "off";
+    s.levels = [] as string[];
+    s.setThinkingLevel = function (l: string) { this.levels.push(l); this.thinkingLevel = l; };
+    const prompt = s.prompt;
+    s.prompt = async function (t: string) { this.during = this.thinkingLevel; return prompt(t); };
+    created.push(s);
+    return s;
+  });
+  await executeTask("t", config, undefined, "run-e", "te1", { effort: "high" });
+  const s = created.at(-1) as any;
+  assert.equal(s.during, "high");
+  assert.deepEqual(s.levels, ["high", "off"]);
+  await executeTask("t2", config, undefined, "run-e", "te2");
+  assert.equal(s.during, "off");
+  assert.deepEqual(s.levels, ["high", "off"]);
+  __setSessionFactoryForTests(null);
+});

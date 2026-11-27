@@ -158,7 +158,9 @@ Knights maintain persistent sessions across tasks:
 
 ## Thinking Level
 
-`KNIGHT_THINKING` can also be overridden per-task by the dispatching agent via the NATS message metadata. This lets Tim request deeper reasoning for complex tasks without changing the knight's default.
+`KNIGHT_THINKING` sets the default level. When it is unset, `KNIGHT_EFFORT` (from `Knight.spec.effort`: `low`, `medium`, `high`, `xhigh`, `max`) is used instead.
+
+The task payload's optional `effort` field overrides the default for that task only; the session's level is restored afterwards. An unrecognised value is ignored.
 
 ## ConfigMap Structure
 
