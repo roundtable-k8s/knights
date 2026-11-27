@@ -148,12 +148,14 @@ test("resolveModel still resolves a Claude alias when a local base URL is config
 });
 
 test("resolveModel leaves catalog provider/model ids unaffected", async () => {
-  await withEnv({ ANTHROPIC_API_KEY: "test-key" }, async () => {
-    const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
-    assert.equal(provider, "anthropic");
-    assert.equal(modelName, "claude-sonnet-4-5");
-    assert.equal(model.id, "claude-sonnet-4-5");
-  });
+  await withEnv({}, () =>
+    withOneEnv("ANTHROPIC_API_KEY", "test-key", async () => {
+      const { model, provider, modelName } = await resolveModel("anthropic/claude-sonnet-4-5");
+      assert.equal(provider, "anthropic");
+      assert.equal(modelName, "claude-sonnet-4-5");
+      assert.equal(model.id, "claude-sonnet-4-5");
+    }),
+  );
 });
 
 /** Run fn with one env var set (undefined = unset), restoring the original afterwards. */
