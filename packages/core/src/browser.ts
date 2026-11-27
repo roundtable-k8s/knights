@@ -31,12 +31,23 @@ export function setBrowserExec(fn: ExecFn | null): void {
 
 /** Reconnect first: the agent-browser daemon can die between calls; connect is idempotent. */
 export async function runBrowser(args: string[], timeoutMs = 30_000): Promise<string> {
+  let connectFailed = false;
   try {
     await exec(BIN(), ["connect", CDP_URL()], 10_000);
   } catch {
     // best effort — the command may still work through an existing daemon
+    connectFailed = true;
   }
-  const out = await exec(BIN(), args, timeoutMs);
+  let out: string;
+  try {
+    out = await exec(BIN(), args, timeoutMs);
+  } catch (err) {
+    if (!connectFailed) throw err;
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `${msg} (could not connect to the browser at ${CDP_URL()}; is the browser sidecar running?)`,
+    );
+  }
   return out.length > BROWSER_MAX_OUTPUT
     ? `${out.slice(0, BROWSER_MAX_OUTPUT)}\n…[truncated ${out.length - BROWSER_MAX_OUTPUT} chars]`
     : out;
