@@ -204,7 +204,17 @@ export function startPullLoop(opts: PullLoopOptions): TaskPuller {
         // most `free` messages, so taking them keeps within the slots that were free.
         for await (const msg of msgs) {
           if (stopped) log.info("Task delivered while stopping — running it before exit", { subject: msg.subject });
-          handleMsg(msg);
+          // A synchronous throw while handling one message (an accept bug, a bad header object) must not
+          // end the batch: the rest of it still has to be read, and this message is terminated, not retried.
+          try {
+            handleMsg(msg);
+          } catch (err) {
+            log.error("Task message handler threw — terminating the message", {
+              subject: msg.subject,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            try { msg.term("handler error"); } catch { /* connection gone */ }
+          }
         }
       } catch (err) {
         if (stopped) break;

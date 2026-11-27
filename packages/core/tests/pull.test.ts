@@ -149,6 +149,40 @@ describe("pull loop (fake fetch)", () => {
     assert.deepEqual(await run(), ["term", "term", "term"]);
   });
 
+  it("keeps reading the batch when one message's handler throws: that message is terminated, the rest run, no retry delay (#226)", async () => {
+    const calls: string[] = [];
+    const mk = (id: string): PulledMsg => ({
+      data: new TextEncoder().encode(JSON.stringify({ task: `do ${id}`, taskId: id, from: id === "m2" ? "other" : undefined })),
+      subject: `fleet-a.tasks.x.${id}`,
+      ack: () => calls.push(`ack:${id}`), working() {}, term: () => calls.push(`term:${id}`),
+    });
+    const handled: string[] = [];
+    let served = false;
+    const puller = startPullLoop({
+      freeSlots: () => 5,
+      retryDelayMs: 60_000,
+      fetch: async () => {
+        const batch = served ? [] : ["m1", "m2", "m3"].map(mk);
+        served = true;
+        if (batch.length === 0) await sleep(50);
+        return (async function* () { yield* batch; })();
+      },
+      accept: (t) => {
+        if (t.from === "other") throw new Error("accept bug");
+        return true;
+      },
+      onTask: (d) => {
+        if (d.task.taskId === "m1") throw new Error("handler bug");
+        handled.push(d.task.taskId);
+      },
+    });
+    await waitFor(() => handled.includes("m3") && calls.includes("term:m1") && calls.includes("term:m2"), 2000);
+    await puller.stop();
+    assert.deepEqual(handled, ["m3"]);
+    assert.deepEqual(calls.filter((c) => c.startsWith("term:")).sort(), ["term:m1", "term:m2"]);
+    assert.equal(calls.filter((c) => c.startsWith("ack")).length, 0);
+  });
+
   it("answers a payload that breaks the schema through onInvalid, then acks it; terms it without onInvalid (#6)", async () => {
     const calls: string[] = [];
     const mk = (body: string): PulledMsg => ({
