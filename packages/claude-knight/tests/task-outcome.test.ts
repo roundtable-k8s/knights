@@ -33,7 +33,7 @@ test("a publish failure counts publish_failed and publishes no second, made-up r
   assert.equal(await count("publish_failed"), before + 1);
 });
 
-test("a reserve-refused task records the refusal and its scope acks once", async () => {
+test("a reserve refusal is recorded as refused, and closing its scope twice acks only once", async () => {
   const calls: string[] = [];
   const delivery = { working: () => calls.push("working"), ack: () => calls.push("ack") };
   const scope = startTaskScope({ delivery, timeoutMs: 60_000 });
