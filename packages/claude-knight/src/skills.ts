@@ -113,8 +113,8 @@ export async function waitForSkills(
 ): Promise<number> {
   const expected = deps.expected ?? skillsExpected(process.env, undefined, config.configDir);
   const count = await waitForSkillsCore({
-    maxAttempts: 20,
-    intervalMs: 3000,
+    maxAttempts: 120,
+    intervalMs: 500,
     expected,
     sleep: deps.sleep,
     info: (msg, data) => log.info(msg, { skillsDir: config.skillsDir, ...data }),

@@ -35,7 +35,7 @@ test("expected but none appear: polls with sleeps", async () => {
     const sleeps: number[] = [];
     const n = await waitForSkills(cfg, { expected: true, sleep: async (ms) => { sleeps.push(ms); } });
     assert.equal(n, 0);
-    assert.equal(sleeps.length, 19);
+    assert.equal(sleeps.length, 119);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

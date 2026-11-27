@@ -25,7 +25,7 @@ function fakeClock() {
 test("waitForSkills: skips the wait when no skills are expected", async () => {
   const c = fakeClock();
   const logs: string[] = [];
-  const n = await waitForSkills({ maxAttempts: 20, intervalMs: 3000, expected: false, load: () => 0, ...c, info: (m) => logs.push(m) });
+  const n = await waitForSkills({ maxAttempts: 120, intervalMs: 500, expected: false, load: () => 0, ...c, info: (m) => logs.push(m) });
   assert.equal(n, 0);
   assert.deepEqual(c.sleeps, []);
   assert.equal(logs.length, 1);
@@ -35,16 +35,24 @@ test("waitForSkills: skips the wait when no skills are expected", async () => {
 test("waitForSkills: keeps polling until skills appear when expected", async () => {
   const c = fakeClock();
   let calls = 0;
-  const n = await waitForSkills({ maxAttempts: 20, intervalMs: 3000, expected: true, load: () => (++calls >= 3 ? 5 : 0), ...c });
+  const n = await waitForSkills({ maxAttempts: 120, intervalMs: 500, expected: true, load: () => (++calls >= 3 ? 5 : 0), ...c });
   assert.equal(n, 5);
-  assert.deepEqual(c.sleeps, [3000, 3000]);
+  assert.deepEqual(c.sleeps, [500, 500]);
 });
 
 test("waitForSkills: gives up after maxAttempts when skills never arrive", async () => {
   const c = fakeClock();
-  const n = await waitForSkills({ maxAttempts: 20, intervalMs: 3000, expected: true, load: () => 0, ...c });
+  const n = await waitForSkills({ maxAttempts: 120, intervalMs: 500, expected: true, load: () => 0, ...c });
   assert.equal(n, 0);
-  assert.equal(c.sleeps.length, 19);
+  assert.equal(c.sleeps.length, 119);
+  assert.equal(c.sleeps.reduce((a, b) => a + b, 0), 59_500); // ~60 s ceiling unchanged
+});
+
+test("waitForSkills: logs the waiting message at most every 10th attempt", async () => {
+  const c = fakeClock();
+  const logs: string[] = [];
+  await waitForSkills({ maxAttempts: 120, intervalMs: 500, expected: true, load: () => 0, ...c, info: (m) => logs.push(m) });
+  assert.equal(logs.filter((m) => m.startsWith("No skills found")).length, 12);
 });
 
 test("skillsExpected: reads KNIGHT_SKILLS from a non-default config dir", () => {
