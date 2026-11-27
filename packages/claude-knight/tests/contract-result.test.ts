@@ -134,6 +134,14 @@ test("fixture result.transient: an overloaded API error publishes transient over
   assert.deepEqual(resultFixtureDiff({ ...p, result: "Task failed: API Error: 529 Overloaded", error: "API Error: 529 Overloaded", turns: 0 }, "result.transient"), []);
 });
 
+test("a NATS connection error or a stray 529 is not transient", () => {
+  for (const msg of ["connection error", "NatsError: CONNECTION_CLOSED", "processed 529 records"]) {
+    const p = buildResultPayload(failedOutcome(msg, config), meta);
+    assert.ok(!("transient" in p) && !("transientReason" in p), msg);
+  }
+  assert.equal(buildResultPayload(failedOutcome("API Error: 529 Overloaded", config), meta).transientReason, "overloaded");
+});
+
 test("a thrown connection reset is transient network; an ordinary failure is not", () => {
   assert.equal(buildResultPayload(failedOutcome("read ECONNRESET", config), meta).transientReason, "network");
   const plain = buildResultPayload(failedOutcome("boom", config), meta);

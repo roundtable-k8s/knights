@@ -147,6 +147,26 @@ test("transient fields validate and classify provider errors only", async () => 
   assert.equal(transientFailure("APIConnectionTimeoutError")?.transientReason, "network");
   assert.equal(transientFailure("Task timed out after 600s"), undefined);
   assert.equal(transientFailure("3 tests failed"), undefined);
+  // Non-provider text is never transient (#336).
+  for (const t of ["connection error", "NatsError: CONNECTION_CLOSED", "nats: connection error", "processed 529 records", "error: 500 files changed", "the queue is overloaded", "tests failed: 3 of 500 passed"]) {
+    assert.equal(transientFailure(t), undefined, t);
+  }
+  assert.equal(transientFailure("API Error: Connection error.")?.transientReason, "network");
+  assert.equal(transientFailure("529")?.transientReason, "overloaded");
+  // pi-knight reports provider failures as "LLM call failed: <SDK message>".
+  for (const t of ["LLM call failed: Connection error.", "LLM call failed: Request timed out."]) assert.equal(transientFailure(t)?.transientReason, "network", t);
+  for (const t of ['LLM call failed: 500 {"type":"error"}', "LLM call failed: 503 {}"]) assert.equal(transientFailure(t)?.transientReason, "provider_5xx", t);
+  assert.equal(transientFailure('LLM call failed: 529 {"type":"error"}')?.transientReason, "overloaded");
+  assert.equal(transientFailure("LLM call failed: Overloaded")?.transientReason, "overloaded");
+  assert.equal(transientFailure("LLM call failed: NATS connection error"), undefined);
+  assert.equal(transientFailure('{"type":"overloaded_error"}')?.transientReason, "overloaded");
+});
+
+test("transient pairing is documented in the schema descriptions", async () => {
+  const { TaskResult } = await import("../src/contract/schema.ts");
+  const props = (TaskResult as unknown as { properties: Record<string, { description?: string }> }).properties;
+  assert.match(props.transient?.description ?? "", /Only set when `success` is false/);
+  assert.match(props.transientReason?.description ?? "", /transient: true/);
 });
 
 // result.truncated is produced by publishResult (capResultText), not by a runtime's result builder,
