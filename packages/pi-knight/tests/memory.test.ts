@@ -111,11 +111,13 @@ test("setupCompactionHook counts compactions and retry sequences", async () => {
   listener({ type: "compaction_start", reason: "threshold" });
   listener({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
   listener({ type: "compaction_end", reason: "overflow", aborted: true, willRetry: false });
+  listener({ type: "compaction_end", reason: "overflow", aborted: false, willRetry: false, errorMessage: "boom sk-ant-api03-" + "a".repeat(40) });
   listener({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1, errorMessage: "e" });
   listener({ type: "auto_retry_end", success: true, attempt: 1 });
   listener({ type: "auto_retry_end", success: false, attempt: 3, finalError: "e" });
   assert.equal(await value("roundtable_knight_compactions_total", { reason: "threshold", outcome: "completed" }), 1);
   assert.equal(await value("roundtable_knight_compactions_total", { reason: "overflow", outcome: "aborted" }), 1);
+  assert.equal(await value("roundtable_knight_compactions_total", { reason: "overflow", outcome: "failed" }), 1);
   assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "succeeded" }), 1);
   assert.equal(await value("roundtable_knight_llm_retries_total", { outcome: "exhausted" }), 1);
 });

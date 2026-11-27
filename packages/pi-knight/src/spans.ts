@@ -82,6 +82,7 @@ export class SessionSpans {
           reason: String(e.reason),
           aborted: Boolean(e.aborted),
           will_retry: Boolean(e.willRetry),
+          ...this.errorAttr(e.errorMessage),
         });
         break;
       case "auto_retry_start":

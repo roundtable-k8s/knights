@@ -29,7 +29,7 @@ export const {
 
 export const compactionsTotal = new client.Counter({
   name: "roundtable_knight_compactions_total",
-  help: "Context compactions of the pi session, by trigger reason and outcome (completed|aborted)",
+  help: "Context compactions of the pi session, by trigger reason and outcome (completed|aborted|failed)",
   labelNames: ["reason", "outcome"] as const,
   registers: [registry],
 });
