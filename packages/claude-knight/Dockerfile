@@ -25,6 +25,9 @@ RUN mkdir -p /out \
     && cp -a packages/core/package.json packages/core/dist /out/node_modules/@roundtable/knight-core/
 
 FROM node:22.19-slim
+LABEL org.opencontainers.image.source="https://github.com/roundtable-k8s/knights" \
+      org.opencontainers.image.description="claude-knight: Claude Agent SDK runtime for the Knights of the Round Table" \
+      org.opencontainers.image.licenses="Apache-2.0"
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -36,7 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Mise baseline tools (python, yq, ripgrep for skill scripts) ──
-RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+# renovate: datasource=github-releases depName=jdx/mise
+ARG MISE_VERSION=v2026.11.6
+RUN curl -fsSL https://mise.run | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh
 COPY packages/claude-knight/mise.toml /app/mise.toml
 ENV MISE_DATA_DIR=/app/.mise \
     MISE_CONFIG_FILE=/app/mise.toml \
