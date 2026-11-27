@@ -51,6 +51,16 @@ describe("publishTaskOutcome", () => {
     assert.equal(published, 1);
   });
 
+  it("still resolves when onPublishFailed throws after a failed publish", async () => {
+    let failed = 0;
+    await publishTaskOutcome({
+      taskId: "t1", record: () => {}, payload: () => result,
+      publish: async () => { throw new Error("nats down"); },
+      onPublishFailed: () => { failed++; throw new Error("callback broke"); },
+    });
+    assert.equal(failed, 1);
+  });
+
   it("resolves when payload construction throws", async () => {
     let failed = 0;
     await publishTaskOutcome({
