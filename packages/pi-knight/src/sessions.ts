@@ -129,23 +129,53 @@ export function selectSessionsToPrune(
   return out;
 }
 
-/** Apply `policy` to the session files under `root`. Returns the deleted paths. */
+export interface PruneResult {
+  /** Paths that were deleted. */
+  removed: string[];
+  /** Paths selected for deletion that could not be deleted, with the error message. */
+  failed: Array<{ path: string; error: string }>;
+  /** Set when the sessions root exists but cannot be read (e.g. EACCES). */
+  rootError?: string;
+}
+
+/**
+ * Apply `policy` to the session files under `root`. Returns what was deleted and what
+ * could not be (so the caller can report a volume that is filling up instead of
+ * silently keeping every file).
+ */
 export async function pruneSessionFiles(
   policy: RetentionPolicy,
   keep: ReadonlySet<string> = new Set(),
   root: string = sessionsRoot(),
   now: number = Date.now(),
-): Promise<string[]> {
-  if (policy.maxFiles <= 0 && policy.maxAgeMs <= 0) return [];
+): Promise<PruneResult> {
+  const result: PruneResult = { removed: [], failed: [] };
+  if (policy.maxFiles <= 0 && policy.maxAgeMs <= 0) return result;
+  try {
+    await readdir(root);
+  } catch (err) {
+    // A missing root just means no session has been persisted yet.
+    if (codeOf(err) !== "ENOENT") result.rootError = errorMessage(err);
+    return result;
+  }
   const victims = selectSessionsToPrune(await listSessionFiles(root), policy, keep, now);
-  const removed: string[] = [];
   for (const v of victims) {
     try {
       await unlink(v.path);
-      removed.push(v.path);
-    } catch {
-      // already gone or unreadable — not worth failing a task over
+      result.removed.push(v.path);
+    } catch (err) {
+      // Already gone is not a failure; anything else means the file stays on disk.
+      if (codeOf(err) === "ENOENT") continue;
+      result.failed.push({ path: v.path, error: errorMessage(err) });
     }
   }
-  return removed;
+  return result;
+}
+
+function codeOf(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException)?.code;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, utimes, readdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, utimes, readdir, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -128,8 +128,9 @@ test("pruneSessionFiles deletes over-cap session files under the sessions root",
     }
     await writeFile(join(dir, "notes.txt"), "not a session");
 
-    const removed = await pruneSessionFiles({ maxFiles: 1, maxAgeMs: 0 }, new Set(), root);
+    const { removed, failed } = await pruneSessionFiles({ maxFiles: 1, maxAgeMs: 0 }, new Set(), root);
     assert.equal(removed.length, 2);
+    assert.deepEqual(failed, []);
     assert.deepEqual((await readdir(dir)).sort(), ["2026-01-03_ccc.jsonl", "notes.txt"]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -137,12 +138,59 @@ test("pruneSessionFiles deletes over-cap session files under the sessions root",
 });
 
 test("pruneSessionFiles is a no-op when the sessions root does not exist", async () => {
-  const removed = await pruneSessionFiles(
+  const result = await pruneSessionFiles(
     { maxFiles: 1, maxAgeMs: DAY },
     new Set(),
     join(tmpdir(), "pk-sessions-does-not-exist"),
   );
-  assert.deepEqual(removed, []);
+  assert.deepEqual(result, { removed: [], failed: [] });
+});
+
+test("pruneSessionFiles reports over-cap files it cannot delete instead of dropping them", async (t) => {
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    t.skip("root can delete read-only directory contents");
+    return;
+  }
+  const root = await mkdtemp(join(tmpdir(), "pk-sessions-"));
+  const dir = join(root, "--data--");
+  try {
+    await mkdir(dir);
+    const names = ["2026-01-01_aaa.jsonl", "2026-01-02_bbb.jsonl", "2026-01-03_ccc.jsonl"];
+    for (const [i, n] of names.entries()) {
+      const p = join(dir, n);
+      await writeFile(p, "{}\n");
+      const d = new Date(Date.UTC(2026, 0, 1 + i));
+      await utimes(p, d, d);
+    }
+    await chmod(dir, 0o500); // read + traverse, no unlink
+    const result = await pruneSessionFiles({ maxFiles: 1, maxAgeMs: 0 }, new Set(), root);
+    assert.deepEqual(result.removed, []);
+    assert.equal(result.failed.length, 2);
+    assert.deepEqual(result.failed.map((f) => f.path).sort(), [join(dir, names[0]), join(dir, names[1])].sort());
+    assert.ok(result.failed.every((f) => f.error.length > 0));
+    assert.equal(result.rootError, undefined);
+  } finally {
+    await chmod(dir, 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("pruneSessionFiles reports an unreadable sessions root as rootError", async (t) => {
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    t.skip("root can read any directory");
+    return;
+  }
+  const root = await mkdtemp(join(tmpdir(), "pk-sessions-"));
+  try {
+    await chmod(root, 0o000);
+    const result = await pruneSessionFiles({ maxFiles: 1, maxAgeMs: 0 }, new Set(), root);
+    assert.deepEqual(result.removed, []);
+    assert.deepEqual(result.failed, []);
+    assert.ok(result.rootError && result.rootError.length > 0);
+  } finally {
+    await chmod(root, 0o700).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("sessionsRoot follows KNIGHT_DATA_DIR at call time, KNIGHT_SESSIONS_ROOT wins", () => {
