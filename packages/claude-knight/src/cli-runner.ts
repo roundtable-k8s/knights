@@ -251,11 +251,14 @@ export const SIGKILL_PASS_PAUSE_MS = 50;
  */
 export async function killByTokenUntilEmpty(
   token: string,
-  scan: (token: string) => number[] = findByToken,
-  send?: (pid: number, signal: NodeJS.Signals) => void,
-  maxPasses = SIGKILL_MAX_PASSES,
-  pauseMs = SIGKILL_PASS_PAUSE_MS,
+  opts: {
+    scan?: (token: string) => number[];
+    send?: (pid: number, signal: NodeJS.Signals) => void;
+    maxPasses?: number;
+    pauseMs?: number;
+  } = {},
 ): Promise<number> {
+  const { scan = findByToken, send, maxPasses = SIGKILL_MAX_PASSES, pauseMs = SIGKILL_PASS_PAUSE_MS } = opts;
   let total = 0;
   for (let pass = 0; pass < maxPasses; pass++) {
     const n = killByToken(token, "SIGKILL", scan, send);

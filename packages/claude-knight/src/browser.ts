@@ -35,44 +35,59 @@ async function guarded(name: string, fn: () => Promise<{ content: Content; isErr
 
 const ref = z.string().describe("Element ref from browser_snapshot (e.g. @e5) or a CSS selector");
 
+/** The argument shape of each browser tool; the registrations below and the BrowserArgs type both derive from it. */
+export const browserShapes = {
+  browser_open: { url: z.string().describe("URL to navigate to") },
+  browser_snapshot: {},
+  browser_click: { ref },
+  browser_fill: { ref, text: z.string().describe("Text to fill") },
+  browser_get_text: { ref },
+  browser_screenshot: {
+    path: z.string().optional().describe("Where to save the PNG"),
+    full: z.boolean().optional().describe("Capture the full scrollable page"),
+  },
+  browser_eval: { js: z.string().describe("JavaScript to evaluate in the page context") },
+  browser_close: {},
+};
+
+/** Parsed arguments of each browser tool, so a schema change fails typecheck wherever a caller relies on the old shape. */
+export type BrowserArgs = { [K in keyof typeof browserShapes]: z.infer<z.ZodObject<(typeof browserShapes)[K]>> };
+
 export const browserTools = [
   tool(
     "browser_open",
     "Navigate the headless browser to a URL. Use for JS-rendered pages, SPAs, logins and forms, or when WebFetch/curl is not enough. Then call browser_snapshot to see the page.",
-    { url: z.string().describe("URL to navigate to") },
+    browserShapes.browser_open,
     ({ url }) => guarded("open", async () => text((await runBrowser(["open", url], 60_000)) || `Navigated to ${url}`)),
   ),
   tool(
     "browser_snapshot",
     "Accessibility tree of the current page with element refs (@e1, @e2, …) for browser_click/browser_fill. Far cheaper than raw HTML.",
-    {},
+    browserShapes.browser_snapshot,
     () => guarded("snapshot", async () => text(await runBrowser(["snapshot"], 20_000))),
   ),
   tool(
     "browser_click",
     "Click an element by ref (from browser_snapshot) or CSS selector.",
-    { ref },
+    browserShapes.browser_click,
     ({ ref: r }) => guarded("click", async () => text((await runBrowser(["click", r])) || `Clicked ${r}`)),
   ),
   tool(
     "browser_fill",
     "Clear an input and type text into it.",
-    { ref, text: z.string().describe("Text to fill") },
+    browserShapes.browser_fill,
     ({ ref: r, text: t }) => guarded("fill", async () => text((await runBrowser(["fill", r, t])) || `Filled ${r}`)),
   ),
   tool(
     "browser_get_text",
     "Text content of one element.",
-    { ref },
+    browserShapes.browser_get_text,
     ({ ref: r }) => guarded("get_text", async () => text(await runBrowser(["get", "text", r]))),
   ),
   tool(
     "browser_screenshot",
     "Screenshot the current page. Returns the image so you can look at it, and saves it to `path` (default /data/scratch/screenshots/<timestamp>.png).",
-    {
-      path: z.string().optional().describe("Where to save the PNG"),
-      full: z.boolean().optional().describe("Capture the full scrollable page"),
-    },
+    browserShapes.browser_screenshot,
     ({ path, full }) =>
       guarded("screenshot", async () => {
         const file = path ?? `/data/scratch/screenshots/${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
@@ -91,13 +106,13 @@ export const browserTools = [
   tool(
     "browser_eval",
     "Evaluate JavaScript in the page and return the result.",
-    { js: z.string().describe("JavaScript to evaluate in the page context") },
+    browserShapes.browser_eval,
     ({ js }) => guarded("eval", async () => text(await runBrowser(["eval", "-b", Buffer.from(js).toString("base64")]))),
   ),
   tool(
     "browser_close",
     "Close the page and free browser resources when done.",
-    {},
+    browserShapes.browser_close,
     () => guarded("close", async () => text((await runBrowser(["close"])) || "Browser closed")),
   ),
 ];

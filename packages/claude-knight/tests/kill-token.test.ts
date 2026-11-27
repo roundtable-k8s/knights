@@ -21,7 +21,7 @@ test("SIGKILL repeats the scan until a pass finds nothing (a late fork is caught
   // First scan finds pid 101, the second finds a child forked in between, the third is empty.
   const { scan, calls } = scripted([[101], [202], []]);
   const sent: Array<[number, string]> = [];
-  const total = await killByTokenUntilEmpty("tok", scan, (pid, sig) => sent.push([pid, sig]), 5, 0);
+  const total = await killByTokenUntilEmpty("tok", { scan, send: (pid, sig) => sent.push([pid, sig]), maxPasses: 5, pauseMs: 0 });
   assert.equal(total, 2);
   assert.deepEqual(sent, [[101, "SIGKILL"], [202, "SIGKILL"]]);
   assert.equal(calls.length, 3, "stops on the first empty pass");
@@ -30,7 +30,7 @@ test("SIGKILL repeats the scan until a pass finds nothing (a late fork is caught
 test("SIGKILL stops after the pass bound even if something keeps reappearing", async () => {
   const { scan, calls } = scripted([[7]]);
   const sent: Array<[number, string]> = [];
-  const total = await killByTokenUntilEmpty("tok", scan, (pid, sig) => sent.push([pid, sig]), 5, 0);
+  const total = await killByTokenUntilEmpty("tok", { scan, send: (pid, sig) => sent.push([pid, sig]), maxPasses: 5, pauseMs: 0 });
   assert.equal(calls.length, 5);
   assert.equal(total, 5);
   assert.equal(sent.length, 5);
@@ -39,7 +39,7 @@ test("SIGKILL stops after the pass bound even if something keeps reappearing", a
 test("SIGKILL with nothing running makes one scan and sends nothing", async () => {
   const { scan, calls } = scripted([[]]);
   let sends = 0;
-  assert.equal(await killByTokenUntilEmpty("tok", scan, () => sends++, 5, 0), 0);
+  assert.equal(await killByTokenUntilEmpty("tok", { scan, send: () => sends++, maxPasses: 5, pauseMs: 0 }), 0);
   assert.equal(calls.length, 1);
   assert.equal(sends, 0);
 });

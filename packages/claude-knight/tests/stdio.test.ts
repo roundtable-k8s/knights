@@ -144,12 +144,9 @@ test("MCP tools/call runs the tool, validates arguments and reports errors as re
   const snap: any = await withBrowser.callTool({ name: "browser_snapshot", arguments: {} });
   assert.match(snap.content[0].text, /button "Go"/);
 
-  // An unknown tool is an error (protocol error or error result, depending on SDK version).
-  const unknown = await client.callTool({ name: "nope", arguments: {} }).then(
-    (r: any) => r.isError === true,
-    () => true,
-  );
-  assert.equal(unknown, true);
+  // An unknown tool comes back as an isError result (the pinned SDK behaviour).
+  const unknown: any = await client.callTool({ name: "nope", arguments: {} });
+  assert.equal(unknown.isError, true);
 });
 
 test("`index.js mcp` serves over stdio to an SDK Client and exits cleanly when stdin closes", async () => {
