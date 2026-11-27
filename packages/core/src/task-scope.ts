@@ -19,7 +19,8 @@ export interface TaskScope {
   signal: AbortSignal;
   /** True when the signal was aborted by the timeout, not by `abort()`. */
   readonly timedOut: boolean;
-  abort(): void;
+  /** Aborts the signal, optionally with a reason (e.g. ShutdownAbort). */
+  abort(reason?: unknown): void;
   /** Idempotent. Clears timer and interval, runs `onClose` (if opened), then acks exactly once. */
   close(): void;
 }
@@ -58,7 +59,7 @@ export function startTaskScope(opts: TaskScopeOptions): TaskScope {
     get timedOut() {
       return timedOut;
     },
-    abort: () => controller.abort(),
+    abort: (reason) => controller.abort(reason),
     close: () => {
       if (closed) return;
       closed = true;
