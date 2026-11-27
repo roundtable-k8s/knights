@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { registry, recordRefusal } from "../src/runtime-metrics.js";
 import { refusalCode } from "../src/result-extraction.js";
 
-// NaN when the series is missing, so a missing series can never compare equal to another NaN.
+// NaN when the series is missing; the Number.isFinite assertions below are what catch a missing series
+// (strict assert.equal treats NaN as equal to NaN).
 async function hits(): Promise<number> {
   const line = (await registry.metrics()).split("\n").find((l) => l.startsWith("roundtable_knight_usage_limit_hits_total"));
   if (!line) return NaN;

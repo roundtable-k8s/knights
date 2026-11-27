@@ -166,7 +166,6 @@ export function describeSessionEnd(sess: AgentSession, fromIndex = 0): string | 
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
     const types = new Set(Object.keys(partCounts(msg)));
-    if (Array.isArray(msg.content) && msg.content.length === 0) types.clear();
     let shape: string;
     if (types.size === 0) shape = "the last message was empty";
     else if (types.size === 1 && types.has("toolCall")) shape = "the last message had only tool calls (a nats_publish with terminate: true ends the task this way)";

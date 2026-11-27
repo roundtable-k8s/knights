@@ -15,6 +15,7 @@ const run: TaskResult = {
   billing: "subscription",
   tokens: { input: 1200, output: 340, cacheRead: 0, cacheWrite: 0 },
   model: "claude-opus-5-5",
+  toolCalls: 4,
   turns: 3,
 };
 
