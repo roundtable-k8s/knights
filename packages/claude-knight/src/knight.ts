@@ -112,15 +112,15 @@ export function buildOptions(
   return options;
 }
 
-/**
- * Per-task working directory: $KNIGHT_WORKDIR/work/<runId|taskId>-<hash>, sanitised.
- * Keyed on runId so a resumed session (stored per cwd) finds its transcript.
- */
 /** Max length of a task work-dir name, and the `-<hash>` suffix length (sha256 hex, first 8 chars, plus the dash). */
 const WORK_DIR_NAME_MAX = 120;
 const WORK_DIR_HASH_LEN = 8;
 const WORK_DIR_SUFFIX_LEN = WORK_DIR_HASH_LEN + 1;
 
+/**
+ * Per-task working directory: $KNIGHT_WORKDIR/work/<runId|taskId>-<hash>, sanitised.
+ * Keyed on runId so a resumed session (stored per cwd) finds its transcript.
+ */
 export function taskWorkDir(config: KnightConfig, taskId: string, runId?: string): string {
   const raw = runId || taskId;
   // The hash of the raw id keeps `a/b` and `a_b` (same after sanitising) in distinct dirs; stable per run.
@@ -330,7 +330,7 @@ export async function executeTask(
       lastAssistantText: state.lastAssistantText,
       assistantError: state.assistantError,
       aborted: signal.aborted,
-        abortReason: signal.reason,
+      abortReason: signal.reason,
       config,
       durationMs: Date.now() - started,
       timeoutMs: over.timeoutMs,

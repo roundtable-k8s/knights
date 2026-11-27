@@ -474,6 +474,21 @@ test("a failed usage probe keeps the old reading", async () => {
   resetPlanLimits();
 });
 
+test("a successful probe keeps a blocking window it did not report", async () => {
+  resetPlanLimits();
+  const t = 1_800_000_000_000;
+  const resetsAt = (t + 3600_000) / 1000;
+  recordRateLimit({ status: "rejected", rateLimitType: "seven_day", utilization: 1, resetsAt }, t);
+  // the probe only reports five_hour; the rejected seven_day window must still block
+  const probe = async () => {
+    recordRateLimit({ status: "allowed", rateLimitType: "five_hour", utilization: 0.1, resetsAt }, t);
+  };
+  const r = await checkReserveRefreshing(0.8, probe, { now: () => t, intervalMs: 300_000 });
+  assert.equal(r.blocked, true);
+  assert.match(r.reason ?? "", /seven_day/);
+  resetPlanLimits();
+});
+
 test("buildChildEnv passes the active task span to the child as TRACEPARENT", async () => {
   const { startTelemetry, withTaskSpan } = await import("@roundtable/knight-core");
   const { InMemorySpanExporter, SimpleSpanProcessor } = await import("@opentelemetry/sdk-trace-base");

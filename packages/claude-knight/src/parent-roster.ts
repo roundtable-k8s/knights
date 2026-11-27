@@ -1,4 +1,5 @@
 import { initRoster, log, getConnection, type Roster } from "@roundtable/knight-core";
+import type { Runtime } from "./config.js";
 
 /**
  * Start the agent-card roster (a KV watch on <table>.*) in the parent process, but only for the sdk
@@ -6,7 +7,7 @@ import { initRoster, log, getConnection, type Roster } from "@roundtable/knight-
  * starts its own roster, so a parent watch would be one unused KV watch and card cache per pod.
  */
 export function startParentRoster(
-  runtime: string,
+  runtime: Runtime,
   env: NodeJS.ProcessEnv,
   knightName: string,
   init: typeof initRoster = initRoster,
