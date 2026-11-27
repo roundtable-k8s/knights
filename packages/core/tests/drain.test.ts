@@ -77,7 +77,7 @@ async function harness(opts: { taskMs: number; maxWaitMs: number; abortable?: bo
     exit: (code) => { events.push("exit"); exitCode = code; },
     ...(opts.abortable ? { abortInflight: () => { events.push("abort"); aborters.forEach((f) => f()); }, abortGraceMs: 2000 } : {}),
   });
-  installSignalHandlers(shutdown, proc);
+  installSignalHandlers(shutdown, proc as unknown as Pick<NodeJS.Process, "on">);
 
   return {
     events, port, proc,

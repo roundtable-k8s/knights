@@ -16,7 +16,6 @@ test("a pi-knight task flows from the core pull loop into the handler, un-acked 
     ack: () => calls.push(`ack:${id}`),
     working: () => calls.push(`working:${id}`),
     term: () => calls.push(`term:${id}`),
-    nak: () => calls.push(`nak:${id}`),
   });
   const knightName = "Tester";
   let served = false;

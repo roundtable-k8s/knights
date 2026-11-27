@@ -144,7 +144,7 @@ async function runTraced(prompt: string) {
   assert.ok(task, "the knight's task span was recorded");
   const { traceId, spanId } = task.spanContext();
   const interaction = () => receiver.spans.find((s) => s.name === "claude_code.interaction" && s.traceId === traceId);
-  const arrived = await receiver.waitFor(interaction, 30_000);
+  const arrived = await receiver.waitFor(() => !!interaction(), 30_000);
   const seen = receiver.spans.map((s) => `${s.name}(trace ${s.traceId.slice(0, 8)}, parent ${s.parentSpanId.slice(0, 8)})`).join(", ");
   assert.ok(arrived, `claude_code.interaction exported on the task's trace; receiver got spans [${seen}], rejected ${JSON.stringify(receiver.rejected)}`);
   // Give the log and tool exports a moment after the interaction span.

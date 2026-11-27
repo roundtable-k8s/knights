@@ -14,7 +14,7 @@ import { connectNats, drain, publishResult, subscribe, type NatsSubscribeConfig,
 import { createShutdown } from "../src/drain.ts";
 import { lostTaskResult, type TaskResult } from "../src/contract/index.ts";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 async function waitFor(cond: () => boolean, ms = 10_000, what = "condition") {
   const end = Date.now() + ms;
   while (!cond()) {

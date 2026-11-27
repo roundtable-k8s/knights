@@ -9,7 +9,9 @@ import { roundtableToolIds } from "../src/tools.js";
 import { buildPreamble } from "../src/prompt.js";
 import { loadConfig } from "../src/config.js";
 
-const byName = (n: string) => browserTools.find((t) => t.name === n)!;
+// The tools' handler argument is an intersection of every tool's input; each test passes only its own tool's.
+type LooseTool = { handler: (args: Record<string, unknown>, extra: unknown) => Promise<unknown> };
+const byName = (n: string) => browserTools.find((t) => t.name === n)! as unknown as LooseTool;
 const calls: string[][] = [];
 
 function fakeExec(outputs: Record<string, string> = {}) {
