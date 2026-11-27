@@ -124,8 +124,8 @@ export const TaskResult = Type.Object(
     }),
     model: Type.String({ description: "The model actually used, whether or not the task carried an override." }),
     tool_calls: Type.Optional(count("Tool calls the agent made (pi-knight and claude-knight).")),
-    turns: Type.Optional(count("claude-knight: agent turns.")),
-    runtime: Type.Optional(Type.String({ description: "claude-knight: `claude-knight`." })),
+    turns: Type.Optional(count("Agent turns (pi-knight and claude-knight).")),
+    runtime: Type.Optional(Type.String({ description: "The knight runtime: `claude-knight` or `pi-knight`." })),
     billing: Type.Optional(Type.Enum(["subscription", "api", "local"], {
         description: "How the run is billed. claude-knight: `subscription` or `api`. pi-knight: `local` for an operator-supplied model endpoint (cost 0).",
       })),

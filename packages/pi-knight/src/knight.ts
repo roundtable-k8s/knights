@@ -35,6 +35,8 @@ export interface TaskResult {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   model: string;
   toolCalls: number;
+  /** Agent turns (assistant messages) this task produced. */
+  turns: number;
   /** Pull requests this task opened or updated (omitted when none). */
   prs?: PRRef[];
   /** Review verdict from a final "Verdict:" line (omitted when none). */
@@ -415,6 +417,7 @@ export async function executeTask(
   const lastMessageBefore = priorMessages && priorMessages.length > 0 ? priorMessages[priorMessages.length - 1] : undefined;
   const costBefore = statsBefore.cost;
   const toolCallsBefore = statsBefore.toolCalls;
+  const turnsBefore = statsBefore.assistantMessages;
   const tokensBefore = {
     input: statsBefore.tokens.input,
     output: statsBefore.tokens.output,
@@ -535,6 +538,7 @@ export async function executeTask(
     // Local endpoints cost nothing per token whatever a catalog entry says.
     const taskCost = local ? 0 : delta(statsAfter.cost, costBefore);
     const taskToolCalls = delta(statsAfter.toolCalls, toolCallsBefore);
+    const taskTurns = delta(statsAfter.assistantMessages, turnsBefore);
     const taskTokens = {
       input: delta(statsAfter.tokens.input, tokensBefore.input),
       output: delta(statsAfter.tokens.output, tokensBefore.output),
@@ -617,6 +621,7 @@ export async function executeTask(
       tokens: taskTokens,
       model: ranModel,
       toolCalls: taskToolCalls,
+      turns: taskTurns,
       ...(structured.prs.length > 0 ? { prs: structured.prs } : {}),
       ...(structured.verdict ? { verdict: structured.verdict } : {}),
       ...(refused ? { refused } : {}),
