@@ -187,6 +187,8 @@ export function getBestAssistantResult(sess: AgentSession, fromIndex = 0): strin
   return suspiciousFallback;
 }
 
+const BEFORE_OUTPUT_PHRASE = "before producing output";
+
 /**
  * Opt-in (ABORTED_TASK_IS_FAILURE): when the task's last assistant message ended in an
  * abort or LLM error, return the failure to publish — the reason plus any partial output.
@@ -205,8 +207,10 @@ export function describeAbortedTask(
     if (msg?.role !== "assistant") continue;
     if (msg.stopReason !== "error" && msg.stopReason !== "aborted") return undefined;
     const reason = describeSessionFailure(sess, taskAborted, fromIndex, abort) ?? "Task aborted";
-    // "before producing output" contradicts the partial output that follows.
-    if (partial && reason.startsWith("Task aborted before producing output")) return `Task aborted. Partial output: ${partial}`;
+    // "before producing output" contradicts the partial output that follows: keep the
+    // reason up to that phrase (timeout, shutdown or abort) and attach the partial output.
+    const beforeOutput = reason.indexOf(BEFORE_OUTPUT_PHRASE);
+    if (partial && beforeOutput >= 0) return `${reason.slice(0, beforeOutput).trim()}. Partial output: ${partial}`;
     if (!partial) return reason;
     return /[.!?]$/.test(reason) ? `${reason} Partial output: ${partial}` : `${reason}. Partial output: ${partial}`;
   }
@@ -274,5 +278,16 @@ export function taskStartIndex(sess: AgentSession, anchor: unknown): number {
   const messages = (sess as AgentSession & { messages?: unknown[] }).messages;
   if (!Array.isArray(messages)) return 0;
   const i = messages.lastIndexOf(anchor);
-  return i < 0 ? 0 : i + 1;
+  if (i >= 0) return i + 1;
+  // The anchor was compacted away (or is a summary Pi rebuilds on each load). Start after the
+  // latest compaction summary so text from earlier steps before it is never returned.
+  let summary = -1;
+  for (let j = messages.length - 1; j >= 0; j--) {
+    const role = (messages[j] as { role?: unknown } | undefined)?.role;
+    if (role === "compactionSummary" || role === "branchSummary") {
+      summary = j;
+      break;
+    }
+  }
+  return summary < 0 ? 0 : summary + 1;
 }
