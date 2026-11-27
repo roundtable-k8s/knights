@@ -108,6 +108,12 @@ export function maxConcurrentTasks(env: Env, fallback: number = DEFAULT_MAX_CONC
   return n;
 }
 
+/**
+ * Time kept between the default drain bound and the pod's terminationGracePeriodSeconds
+ * (task timeout + 60s), so an aborted task can still publish before the kubelet SIGKILL.
+ */
+export const SHUTDOWN_MARGIN_MS = 20_000;
+
 export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
   const taskTimeoutMs = positiveIntEnv(env, "TASK_TIMEOUT_MS", 1_800_000);
   return {
@@ -120,7 +126,7 @@ export function loadBaseConfig(env: Env = process.env): BaseKnightConfig {
     metricsPort: intEnv(env, "METRICS_PORT", 3000),
     logLevel: env["LOG_LEVEL"] ?? "info",
     taskTimeoutMs,
-    drainTimeoutMs: positiveIntEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000),
+    drainTimeoutMs: positiveIntEnv(env, "DRAIN_TIMEOUT_MS", taskTimeoutMs + 60_000 - SHUTDOWN_MARGIN_MS),
     ...(env["KNIGHT_MEMORY_DIR"] ? { memoryDir: env["KNIGHT_MEMORY_DIR"] } : {}),
     ...(env["KNIGHT_MEMORY_ROOT"] ? { memoryRoot: env["KNIGHT_MEMORY_ROOT"] } : {}),
     ...(cardsBucketFromEnv(env) ? { cardsBucket: cardsBucketFromEnv(env) } : {}),

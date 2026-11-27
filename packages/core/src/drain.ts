@@ -1,5 +1,16 @@
 import { log } from "./logger.js";
 
+/** The abort reason given to in-flight tasks when the knight is shutting down. */
+export const SHUTDOWN_ABORT_REASON = "knight shutting down";
+
+/** Abort reason (`signal.reason`) that tells a runtime the abort came from shutdown, not a timeout. */
+export class ShutdownAbort extends Error {
+  constructor() {
+    super(SHUTDOWN_ABORT_REASON);
+    this.name = "ShutdownAbort";
+  }
+}
+
 export interface DrainOptions {
   /** Tasks currently executing. */
   getActive(): number;

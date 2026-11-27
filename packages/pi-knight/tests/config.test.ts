@@ -14,7 +14,7 @@ test("pi-knight config defaults", () => {
   assert.equal(c.natsResultsStream, "fleet_a_results");
   assert.equal(c.natsResultsPrefix, "fleet-a.results");
   assert.equal(c.taskTimeoutMs, 1_800_000);
-  assert.equal(c.drainTimeoutMs, 1_860_000);
+  assert.equal(c.drainTimeoutMs, 1_840_000);
   assert.equal(c.maxConcurrentTasks, 1);
   assert.equal(c.metricsPort, 3000);
   assert.equal(c.logLevel, "info");
@@ -24,7 +24,7 @@ test("pi-knight config defaults", () => {
 
 test("pi-knight config env overrides and required vars", () => {
   const c = loadConfig({ ...env, TASK_TIMEOUT_MS: "1000", METRICS_PORT: "9", ACTIVITY_CONTENT: "none", MAX_CONCURRENT_TASKS: "4" });
-  assert.equal(c.drainTimeoutMs, 61_000);
+  assert.equal(c.drainTimeoutMs, 41_000);
   assert.equal(c.metricsPort, 9);
   assert.equal(c.activityContent, "none");
   assert.equal(c.maxConcurrentTasks, 4);

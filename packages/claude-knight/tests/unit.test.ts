@@ -18,6 +18,7 @@ import {
   resetPlanLimits,
 } from "../src/plan-limits.js";
 import { classifyResult, isUsageLimitMessage } from "../src/result.js";
+import { ShutdownAbort } from "@roundtable/knight-core";
 import { formatRequestResponse } from "@roundtable/knight-core";
 import { taskWorkDir } from "../src/knight.js";
 import { itemsForMessage } from "../src/session-source.js";
@@ -41,9 +42,9 @@ test("model mapping accepts Claude ids and aliases, drops non-Claude models", ()
   assert.equal(resolveClaudeModel("openrouter/deepseek/deepseek-v3.2", "haiku"), "haiku");
 });
 
-test("DRAIN_TIMEOUT_MS defaults to TASK_TIMEOUT_MS + 60s", () => {
-  assert.equal(loadConfig({ ...baseEnv }).drainTimeoutMs, 1_800_000 + 60_000);
-  assert.equal(loadConfig({ ...baseEnv, TASK_TIMEOUT_MS: "1000" }).drainTimeoutMs, 61_000);
+test("DRAIN_TIMEOUT_MS defaults to TASK_TIMEOUT_MS + 60s - 20s", () => {
+  assert.equal(loadConfig({ ...baseEnv }).drainTimeoutMs, 1_800_000 + 60_000 - 20_000);
+  assert.equal(loadConfig({ ...baseEnv, TASK_TIMEOUT_MS: "1000" }).drainTimeoutMs, 41_000);
   assert.equal(loadConfig({ ...baseEnv, TASK_TIMEOUT_MS: "1000", DRAIN_TIMEOUT_MS: "5" }).drainTimeoutMs, 5);
 });
 
@@ -486,4 +487,17 @@ test("buildChildEnv passes the active task span to the child as TRACEPARENT", as
       await t.shutdown();
     }
   });
+});
+
+test("classifyResult: shutdown abort reports an interruption, own timer still reports a timeout", () => {
+  const cfg = loadConfig({ ...baseEnv });
+  const shut = classifyResult({ result: undefined, lastAssistantText: "half", thrown: "aborted", aborted: true, abortReason: new ShutdownAbort(), config: cfg, durationMs: 90_000 });
+  assert.equal(shut.success, false);
+  assert.match(shut.error!, /^Task interrupted: the knight is shutting down \(pod restart or rollout\), not a task timeout\. It can be retried\./);
+  assert.match(shut.error!, /half/);
+  assert.doesNotMatch(shut.error!, /timed out/);
+  const bare = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new ShutdownAbort(), config: cfg, durationMs: 1 });
+  assert.match(bare.error!, /^Task interrupted/);
+  const timer = classifyResult({ result: undefined, lastAssistantText: "", aborted: true, abortReason: new Error("x"), config: cfg, durationMs: 1 });
+  assert.match(timer.error!, /task timeout/);
 });

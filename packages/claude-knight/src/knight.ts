@@ -246,8 +246,8 @@ export async function executeTask(
 
     const resume = config.sessionMode === "run" && runId ? runSessions.get(runId) : undefined;
     const abortController = new AbortController();
-    const onAbort = () => abortController.abort();
-    if (signal.aborted) abortController.abort();
+    const onAbort = () => abortController.abort(signal.reason);
+    if (signal.aborted) abortController.abort(signal.reason);
     else signal.addEventListener("abort", onAbort, { once: true });
 
     log.info("Executing task", {
@@ -291,6 +291,7 @@ export async function executeTask(
         assistantError: state.assistantError,
         thrown: message,
         aborted: signal.aborted,
+        abortReason: signal.reason,
         config,
         durationMs: Date.now() - started,
         toolCalls: state.toolCalls,
@@ -326,6 +327,7 @@ export async function executeTask(
       lastAssistantText: state.lastAssistantText,
       assistantError: state.assistantError,
       aborted: signal.aborted,
+        abortReason: signal.reason,
       config,
       durationMs: Date.now() - started,
       prs: state.prs,
