@@ -6,12 +6,11 @@ import {
   DefaultResourceLoader,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isLocalModel, resolveModel, createTrustedSettingsManager, type ResolvedModel } from "./model.js";
 import { dataPaths, type KnightConfig } from "./config.js";
 import { sessionMessages } from "./runtime-metrics.js";
 import { SessionSpans } from "./spans.js";
-import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type TaskActivity } from "@roundtable/knight-core";
+import { forceRemoveTree, log, memoryPromptSection, resolveMemoryPaths, type Subscribable, type TaskActivity } from "@roundtable/knight-core";
 import { getNatsTools, setKnightName, setNatsPrefix } from "./tools/nats.js";
 import { subagentTools, setParentModel } from "./tools/subagent.js";
 import { browserTools } from "./tools/browser.js";
@@ -246,7 +245,7 @@ async function createSession(config: KnightConfig, cwd: string): Promise<AgentSe
   setNatsPrefix(config.natsResultsPrefix.replace(/\.results$/, ""));
   setParentModel(config.knightModel);
 
-  const thinkingLevel = (config.thinkingLevel ?? "off") as ThinkingLevel;
+  const thinkingLevel = config.thinkingLevel ?? "off";
 
   // createAgentSession does not reload a caller-supplied loader: reload() is what discovers
   // skills and loads the inline tool-hook extension.
@@ -490,11 +489,11 @@ export async function executeTask(
     opts.activity?.attach(sess, (e) => onSessionEvent(opts.activity!, e));
     ranModel = resolvedModelName(override?.model ?? sess.model, modelUsed);
     // chat / execute_tool spans under the task's invoke_agent span (no-ops without an SDK).
-    spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table }, undefined, () => (sess as any).systemPrompt, config.skillsDir);
+    spans = new SessionSpans(ranModel, { knight: config.knightName, table: config.table }, undefined, () => (sess as { systemPrompt?: string }).systemPrompt, config.skillsDir);
     const sp = spans;
     try {
       // Typed view of the SDK session's event subscription (same shape TaskActivity.attach takes).
-      unsubSpans = (sess as { subscribe?: (listener: (e: unknown) => void) => () => void }).subscribe?.((e) => {
+      unsubSpans = (sess as Subscribable<unknown>).subscribe?.((e) => {
         try {
           sp.handle(e);
         } catch (err) {

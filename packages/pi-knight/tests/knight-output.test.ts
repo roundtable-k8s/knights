@@ -120,7 +120,7 @@ test("describeSessionEnd uses part types and stop reason, not content", () => {
     { role: "user", content: "secret" },
     { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { cmd: "secret" } }], stopReason: "toolUse" },
   ] } as never;
-  assert.equal(describeSessionEnd(sess), "the last message had only tool calls, stop reason toolUse");
+  assert.equal(describeSessionEnd(sess), "the last message had only tool calls (a nats_publish with terminate: true ends the task this way), stop reason toolUse");
   assert.equal(describeSessionEnd(sess, 2), undefined);
 });
 

@@ -136,18 +136,40 @@ export function resolveTaskOutcome(
   return { result: error, success: false, error };
 }
 
+type TailMessage = { role?: string; content?: unknown; stopReason?: string; errorMessage?: string };
+
+/** The session's messages from `fromIndex` on, or undefined when the session does not expose them. */
+function tailMessages(sess: AgentSession, fromIndex: number): TailMessage[] | undefined {
+  const messages = (sess as unknown as { messages?: TailMessage[] }).messages;
+  return Array.isArray(messages) ? messages.slice(fromIndex) : undefined;
+}
+
+/** Content part types of a message with their counts (a plain string content counts as `string`: its length). */
+function partCounts(msg: TailMessage | undefined): Record<string, number> {
+  const parts: Record<string, number> = {};
+  if (Array.isArray(msg?.content)) {
+    for (const part of msg.content) {
+      const type = (part as { type?: string })?.type ?? "unknown";
+      parts[type] = (parts[type] ?? 0) + 1;
+    }
+  } else if (typeof msg?.content === "string") {
+    parts["string"] = msg.content.length;
+  }
+  return parts;
+}
+
 /** How the task's last assistant message ended, from stop reason and part types only (never content). */
 export function describeSessionEnd(sess: AgentSession, fromIndex = 0): string | undefined {
-  const messages = (sess as unknown as { messages?: Array<{ role?: string; content?: unknown; stopReason?: string }> }).messages;
-  if (!Array.isArray(messages)) return undefined;
-  for (let i = messages.length - 1; i >= fromIndex; i--) {
+  const messages = tailMessages(sess, fromIndex);
+  if (!messages) return undefined;
+  for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
-    const types = new Set<string>();
-    if (Array.isArray(msg.content)) for (const p of msg.content) types.add((p as { type?: string })?.type ?? "unknown");
+    const types = new Set(Object.keys(partCounts(msg)));
+    if (Array.isArray(msg.content) && msg.content.length === 0) types.clear();
     let shape: string;
     if (types.size === 0) shape = "the last message was empty";
-    else if (types.size === 1 && types.has("toolCall")) shape = "the last message had only tool calls";
+    else if (types.size === 1 && types.has("toolCall")) shape = "the last message had only tool calls (a nats_publish with terminate: true ends the task this way)";
     else if (types.size === 1 && types.has("thinking")) shape = "the last message was thinking only";
     else shape = `the last message had ${[...types].sort().join(", ")} parts`;
     return msg.stopReason ? `${shape}, stop reason ${msg.stopReason}` : shape;
@@ -161,25 +183,14 @@ export function describeSessionEnd(sess: AgentSession, fromIndex = 0): string | 
  * tool calls" from "thinking-only reply" from "stream died" without dumping transcripts.
  */
 export function summarizeSessionTail(sess: AgentSession, limit = 6, fromIndex = 0): Array<Record<string, unknown>> {
-  const messages = (sess as unknown as { messages?: Array<{ role?: string; content?: unknown; stopReason?: string; errorMessage?: string }> }).messages;
-  if (!Array.isArray(messages)) return [];
-  return messages.slice(Math.max(fromIndex, messages.length - limit)).map((msg) => {
-    const parts: Record<string, number> = {};
-    if (Array.isArray(msg?.content)) {
-      for (const part of msg.content) {
-        const type = (part as { type?: string })?.type ?? "unknown";
-        parts[type] = (parts[type] ?? 0) + 1;
-      }
-    } else if (typeof msg?.content === "string") {
-      parts["string"] = msg.content.length;
-    }
-    return {
-      role: msg?.role,
-      stopReason: msg?.stopReason,
-      ...(msg?.errorMessage ? { errorMessage: msg.errorMessage } : {}),
-      parts,
-    };
-  });
+  const messages = tailMessages(sess, fromIndex);
+  if (!messages) return [];
+  return messages.slice(Math.max(0, messages.length - limit)).map((msg) => ({
+    role: msg?.role,
+    stopReason: msg?.stopReason,
+    ...(msg?.errorMessage ? { errorMessage: msg.errorMessage } : {}),
+    parts: partCounts(msg),
+  }));
 }
 
 /**
